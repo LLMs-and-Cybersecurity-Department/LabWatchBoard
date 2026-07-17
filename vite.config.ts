@@ -1,0 +1,131 @@
+import { cp, mkdir } from "node:fs/promises";
+import path from "node:path";
+import { defineConfig, type Plugin, type PreviewServer, type ViteDevServer } from "vite";
+import react from "@vitejs/plugin-react";
+
+import { getModelChart, ModelChartError } from "./server/modelChart.mjs";
+import { EarthquakeDataError, getEarthquakeSnapshot } from "./server/earthquake.mjs";
+
+const ecmwfProxy = {
+  target: "https://charts.ecmwf.int/opencharts-api/v1",
+  changeOrigin: true,
+  secure: true,
+  rewrite: (path: string) => path.replace(/^\/api\/ecmwf/, ""),
+};
+
+const pointForecastProxy = {
+  target: "https://api.open-meteo.com",
+  changeOrigin: true,
+  secure: true,
+  rewrite: (requestPath: string) => requestPath.replace(/^\/api\/forecast\/([^/?]+)/, "/v1/$1"),
+};
+
+function copyCatalogue() {
+  return {
+    name: "copy-ecmwf-catalogue",
+    apply: "build" as const,
+    async closeBundle() {
+      const target = path.resolve("dist/data/ecmwf");
+      await mkdir(target, { recursive: true });
+      await cp(path.resolve("data/ecmwf"), target, { recursive: true });
+    },
+  };
+}
+
+function modelChartApi(): Plugin {
+  const attach = (server: ViteDevServer | PreviewServer) => {
+    server.middlewares.use(async (request, response, next) => {
+      const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      if (requestUrl.pathname !== "/api/model-chart") {
+        next();
+        return;
+      }
+      if (!new Set(["GET", "HEAD"]).has(request.method ?? "GET")) {
+        response.writeHead(405, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "模式图表接口仅支持 GET/HEAD" }));
+        return;
+      }
+      try {
+        const result = await getModelChart(requestUrl.searchParams);
+        response.writeHead(200, {
+          "Content-Type": "image/svg+xml; charset=utf-8",
+          "Cache-Control": "public, max-age=21600, stale-while-revalidate=86400",
+          "Content-Length": String(Buffer.byteLength(result.svg)),
+          "X-Model-Name": result.model,
+          "X-Model-Run": result.run,
+          "X-Model-Valid-Time": result.validTime,
+          "X-Model-Chart-Cache": result.cache,
+        });
+        response.end(request.method === "HEAD" ? undefined : result.svg);
+      } catch (error) {
+        const status = error instanceof ModelChartError ? error.statusCode : 500;
+        response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        response.end(JSON.stringify({
+          error: "模式图表生成失败",
+          detail: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    });
+  };
+  return {
+    name: "model-chart-api",
+    configureServer: attach,
+    configurePreviewServer: attach,
+  };
+}
+
+function earthquakeApi(): Plugin {
+  const attach = (server: ViteDevServer | PreviewServer) => {
+    server.middlewares.use(async (request, response, next) => {
+      const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      if (requestUrl.pathname !== "/api/earthquakes") {
+        next();
+        return;
+      }
+      if (!new Set(["GET", "HEAD"]).has(request.method ?? "GET")) {
+        response.writeHead(405, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "地震聚合接口仅支持 GET/HEAD" }));
+        return;
+      }
+      try {
+        const result = await getEarthquakeSnapshot(requestUrl.searchParams);
+        const body = JSON.stringify(result);
+        response.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "no-store",
+          "Content-Length": String(Buffer.byteLength(body)),
+          "X-Earthquake-Cache": String(result.cache),
+        });
+        response.end(request.method === "HEAD" ? undefined : body);
+      } catch (error) {
+        const status = error instanceof EarthquakeDataError ? error.statusCode : 500;
+        response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        response.end(JSON.stringify({
+          error: "地震速报聚合失败",
+          detail: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    });
+  };
+  return {
+    name: "earthquake-api",
+    configureServer: attach,
+    configurePreviewServer: attach,
+  };
+}
+
+export default defineConfig({
+  plugins: [react(), modelChartApi(), earthquakeApi(), copyCatalogue()],
+  server: {
+    proxy: {
+      "/api/ecmwf": ecmwfProxy,
+      "/api/forecast": pointForecastProxy,
+    },
+  },
+  preview: {
+    proxy: {
+      "/api/ecmwf": ecmwfProxy,
+      "/api/forecast": pointForecastProxy,
+    },
+  },
+});
