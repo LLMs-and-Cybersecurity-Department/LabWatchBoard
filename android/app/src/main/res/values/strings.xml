@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">天气与地震信息看板</string>
+    <string name="title_activity_main">天气与地震信息看板</string>
+    <string name="package_name">io.basyacatx.weatherquake</string>
+    <string name="custom_url_scheme">io.basyacatx.weatherquake</string>
+</resources>

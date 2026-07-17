@@ -1,0 +1,62 @@
+appId: io.basyacatx.weatherquake
+productName: 天气与地震信息看板
+executableName: weather-quake-board
+artifactName: Weather-Earthquake-Board-${version}-${os}-${arch}.${ext}
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**
+  - desktop-dist/main.mjs
+  - data/seismic/**
+  - package.json
+  - "!**/*.map"
+  - "!**/*.ts"
+  - "!**/*.tsx"
+  - "!**/*test*"
+  - "!node_modules/**"
+asar: true
+compression: maximum
+npmRebuild: false
+electronLanguages:
+  - zh-CN
+  - en-US
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  loadBrowserProcessSpecificV8Snapshot: false
+  grantFileProtocolExtraPrivileges: false
+mac:
+  category: public.app-category.weather
+  target:
+    - dmg
+    - pkg
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlementsInherit: build/entitlements.mac.plist
+pkg:
+  allowAnywhere: false
+  allowCurrentUserHome: true
+win:
+  target:
+    - msi
+msi:
+  oneClick: false
+  perMachine: false
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+linux:
+  category: Science
+  syncDesktopName: true
+  synopsis: 多模式天气与全球地震信息看板
+  description: 面向公众的多模式天气、全球地震报告、测站观测与历史回放应用。
+  maintainer: BasyaCatX
+  vendor: BasyaCatX
+  target:
+    - AppImage
+    - deb
+    - rpm

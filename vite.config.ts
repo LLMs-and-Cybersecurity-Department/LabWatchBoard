@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 
 import { getModelChart, ModelChartError } from "./server/modelChart.mjs";
 import { EarthquakeDataError, getEarthquakeSnapshot } from "./server/earthquake.mjs";
+import { getJmaTsunamiSnapshot } from "./server/jmaTsunami.mjs";
 
 const ecmwfProxy = {
   target: "https://charts.ecmwf.int/opencharts-api/v1",
@@ -114,8 +115,63 @@ function earthquakeApi(): Plugin {
   };
 }
 
+function jmaTsunamiApi(): Plugin {
+  const attach = (server: ViteDevServer | PreviewServer) => {
+    server.middlewares.use(async (request, response, next) => {
+      const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      if (requestUrl.pathname !== "/api/seismic/jma-tsunami") {
+        next();
+        return;
+      }
+      if (!new Set(["GET", "HEAD"]).has(request.method ?? "GET")) {
+        response.writeHead(405, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "JMA 海啸预报接口仅支持 GET/HEAD" }));
+        return;
+      }
+      try {
+        const result = await getJmaTsunamiSnapshot();
+        const body = JSON.stringify(result);
+        response.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "no-store",
+          "Content-Length": String(Buffer.byteLength(body)),
+        });
+        response.end(request.method === "HEAD" ? undefined : body);
+      } catch (error) {
+        response.writeHead(502, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        response.end(JSON.stringify({
+          error: "JMA 海啸预报获取失败",
+          detail: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    });
+  };
+  return {
+    name: "jma-tsunami-api",
+    configureServer: attach,
+    configurePreviewServer: attach,
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), modelChartApi(), earthquakeApi(), copyCatalogue()],
+  base: "./",
+  plugins: [react(), modelChartApi(), earthquakeApi(), jmaTsunamiApi(), copyCatalogue()],
+  build: {
+    sourcemap: false,
+    minify: "terser",
+    terserOptions: {
+      compress: {
+        passes: 2,
+        drop_debugger: true,
+      },
+      mangle: {
+        safari10: true,
+      },
+      format: {
+        comments: false,
+      },
+    },
+  },
   server: {
     proxy: {
       "/api/ecmwf": ecmwfProxy,

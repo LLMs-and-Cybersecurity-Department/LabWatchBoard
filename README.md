@@ -4,7 +4,8 @@
 
 项目聚合 ECMWF、NOAA GFS、DWD ICON、CMA/NMC、JMA、USGS、CENC、CWA、EMSC、GFZ、GeoNet、BMKG 等机构的公开数据，并尽量保留来源、更新时间、震级类型和缓存状态，帮助普通用户更直观地理解天气变化与地震活动。
 
-> [!IMPORTANT]
+> [!IMPORTANT-重要提示]  
+> 如果要体验完整的产品功能，你必须开启VPN，中继服务器正在搭建中，请谅解。  
 > 本项目是公众信息展示与学习工具，不是官方气象或地震预警系统，也不能替代政府部门、应急机构及数据发布机构的正式通告。遇到灾害风险时，请以所在地官方信息和应急指引为准。
 
 ## 主要功能
@@ -49,6 +50,8 @@ pnpm start
 ```
 
 `pnpm build` 会把最近一次 ECMWF 目录快照复制到 `dist/data/ecmwf/`，实时目录不可用时产品选择仍可工作。`server.mjs` 提供静态文件、SPA 回退、压缩、安全响应头、上游超时、ECMWF/点位预报同源代理、`/api/model-chart` 模式图表、`/api/earthquakes` 九机构地震报告聚合、`/api/seismic/fdsn/stations` 全球与 CWA CWASN 台站、`/api/seismic/fdsn/waveform` miniSEED 快照和 `/api/seismic/camera/resolve` 官方视频可嵌入性检查，以及 `/healthz` 健康检查。ECMWF 目录、动画帧和点位预报代理使用 128 MB 有界 LRU；瞬时 429/5xx 会自动重试，曾成功读取的同一 URL 在上游故障时以 `X-Proxy-Cache: STALE` 明确回退，健康接口会报告当前缓存条目和字节数。
+
+macOS、Windows、Linux 与 Android 的安装包构建、签名变量和源码保护边界见 [PACKAGING.md](./PACKAGING.md)。
 
 常用环境变量：
 

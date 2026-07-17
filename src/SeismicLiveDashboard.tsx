@@ -49,6 +49,7 @@ import {
   filterEewHistoryEventsBySource,
   fetchCencIntensity,
   fetchEewRelay,
+  fetchJmaTsunami,
   fetchKmaPews,
   fetchNiedRealtime,
   fetchNiedStations,
@@ -80,6 +81,7 @@ import {
   MMI_LEGEND,
   jmaShindoColor,
   jmaShindoLabel,
+  jmaTsunamiLineStyle,
   mmiIntensityColor,
   simulateJmaRegionImpact,
   simulateReplayStationResponse,
@@ -92,6 +94,7 @@ import {
   type HypocenterEstimate,
   type KmaStation,
   type JmaSeismicSiteCatalogue,
+  type JmaTsunamiSnapshot,
   type LiveEew,
   type LiveEewSource,
   type NiedRealtimeFrame,
@@ -122,6 +125,7 @@ import {
 import { usePersistentState } from "./usePersistentState";
 import { FdsnWaveformPanel } from "./FdsnWaveformPanel";
 import { SeismicCameraRelay } from "./SeismicCameraRelay";
+import { GNSS_STATIONS, type GnssStation } from "./gnssStations";
 import {
   FDSN_PROVIDER_COLORS,
   GLOBAL_FDSN_PROVIDER_IDS,
@@ -163,6 +167,14 @@ type JmaRegionProperties = {
 };
 type JmaRegionFeature = Feature<Geometry, JmaRegionProperties>;
 type JmaRegionCollection = FeatureCollection<Geometry, JmaRegionProperties>;
+type TsunamiRegionProperties = {
+  code: string;
+  name: string;
+  namekana?: string;
+  grade?: string;
+  level?: number;
+};
+type TsunamiRegionCollection = FeatureCollection<Geometry, TsunamiRegionProperties>;
 
 const HISTORY_LIMIT = 180;
 const INSTITUTION_SOURCE_TOTAL = 9;
@@ -643,6 +655,24 @@ const CwaStationBaseMarkers = memo(function CwaStationBaseMarkers(props: {
   return <>{props.stations.map((station) => <CircleMarker key={station.id} center={[station.latitude, station.longitude]} radius={2.6} pathOptions={{ color: FDSN_PROVIDER_COLORS.cwa, fillColor: FDSN_PROVIDER_COLORS.cwa, weight: 0.7, opacity: 0.96, fillOpacity: 0.8 }} eventHandlers={{ click: () => props.onSelectStation(station) }} />)}</>;
 });
 
+const GnssStationMarkers = memo(function GnssStationMarkers(props: { stations: readonly GnssStation[] }) {
+  return <>{props.stations.map((station) => <CircleMarker
+    key={station.id}
+    center={[station.latitude, station.longitude]}
+    radius={2.15}
+    pathOptions={{ color: "#f59e0b", fillColor: "#f59e0b", weight: 0.5, opacity: 0.92, fillOpacity: 0.74 }}
+  >
+    <Popup>
+      <strong>{station.stationName}（{station.stationCode}）</strong><br />
+      中国大陆 GNSS 站点<br />
+      {station.networkName}{station.networkType ? ` · ${station.networkType}` : ""}<br />
+      {station.latitude.toFixed(4)}, {station.longitude.toFixed(4)}
+      {station.address ? <><br />{station.address}</> : null}
+      <br /><small>应用内置站点目录 · 非实时位移数据</small>
+    </Popup>
+  </CircleMarker>)}</>;
+});
+
 const GlobalStationBaseLayer = memo(function GlobalStationBaseLayer(props: { stations: GlobalSeismicStation[]; show: boolean; onSelectStation: (station: SelectableStation) => void }) {
   const stations = useMemo(() => sampleGlobalStationsForMap(props.stations, 120), [props.stations]);
   return <Pane name="seismic-station-base-global" style={{ zIndex: 460 }}>{props.show && <GlobalStationBaseMarkers stations={stations} onSelectStation={props.onSelectStation} />}</Pane>;
@@ -651,6 +681,10 @@ const GlobalStationBaseLayer = memo(function GlobalStationBaseLayer(props: { sta
 const CwaStationBaseLayer = memo(function CwaStationBaseLayer(props: { stations: GlobalSeismicStation[]; show: boolean; onSelectStation: (station: SelectableStation) => void }) {
   const stations = useMemo(() => sampleGlobalStationsForMap(props.stations, 90), [props.stations]);
   return <Pane name="seismic-station-base-cwa" style={{ zIndex: 460 }}>{props.show && <CwaStationBaseMarkers stations={stations} onSelectStation={props.onSelectStation} />}</Pane>;
+});
+
+const GnssStationLayer = memo(function GnssStationLayer(props: { stations: readonly GnssStation[]; show: boolean }) {
+  return <Pane name="seismic-station-base-gnss" style={{ zIndex: 455 }}>{props.show ? <GnssStationMarkers stations={props.stations} /> : null}</Pane>;
 });
 
 const NiedStationBaseLayer = memo(function NiedStationBaseLayer(props: { stations: SeismicStation[]; show: boolean; onSelectStation: (station: SelectableStation) => void }) {
@@ -689,6 +723,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   globalStations: GlobalSeismicStation[];
   globalResponseStations: GlobalSeismicStation[];
   cwaStations: GlobalSeismicStation[];
+  gnssStations: readonly GnssStation[];
   cencReport: CencIntensityReport | null;
   niedFrame: NiedRealtimeFrame | null;
   kmaValues: number[];
@@ -700,6 +735,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   showCenc: boolean;
   showGlobal: boolean;
   showCwa: boolean;
+  showGnss: boolean;
   selectedStation: SelectableStation | null;
   selectedEvent: LiveEew | null;
   selectedReport: EarthquakeEvent | null;
@@ -712,8 +748,10 @@ const SeismicMap = memo(function SeismicMap(props: {
   oceanMode: OceanResponseMode;
   localRegions: JmaRegionCollection;
   officialRegions: JmaRegionCollection;
+  tsunamiRegions: TsunamiRegionCollection;
   showLocalImpact: boolean;
   showOfficialImpact: boolean;
+  showTsunami: boolean;
   detectionStationIds: string[];
   detectionRanks: Record<string, number>;
   detectionMode: "live" | "replay";
@@ -853,6 +891,14 @@ const SeismicMap = memo(function SeismicMap(props: {
       <Pane name="seismic-grid-pane" style={{ zIndex: 410, pointerEvents: "none" }}>
         {detectionCells.map((cell) => <Rectangle key={`${props.detectionSessionKey}:${cell.id}`} bounds={cell.bounds} interactive={false} pathOptions={{ color: NIED_GRID_COLORS[cell.color], weight: blinkOn ? 2.8 : 1.6, opacity: blinkOn ? 1 : 0.28, dashArray: props.detectionMode === "replay" ? "7 5" : undefined, fill: false }} />)}
       </Pane>
+      <Pane name="seismic-jma-tsunami-pane" style={{ zIndex: 430, pointerEvents: "none" }}>
+        {props.showTsunami && props.tsunamiRegions.features.length > 0 && <LeafletGeoJSON
+          key={props.tsunamiRegions.features.map((feature) => `${feature.properties.code}:${feature.properties.level}`).join("|")}
+          data={props.tsunamiRegions}
+          interactive={false}
+          style={(feature) => jmaTsunamiLineStyle(Number(feature?.properties?.level ?? 1))}
+        />}
+      </Pane>
       <Pane name="seismic-event-pane" style={{ zIndex: 440 }}>
         {props.selectedEvent && !props.selectedEvent.cancelled && <CircleMarker center={[props.selectedEvent.latitude, props.selectedEvent.longitude]} radius={10} pathOptions={{ color: "#fff", fillColor: "#ef4444", weight: 2, fillOpacity: 0.95 }}>
           <Popup><strong>{props.selectedEvent.source} {props.selectedEvent.title}</strong><br />{props.selectedEvent.place}<br />M {props.selectedEvent.magnitude?.toFixed(1) ?? "--"}</Popup>
@@ -867,6 +913,7 @@ const SeismicMap = memo(function SeismicMap(props: {
         </CircleMarker>}
       </Pane>
       <CwaStationBaseLayer stations={props.cwaStations} show={props.showCwa && baseLayerStage >= 1} onSelectStation={props.onSelectStation} />
+      <GnssStationLayer stations={props.gnssStations} show={props.showGnss} />
       <GlobalStationBaseLayer stations={props.globalStations} show={props.showGlobal && baseLayerStage >= 2} onSelectStation={props.onSelectStation} />
       <OceanStationBaseLayer stations={props.oceanStations} showSnet={props.showOcean && baseLayerStage >= 3} showOther={props.showOtherOcean && baseLayerStage >= 3} onSelectStation={props.onSelectStation} />
       <KmaStationBaseLayer stations={props.kmaStations} show={props.showKma && baseLayerStage >= 4} onSelectStation={props.onSelectStation} />
@@ -957,6 +1004,8 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   const [showCenc, setShowCenc] = usePersistentState("seismic-show-cenc-intensity", true);
   const [showGlobalStations, setShowGlobalStations] = usePersistentState("seismic-show-global-fdsn", true);
   const [showCwaStations, setShowCwaStations] = usePersistentState("seismic-show-cwa-cwasn", true);
+  const [showGnssStations, setShowGnssStations] = usePersistentState("seismic-show-china-gnss", false);
+  const [showJmaTsunami, setShowJmaTsunami] = usePersistentState("seismic-show-jma-tsunami", true);
   const [showLocalImpact, setShowLocalImpact] = usePersistentState("seismic-show-local-impact", true);
   const [showOfficialImpact, setShowOfficialImpact] = usePersistentState("seismic-show-official-impact", true);
   const [snetViewMode, setSnetViewMode] = usePersistentState<SnetViewMode>("seismic-snet-view-mode", "measured");
@@ -972,6 +1021,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   const [selectedSnetReportId, setSelectedSnetReportId] = useState<string | null>(null);
   const [jmaRegions, setJmaRegions] = useState<JmaRegionCollection | null>(null);
   const [jmaSeismicSites, setJmaSeismicSites] = useState<JmaSeismicSiteCatalogue | null>(null);
+  const [tsunamiRegions, setTsunamiRegions] = useState<TsunamiRegionCollection | null>(null);
+  const [jmaTsunami, setJmaTsunami] = useState<JmaTsunamiSnapshot | null>(null);
+  const [jmaTsunamiState, setJmaTsunamiState] = useState<SourceState>("connecting");
+  const [jmaTsunamiLatency, setJmaTsunamiLatency] = useState<number | null>(null);
+  const [jmaTsunamiError, setJmaTsunamiError] = useState("");
   const [niedFrame, setNiedFrame] = useState<NiedRealtimeFrame | null>(null);
   const [niedState, setNiedState] = useState<SourceState>("connecting");
   const [kmaState, setKmaState] = useState<SourceState>("connecting");
@@ -981,6 +1035,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   const [niedCatalogueError, setNiedCatalogueError] = useState("");
   const [oceanCatalogueError, setOceanCatalogueError] = useState("");
   const [jmaCatalogueError, setJmaCatalogueError] = useState("");
+  const [tsunamiCatalogueError, setTsunamiCatalogueError] = useState("");
   const [globalStationSnapshot, setGlobalStationSnapshot] = useState<GlobalStationSnapshot | null>(null);
   const [eventGlobalStationSnapshot, setEventGlobalStationSnapshot] = useState<{
     eventKey: string;
@@ -1363,6 +1418,56 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
         setJmaCatalogueError((current) => current || (error instanceof Error ? error.message : String(error)));
       });
     return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/data/jp.tsunami.topo.json", { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`JMA 海啸预报区边界 ${response.status}`);
+        return response.json() as Promise<{ objects?: { region?: unknown } }>;
+      })
+      .then((topology) => {
+        if (!topology.objects?.region) throw new Error("JMA 海啸预报区边界格式无效");
+        setTsunamiRegions(topojsonFeature(topology, topology.objects.region) as TsunamiRegionCollection);
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setTsunamiCatalogueError(error instanceof Error ? error.message : String(error));
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let timer = 0;
+    let controller: AbortController | null = null;
+    const poll = async () => {
+      controller?.abort();
+      controller = new AbortController();
+      const started = Date.now();
+      try {
+        const snapshot = await fetchJmaTsunami(controller.signal);
+        if (!active) return;
+        setJmaTsunami(snapshot);
+        setJmaTsunamiState(snapshot.sourceState);
+        setJmaTsunamiLatency(Date.now() - started);
+        setJmaTsunamiError(snapshot.error ?? "");
+      } catch (error) {
+        if (!active || (error instanceof DOMException && error.name === "AbortError")) return;
+        setJmaTsunamiState("error");
+        setJmaTsunamiLatency(null);
+        setJmaTsunamiError(error instanceof Error ? error.message : String(error));
+      } finally {
+        if (active) timer = window.setTimeout(poll, 15_000);
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      controller?.abort();
+    };
   }, []);
 
   useEffect(() => {
@@ -2004,6 +2109,24 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
     () => affectedRegionLayers(jmaRegions, jmaSeismicSites, mapEvent, impactElapsed),
     [impactElapsed, jmaRegions, jmaSeismicSites, mapEvent],
   );
+  const activeTsunamiRegions = useMemo<TsunamiRegionCollection>(() => {
+    if (!tsunamiRegions || !jmaTsunami?.active) return { type: "FeatureCollection", features: [] };
+    const activeAreas = new Map(jmaTsunami.areas.map((area) => [area.name, area]));
+    return {
+      type: "FeatureCollection",
+      features: tsunamiRegions.features.flatMap((feature) => {
+        const area = activeAreas.get(feature.properties.name);
+        return area ? [{
+          ...feature,
+          properties: {
+            ...feature.properties,
+            grade: area.grade,
+            level: area.level,
+          },
+        }] : [];
+      }),
+    };
+  }, [jmaTsunami, tsunamiRegions]);
   const waveNow = replayEvent ? mapOrigin + replaySeconds * 1000 : mapOrigin ? Math.min(clock, mapOrigin + 300_000) : clock;
   const showWaves = replayEvent ? replaySeconds > 0 : Boolean(mapEvent === latestEvent && latestEvent && !latestEvent.cancelled);
   const rawMapDetectionStationIds = replayEvent
@@ -2110,6 +2233,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
               <SourceIndicator label="KMA-PEWS 官方实时" state={kmaState} latency={kmaLatency} />
               <SourceIndicator label="Wolfx HTTP 多机构 EEW" state={wolfxState} latency={wolfxLatency} />
               <SourceIndicator label="P2P / JMA EEW 回退" state={fanState} latency={fallbackLatency} />
+              <SourceIndicator label="JMA 海啸预报 code 552" state={jmaTsunamiState} latency={jmaTsunamiLatency} />
               <SourceIndicator label="CENC 烈度多源后端" state={cencState} latency={cencLatency} />
               <SourceIndicator label="MSIL S-net 实测历史" state={snetState} latency={snetSnapshot?.latencyMs ?? null} />
               <SourceIndicator label={`全球机构报告 ${institutionSourceCount}/${INSTITUTION_SOURCE_TOTAL}`} state={officialState} latency={officialLatency} />
@@ -2133,6 +2257,21 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
             </label>
             {(globalStationError || cwaStationError) && <p className="seismic-source-error">{[globalStationError, cwaStationError].filter(Boolean).join("；")}</p>}
           </section>
+          <section className="control-section seismic-tsunami-control">
+            <div className="section-title"><span><Waves /></span><strong>JMA 海啸预报</strong></div>
+            <div className={`jma-tsunami-status ${jmaTsunami?.state ?? jmaTsunamiState}`}>
+              <header><AlertTriangle size={15} /><strong>{jmaTsunami?.title ?? "正在读取气象厅海啸预报"}</strong><em>{jmaTsunami?.active ? `${jmaTsunami.areas.length} 区` : jmaTsunamiState === "online" ? "监视中" : "连接中"}</em></header>
+              <p>{jmaTsunami?.issuedAt ? `气象厅最近发布：${formatTime(jmaTsunami.issuedAt)}` : "尚未取得发布时间"}{jmaTsunami?.stale ? " · 当前显示缓存并重连" : ""}</p>
+              <div className="jma-tsunami-legend" aria-label="JMA 海啸预报等级">
+                <span><i className="major" />大海啸警报</span>
+                <span><i className="warning" />海啸警报</span>
+                <span><i className="advisory" />海啸注意报</span>
+              </div>
+            </div>
+            <label className="toggle-row"><input type="checkbox" checked={showJmaTsunami} onChange={(event) => setShowJmaTsunami(event.target.checked)} />JMA 海啸预报区 <em>{tsunamiRegions?.features.length ?? "--"}</em></label>
+            <a className="seismic-tsunami-source-link" href={jmaTsunami?.sourceUrl ?? "https://www.data.jma.go.jp/multi/tsunami/index.html?lang=jp"} target="_blank" rel="noreferrer">打开气象厅官方海啸信息<ExternalLink size={12} /></a>
+            {jmaTsunamiError && <p className="seismic-source-error">{jmaTsunamiError}</p>}
+          </section>
           <section className="control-section">
             <div className="section-title"><span><Layers3 /></span><strong>测站图层</strong></div>
             <label className="toggle-row"><input type="checkbox" checked={showNied} onChange={(event) => setShowNied(event.target.checked)} />NIED K-NET / KiK-net <em>{catalogue?.stations.length ?? "--"}</em></label>
@@ -2142,6 +2281,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
             <label className="toggle-row"><input type="checkbox" checked={showOtherOcean} onChange={(event) => setShowOtherOcean(event.target.checked)} />DONET / N-net <em>{oceanCatalogue ? (oceanCatalogue.counts.DONET1 ?? 0) + (oceanCatalogue.counts.DONET2 ?? 0) + (oceanCatalogue.counts["N-net"] ?? 0) : "--"}</em></label>
             <label className="toggle-row"><input type="checkbox" checked={showGlobalStations} onChange={(event) => setShowGlobalStations(event.target.checked)} />全球 FDSN 测站 <em>{globalFdsnStations.length || "--"}</em></label>
             <label className="toggle-row"><input type="checkbox" checked={showCwaStations} onChange={(event) => setShowCwaStations(event.target.checked)} />CWA 台湾 CWASN <em>{cwaStations.length || "--"}</em></label>
+            <label className="toggle-row"><input type="checkbox" checked={showGnssStations} onChange={(event) => setShowGnssStations(event.target.checked)} />中国大陆GNSS站点 <em>{GNSS_STATIONS.length}</em></label>
             <label className="toggle-row"><input type="checkbox" checked={showLocalImpact} onChange={(event) => setShowLocalImpact(event.target.checked)} />本地预测烈度 / 震度区域 <em>{affectedLayers.local.features.length}</em></label>
             <label className="toggle-row"><input type="checkbox" checked={showOfficialImpact} onChange={(event) => setShowOfficialImpact(event.target.checked)} />官方影响地区 <em>{affectedLayers.official.features.length}</em></label>
           </section>
@@ -2160,7 +2300,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
           </section>
           <section className="control-section seismic-legal-note">
             <div className="section-title"><span><AlertTriangle /></span><strong>数据级别</strong></div>
-            <p>NIED 帧经 Yahoo 公开边缘端点读取；S-net 实测历史来自 MSIL 观测瓦片色值反算。全球台站来自 FDSN Station，CWASN 位置来自 CWA GDMS；地图响应属于事件驱动确定性估算，只有 FDSN 台站详情中的 miniSEED 是开放原始波形。所有本地推算和传播回放均不作为官方预警。</p>
+            <p>NIED 帧经 Yahoo 公开边缘端点读取；S-net 实测历史来自 MSIL 观测瓦片色值反算。JMA 海啸状态由 P2P 地震信息转发的气象厅 code 552 报文驱动，海岸预报线来自 JMA 官方 GIS；全球台站来自 FDSN Station，CWASN 位置来自 CWA GDMS。所有本地推算和传播回放均不作为官方预警。</p>
           </section>
         </div>
       </aside>
@@ -2175,13 +2315,15 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
             <div className={`earthquake-status-pill ${officialState === "online" ? "ok" : "warn"}`}><span>机构报告</span><strong>{institutionReports.length} 条</strong></div>
             <div className={`earthquake-status-pill ${activeGlobalCount || activeCwaCount ? "danger" : ""}`}><span>全球 / CWA 响应</span><strong>{activeGlobalCount} / {activeCwaCount} 站</strong></div>
             <div className={`earthquake-status-pill ${oceanResponseActive ? "danger" : ""}`}><span>{oceanHistorySelected ? "S-net 历史回看" : "海底台网响应"}</span><strong>{activeOceanCount ? oceanHistorySelected ? `历史 ${activeOceanCount} 站` : `${activeOceanCount} 站` : "待机"}</strong></div>
+            <div className={`earthquake-status-pill ${jmaTsunami?.active ? "danger" : jmaTsunamiState === "online" ? "ok" : "warn"}`}><span>JMA 海啸</span><strong>{jmaTsunami?.active ? jmaTsunami.title : jmaTsunamiState === "online" ? "无警报" : "连接中"}</strong></div>
             <div className="earthquake-status-pill"><span>本地时间</span><strong>{formatTime(clock)}</strong></div>
           </div>
         </header>
-        {(niedCatalogueError || oceanCatalogueError || jmaCatalogueError) && <div className="error-banner">台网目录更新失败：{[
+        {(niedCatalogueError || oceanCatalogueError || jmaCatalogueError || tsunamiCatalogueError) && <div className="error-banner">台网目录更新失败：{[
           niedCatalogueError && `NIED：${niedCatalogueError}`,
           oceanCatalogueError && `海底台网：${oceanCatalogueError}`,
           jmaCatalogueError && `JMA：${jmaCatalogueError}`,
+          tsunamiCatalogueError && `JMA 海啸：${tsunamiCatalogueError}`,
         ].filter(Boolean).join("；")}</div>}
 
         <section className="seismic-primary-grid">
@@ -2189,7 +2331,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
             <header className="earthquake-panel-header">
               <div><strong>全球实时测站与烈震度影响地图</strong><span>{replayEvent ? "预测区先显示；S 波到区后加深，全球与 CWASN 测站按到时激活" : "区域实时台网、全球 FDSN 与 CWA CWASN 台站均可点击"}</span></div>
               <div className="seismic-map-header-actions">
-                <div className="seismic-map-summary"><span><i className="nied" />NIED {catalogue?.stations.length ?? 0}</span><span><i className="kma" />KMA {kmaStations.length}</span><span><i className="cenc" />CENC {cencMetrics.length}</span><span><i className="ocean" />海底 {oceanCatalogue?.stations.length ?? 0}</span><span><i className="fdsn" />FDSN {globalFdsnStations.length}</span><span><i className="cwa" />CWA {cwaStations.length}</span></div>
+                <div className="seismic-map-summary"><span><i className="nied" />NIED {catalogue?.stations.length ?? 0}</span><span><i className="kma" />KMA {kmaStations.length}</span><span><i className="cenc" />CENC {cencMetrics.length}</span><span><i className="ocean" />海底 {oceanCatalogue?.stations.length ?? 0}</span><span><i className="fdsn" />FDSN {globalFdsnStations.length}</span><span><i className="cwa" />CWA {cwaStations.length}</span><span><i className="gnss" />GNSS {GNSS_STATIONS.length}</span></div>
                 <button className="seismic-map-theme-button" title="全球测站视图" aria-label="全球测站视图" onClick={() => setMapFocus({ key: `global:${Date.now()}`, latitude: 18, longitude: 0, zoom: 2, exact: true })}><Globe2 size={15} /></button>
                 <button className="seismic-map-theme-button" title={mapTheme === "dark" ? "切换为浅色地图" : "切换为深色地图"} aria-label={mapTheme === "dark" ? "切换为浅色地图" : "切换为深色地图"} onClick={() => setMapTheme((value) => value === "dark" ? "light" : "dark")}>{mapTheme === "dark" ? <Sun size={15} /> : <Moon size={15} />}</button>
               </div>
@@ -2204,6 +2346,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
                 globalStations={mapGlobalFdsnStations}
                 globalResponseStations={globalResponseStations}
                 cwaStations={cwaStations}
+                gnssStations={GNSS_STATIONS}
                 cencReport={showCenc ? cencReport : null}
                 niedFrame={mapDetectionStationIds.length ? niedFrame : null}
                 kmaValues={kmaDetection.activeStationIds.length ? kmaValues : EMPTY_NUMBERS}
@@ -2215,6 +2358,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
                 showCenc={showCenc}
                 showGlobal={showGlobalStations}
                 showCwa={showCwaStations}
+                showGnss={showGnssStations}
                 selectedStation={selectedStation}
                 selectedEvent={mapEvent ?? null}
                 selectedReport={selectedInstitutionReport}
@@ -2227,8 +2371,10 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
                 oceanMode={displayedOceanMode}
                 localRegions={affectedLayers.local}
                 officialRegions={affectedLayers.official}
+                tsunamiRegions={activeTsunamiRegions}
                 showLocalImpact={showLocalImpact}
                 showOfficialImpact={showOfficialImpact}
+                showTsunami={showJmaTsunami}
                 detectionStationIds={mapDetectionStationIds}
                 detectionRanks={mapDetectionRanks}
                 detectionMode={replayEvent ? "replay" : "live"}
@@ -2247,6 +2393,15 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
                 replayTimestamp={replayEvent ? Date.parse(replayEvent.originTime) : null}
               />
               <div className="seismic-map-overlay-stack">
+                {showJmaTsunami && jmaTsunami?.active && <section className={`jma-tsunami-alert ${jmaTsunami.state}`} aria-live="assertive">
+                  <header><AlertTriangle size={16} /><strong>JMA · {jmaTsunami.title}</strong><em>LIVE</em></header>
+                  <div className="jma-tsunami-alert-legend">
+                    <span><i className="major" />大海啸警报</span>
+                    <span><i className="warning" />海啸警报</span>
+                    <span><i className="advisory" />海啸注意报</span>
+                  </div>
+                  <footer><b>{jmaTsunami.areas.length} 个预报区</b><span>{jmaTsunami.issuedAt ? formatTime(jmaTsunami.issuedAt) : "发布时间待确认"}</span></footer>
+                </section>}
                 <section className="seismic-map-warning-overlay">
                   <nav aria-label="地图预警摘要">
                     <button className={warningOverlayTab === "latest" ? "active" : ""} onClick={() => setWarningOverlayTab("latest")}><Siren size={13} />最新预警</button>

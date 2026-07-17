@@ -107,6 +107,7 @@ import type {
   Thresholds,
 } from "./types";
 import { usePersistentState } from "./usePersistentState";
+import { DEFAULT_USER_NAME, MAX_USER_NAME_LENGTH, normalizeUserName } from "./userName";
 import {
   advanceWeatherAlertCycle,
   appendWeatherAlertEvent,
@@ -130,8 +131,6 @@ const FPS_OPTIONS = [1, 2, 5, 10, 24, 30, 60];
 const DEFAULT_PRODUCT = "medium-mslp-rain";
 const DEFAULT_PACKAGE = "opencharts";
 const DEFAULT_PROJECTION = "opencharts_eastern_asia";
-const USER_NAME = "BasyaCatX";
-
 type PreloadStatus = {
   signature: string;
   total: number;
@@ -309,6 +308,7 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [fps, setFps] = usePersistentState("ecmwf-pboard-fps", 24);
   const [smooth, setSmooth] = usePersistentState("ecmwf-pboard-smooth", true);
+  const [userName, setUserName] = usePersistentState("ecmwf-pboard-user-name", DEFAULT_USER_NAME);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState("ecmwf-pboard-sidebar-collapsed", false);
   const [favorites, setFavorites] = usePersistentState<string[]>("ecmwf-pboard-favorites", []);
   const [layerVisible, setLayerVisible] = usePersistentState("ecmwf-pboard-layer-visible", true);
@@ -372,6 +372,7 @@ export default function App() {
   );
   const weatherAlertHistoryRef = useRef(weatherAlertHistory);
   weatherAlertHistoryRef.current = weatherAlertHistory;
+  const displayUserName = normalizeUserName(userName);
   const alertCycle = useRef({ ...EMPTY_WEATHER_ALERT_CYCLE });
   const chartPanelRef = useRef<HTMLDivElement | null>(null);
   const sidebarRef = useRef<HTMLElement | null>(null);
@@ -1527,16 +1528,23 @@ export default function App() {
                 <HelpCircle size={17} />
                 <span className="action-label">帮助</span>
               </button>
-              <button title={`欢迎：${USER_NAME}`} aria-label={`欢迎：${USER_NAME}`} onClick={() => setDrawer("user")}>
+              <button title={`欢迎：${displayUserName}`} aria-label={`欢迎：${displayUserName}`} onClick={() => setDrawer("user")}>
                 <UserCircle size={20} />
-                <span className="action-label">欢迎：{USER_NAME}</span>
+                <span className="action-label">欢迎：{displayUserName}</span>
               </button>
             </>
           ) : (
             <>
               <span className="header-source">全球地震目录实时聚合</span>
               <span className="earthquake-header-live"><Activity size={15} />速报监测</span>
-              <span className="earthquake-header-user"><UserCircle size={18} />欢迎：{USER_NAME}</span>
+              <button
+                className="earthquake-header-user"
+                title={`欢迎：${displayUserName}`}
+                aria-label={`欢迎：${displayUserName}`}
+                onClick={() => setDrawer("user")}
+              >
+                <UserCircle size={18} />欢迎：{displayUserName}
+              </button>
             </>
           )}
         </div>
@@ -2272,36 +2280,38 @@ export default function App() {
             )}
           </div>
         </section>
-        <DashboardDrawer
-          view={drawer}
-          onClose={() => setDrawer(null)}
-          provider={selectedProviderConfig}
-          providerHealth={providerHealth}
-          risks={risks}
-          fps={fps}
-          setFps={setFps}
-          smooth={smooth}
-          setSmooth={setSmooth}
-          thresholds={thresholds}
-          setThresholds={setThresholds}
-          currentDescription={currentDescription}
-          currentFrame={currentFrame}
-          products={products}
-          frames={frames}
-          preloadStatus={preloadStatus}
-          animationPlayable={animationPlayable}
-          favoritesCount={favorites.length}
-          layerVisible={layerVisible}
-          setLayerVisible={setLayerVisible}
-          layerOpacity={layerOpacity}
-          setLayerOpacity={setLayerOpacity}
-          legend={<LegendList frame={currentFrame} />}
-          alertHistoryCount={weatherAlertHistory.length}
-          onSpeak={announceCurrentRisk}
-        />
       </main>
       </>
       </div>
+      <DashboardDrawer
+        view={drawer}
+        onClose={() => setDrawer(null)}
+        userName={userName}
+        setUserName={setUserName}
+        provider={selectedProviderConfig}
+        providerHealth={providerHealth}
+        risks={risks}
+        fps={fps}
+        setFps={setFps}
+        smooth={smooth}
+        setSmooth={setSmooth}
+        thresholds={thresholds}
+        setThresholds={setThresholds}
+        currentDescription={currentDescription}
+        currentFrame={currentFrame}
+        products={products}
+        frames={frames}
+        preloadStatus={preloadStatus}
+        animationPlayable={animationPlayable}
+        favoritesCount={favorites.length}
+        layerVisible={layerVisible}
+        setLayerVisible={setLayerVisible}
+        layerOpacity={layerOpacity}
+        setLayerOpacity={setLayerOpacity}
+        legend={<LegendList frame={currentFrame} />}
+        alertHistoryCount={weatherAlertHistory.length}
+        onSpeak={announceCurrentRisk}
+      />
     </div>
   );
 }
@@ -2309,6 +2319,8 @@ export default function App() {
 function DashboardDrawer(props: {
   view: DrawerView;
   onClose: () => void;
+  userName: string;
+  setUserName: React.Dispatch<React.SetStateAction<string>>;
   provider: ProviderConfig;
   providerHealth: ProviderHealth;
   risks: RiskCard[];
@@ -2473,7 +2485,20 @@ function DashboardDrawer(props: {
 
         {props.view === "user" && (
           <div className="drawer-content">
-            <DrawerMetric label="欢迎" value={USER_NAME} />
+            <label className="user-name-editor">
+              显示名称
+              <input
+                aria-label="用户显示名称"
+                type="text"
+                value={props.userName}
+                maxLength={MAX_USER_NAME_LENGTH}
+                placeholder={DEFAULT_USER_NAME}
+                autoComplete="nickname"
+                onChange={(event) => props.setUserName(event.target.value.slice(0, MAX_USER_NAME_LENGTH))}
+                onBlur={() => props.setUserName((value) => normalizeUserName(value))}
+              />
+            </label>
+            <DrawerMetric label="欢迎" value={normalizeUserName(props.userName)} />
             <DrawerMetric label="当前接口" value={props.provider.shortLabel} />
             <DrawerMetric label="使用定位" value="公众信息展示与学习" />
             <DrawerMetric label="收藏图表" value={`${props.favoritesCount} 个`} />

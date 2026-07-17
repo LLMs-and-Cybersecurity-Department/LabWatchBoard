@@ -88,6 +88,201 @@ a {
   color: #111827;
 }
 
+.license-gate {
+  min-height: 100vh;
+  height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: clamp(12px, 3vw, 32px);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% -10%, rgba(36, 198, 216, 0.13), transparent 42%),
+    #090d0f;
+}
+
+.license-dialog {
+  width: min(920px, 100%);
+  max-height: 100%;
+  display: grid;
+  grid-template-rows: auto auto minmax(160px, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid #354246;
+  border-radius: 12px;
+  background: #111719;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+}
+
+.license-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 20px 22px 14px;
+  border-bottom: 1px solid #283337;
+}
+
+.license-dialog-header h1,
+.license-eyebrow,
+.license-instructions {
+  margin: 0;
+}
+
+.license-dialog-header h1 {
+  margin-top: 3px;
+  font-size: clamp(20px, 3vw, 28px);
+}
+
+.license-eyebrow {
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.license-version {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border: 1px solid #3a484c;
+  border-radius: 999px;
+  color: #bdc9c6;
+  font: 600 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.license-instructions {
+  padding: 11px 22px;
+  border-bottom: 1px solid #283337;
+  color: #b9c5c2;
+  background: #151c1e;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.license-document {
+  min-height: 0;
+  margin: 14px 16px;
+  padding: 18px 20px;
+  overflow: auto;
+  border: 1px solid #2c383b;
+  border-radius: 7px;
+  outline: none;
+  background: #0b1012;
+  scrollbar-color: #596669 #12191b;
+}
+
+.license-document:focus-visible {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 2px rgba(36, 198, 216, 0.16);
+}
+
+.license-document pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #d0dad7;
+  font: 13px/1.75 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.license-document-end {
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px dashed #3a484b;
+  color: var(--accent-strong);
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.license-dialog-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-top: 1px solid #2c383b;
+  background: #151b1d;
+}
+
+.license-status {
+  color: #a6b1af;
+  font-size: 12px;
+}
+
+.license-status::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+.license-status-ready {
+  color: #b9d9c4;
+}
+
+.license-status-ready::before {
+  background: var(--ok);
+}
+
+.license-accept-button {
+  min-width: 190px;
+  min-height: 40px;
+  padding: 0 18px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #111518;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.license-accept-button:disabled {
+  border-color: #394346;
+  background: #252d2f;
+  color: #7f8b89;
+  cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+  .license-gate {
+    padding: 0;
+  }
+
+  .license-dialog {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .license-dialog-header {
+    padding: 16px;
+  }
+
+  .license-instructions {
+    padding: 10px 16px;
+  }
+
+  .license-document {
+    margin: 10px;
+    padding: 14px;
+  }
+
+  .license-dialog-footer {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 9px;
+    padding: 10px;
+  }
+
+  .license-accept-button {
+    width: 100%;
+  }
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;
@@ -1252,6 +1447,29 @@ button:disabled:hover {
   color: #c8d2d0;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.user-name-editor {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.user-name-editor input {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #3a474a;
+  border-radius: 6px;
+  outline: none;
+  background: #0d1214;
+  color: var(--text);
+}
+
+.user-name-editor input:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 2px rgba(36, 198, 216, 0.14);
 }
 
 .drawer-metric {
@@ -3345,6 +3563,97 @@ button,
   margin-top: 7px;
 }
 
+.jma-tsunami-status {
+  overflow: hidden;
+  margin-bottom: 7px;
+  border: 1px solid #38464a;
+  border-left: 3px solid #64748b;
+  border-radius: 5px;
+  background: #0d1517;
+}
+
+.jma-tsunami-status.advisory { border-left-color: #ffff00; }
+.jma-tsunami-status.warning { border-left-color: #ff0000; }
+.jma-tsunami-status.major-warning { border-left-color: #ff00ff; }
+
+.jma-tsunami-status > header {
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: 17px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 7px;
+  border-bottom: 1px solid #2f3b3f;
+}
+
+.jma-tsunami-status > header svg { color: #f6b554; }
+
+.jma-tsunami-status > header strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #e9f1ef;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jma-tsunami-status > header em {
+  padding: 2px 5px;
+  border: 1px solid #46575b;
+  border-radius: 3px;
+  color: #b8c5c2;
+  font-size: 7px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.jma-tsunami-status > p {
+  margin: 0;
+  padding: 5px 7px 0;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.jma-tsunami-legend {
+  display: grid;
+  gap: 4px;
+  padding: 6px 7px 7px;
+}
+
+.jma-tsunami-legend span,
+.jma-tsunami-alert-legend span {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  color: #dce7e4;
+  font-size: 8px;
+}
+
+.jma-tsunami-legend i,
+.jma-tsunami-alert-legend i {
+  height: 4px;
+  border-radius: 2px;
+}
+
+.jma-tsunami-legend i.major,
+.jma-tsunami-alert-legend i.major { background: #ff00ff; }
+.jma-tsunami-legend i.warning,
+.jma-tsunami-alert-legend i.warning { background: #ff0000; }
+.jma-tsunami-legend i.advisory,
+.jma-tsunami-alert-legend i.advisory { background: #ffff00; }
+
+.seismic-tsunami-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+  color: #7dd3fc;
+  font-size: 8px;
+  text-decoration: none;
+}
+
 .seismic-refresh-stepper {
   display: inline-grid;
   grid-template-columns: 24px 46px 24px;
@@ -3599,6 +3908,7 @@ button,
 .seismic-map-summary .ocean { background: #22d3ee; }
 .seismic-map-summary .fdsn { background: #c084fc; }
 .seismic-map-summary .cwa { background: #f472b6; }
+.seismic-map-summary .gnss { background: #f59e0b; }
 
 .seismic-map-shell {
   position: relative;
@@ -4108,6 +4418,69 @@ button,
   display: grid;
   gap: 7px;
   pointer-events: none;
+}
+
+.jma-tsunami-alert {
+  overflow: hidden;
+  border: 1px solid rgba(255, 0, 255, 0.8);
+  border-radius: 6px;
+  background: rgba(19, 8, 21, 0.94);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.42);
+  color: #ffffff;
+  pointer-events: auto;
+  backdrop-filter: blur(7px);
+}
+
+.jma-tsunami-alert > header {
+  min-height: 35px;
+  display: grid;
+  grid-template-columns: 19px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  background: #ff00ff;
+}
+
+.jma-tsunami-alert.warning { border-color: rgba(255, 0, 0, 0.9); }
+.jma-tsunami-alert.warning > header { background: #ff0000; }
+.jma-tsunami-alert.advisory { border-color: rgba(255, 255, 0, 0.9); }
+.jma-tsunami-alert.advisory > header {
+  background: #ffff00;
+  color: #111111;
+}
+
+.jma-tsunami-alert > header strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jma-tsunami-alert > header em {
+  padding: 2px 5px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 7px;
+  font-style: normal;
+}
+
+.jma-tsunami-alert-legend {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(33, 18, 35, 0.92);
+}
+
+.jma-tsunami-alert footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  color: #c9d5d2;
+  font-size: 8px;
 }
 
 .seismic-map-warning-overlay,
