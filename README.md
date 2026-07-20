@@ -49,7 +49,7 @@ pnpm check
 pnpm start
 ```
 
-`pnpm build` 会把最近一次 ECMWF 目录快照复制到 `dist/data/ecmwf/`，实时目录不可用时产品选择仍可工作。`server.mjs` 提供静态文件、SPA 回退、压缩、安全响应头、上游超时、ECMWF/点位预报同源代理、`/api/model-chart` 模式图表、`/api/earthquakes` 九机构地震报告聚合、`/api/seismic/fdsn/stations` 全球与 CWA CWASN 台站、`/api/seismic/fdsn/waveform` miniSEED 快照和 `/api/seismic/camera/resolve` 官方视频可嵌入性检查，以及 `/healthz` 健康检查。ECMWF 目录、动画帧和点位预报代理使用 128 MB 有界 LRU；瞬时 429/5xx 会自动重试，曾成功读取的同一 URL 在上游故障时以 `X-Proxy-Cache: STALE` 明确回退，健康接口会报告当前缓存条目和字节数。
+`pnpm build` 会把最近一次 ECMWF 目录快照复制到 `dist/data/ecmwf/`，实时目录不可用时产品选择仍可工作。`server.mjs` 提供静态文件、SPA 回退、压缩、安全响应头、上游超时、ECMWF/点位预报同源代理、`/api/model-chart` 模式图表、`/api/earthquakes` 九机构地震报告聚合、`/api/seismic/external-warnings` 授权 Early-est / GlobalQuake 预警接入、`/api/seismic/fdsn/stations` 全球与 CWA CWASN 台站、`/api/seismic/fdsn/waveform` miniSEED 快照和 `/api/seismic/camera/resolve` 官方视频可嵌入性检查，以及 `/healthz` 健康检查。ECMWF 目录、动画帧和点位预报代理使用 128 MB 有界 LRU；瞬时 429/5xx 会自动重试，曾成功读取的同一 URL 在上游故障时以 `X-Proxy-Cache: STALE` 明确回退，健康接口会报告当前缓存条目和字节数。
 
 macOS、Windows、Linux 与 Android 的安装包构建、签名变量和源码保护边界见 [PACKAGING.md](./PACKAGING.md)。
 
@@ -93,8 +93,16 @@ macOS、Windows、Linux 与 Android 的安装包构建、签名变量和源码�
 | `CAMERA_RELAY_RETRY_COUNT` | `1` | 摄像头瞬时网络失败重试次数 |
 | `CAMERA_RELAY_CACHE_TTL_MS` | `300000` | 视频可播放状态内存缓存有效期 |
 | `EARTHQUAKE_MAX_EVENTS` | `4000` | 单次聚合最多保留的事件数 |
+| `EARLY_EST_FEED_URL` | 空 | 获得许可后配置的 Early-est JSON 或 CAP Feed；未配置时界面显示“待授权配置” |
+| `EARLY_EST_FEED_TOKEN` | 空 | Early-est Feed Bearer Token，仅由服务端读取 |
+| `GLOBALQUAKE_FEED_URL` | 空 | 获得许可后配置的 GlobalQuake JSON 或 CAP Feed；未配置时界面显示“待授权配置” |
+| `GLOBALQUAKE_FEED_TOKEN` | 空 | GlobalQuake Feed Bearer Token，仅由服务端读取 |
+| `EXTERNAL_WARNING_TIMEOUT_MS` | `12000` | Early-est / GlobalQuake 单次授权 Feed 请求超时 |
+| `EXTERNAL_WARNING_CACHE_TTL_MS` | `3000` | 授权预警 Feed 内存缓存有效期 |
 
 对内网开放时至少配置 `DASHBOARD_USER` 和 `DASHBOARD_PASSWORD`，并在反向代理层启用 HTTPS。
+
+Early-est 与 GlobalQuake 当前没有随本项目分发的公开生产 Feed。只有在运营方提供合法授权地址后才可配置上述变量；Token 不会传给浏览器，未配置、过期和错误三种状态会分别展示，也不会用模拟事件冒充实时预警。
 
 ## 爬取图表目录
 

@@ -13,6 +13,7 @@ import {
   Loader2,
   Map as MapIcon,
   MapPin,
+  MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
@@ -23,7 +24,7 @@ import {
   Waves,
 } from "lucide-react";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CircleMarker, MapContainer, Popup, ScaleControl, TileLayer, useMap, ZoomControl } from "react-leaflet";
+import { CircleMarker, GeoJSON as LeafletGeoJSON, MapContainer, Pane, Popup, ScaleControl, TileLayer, useMap, ZoomControl } from "react-leaflet";
 import {
   Bar,
   BarChart,
@@ -51,6 +52,10 @@ import {
   formatEarthquakeTime,
   formatMagnitudeType,
   isMechanismQueryable,
+  isNiedQueryable,
+  isDyfiQueryable,
+  isPagerQueryable,
+  isShakeMapQueryable,
   normalizeEarthquakeRefreshSeconds,
   type EarthquakeBaseLayer,
   type EarthquakeEvent,
@@ -60,8 +65,18 @@ import {
   type EarthquakeTimeZone,
 } from "./earthquake";
 import { FocalMechanismDialog } from "./FocalMechanismDialog";
+import { NiedProductsDialog } from "./NiedProductsDialog";
+import { JshisDialog } from "./JshisDialog";
+import { ShakeMapDialog } from "./ShakeMapDialog";
 import { SeismicLiveDashboard } from "./SeismicLiveDashboard";
+import { UsgsDyfiDialog } from "./UsgsDyfiDialog";
+import { UsgsPagerDialog } from "./UsgsPagerDialog";
 import { usePersistentState } from "./usePersistentState";
+import {
+  isJshisPositionSupported,
+  type JshisFaultShape,
+  type JshisLocationSnapshot,
+} from "./jshis";
 
 const SOURCE_ORDER: EarthquakeSourceId[] = ["usgs", "shakealert", "jma", "cenc", "cwa", "emsc", "gfz", "geonet", "bmkg"];
 const MIN_MAGNITUDES = [0, 1, 2.5, 4, 5, 6];
@@ -151,6 +166,8 @@ function EarthquakeMap(props: {
   baseLayer: EarthquakeBaseLayer;
   updateBursts: Record<string, number>;
   burstClock: number;
+  jshisLocation: JshisLocationSnapshot | null;
+  jshisFault: JshisFaultShape | null;
   onSelect: (event: EarthquakeEvent, focus?: boolean) => void;
 }) {
   const layer = BASE_LAYERS[props.baseLayer];
@@ -178,6 +195,11 @@ function EarthquakeMap(props: {
       <ScaleControl position="bottomleft" imperial={false} />
       <MapResizeSync />
       <MapFocus event={props.focusedEvent} />
+      <Pane name="global-jshis-products" style={{ zIndex: 390, pointerEvents: "none" }}>
+        {props.jshisLocation?.hazard && <LeafletGeoJSON data={props.jshisLocation.hazard.feature} interactive={false} style={{ color: "#facc15", fillColor: "#f97316", weight: 2.2, opacity: 0.98, fillOpacity: 0.22, dashArray: "5 3" }} />}
+        {props.jshisLocation?.site && <LeafletGeoJSON data={props.jshisLocation.site.feature} interactive={false} style={{ color: "#22d3ee", fillColor: "#0891b2", weight: 1.8, opacity: 0.95, fillOpacity: 0.18 }} />}
+        {props.jshisFault && <LeafletGeoJSON data={props.jshisFault.features} interactive={false} style={{ color: "#ef4444", fillColor: "#dc2626", weight: 2.4, opacity: 0.98, fillOpacity: 0.24 }} />}
+      </Pane>
       {props.events.map((event) => {
         const selected = event.id === props.selectedId;
         const burstStartedAt = props.updateBursts[event.id];
@@ -318,6 +340,13 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusEventId, setFocusEventId] = useState<string | null>(null);
   const [mechanismEvent, setMechanismEvent] = useState<EarthquakeEvent | null>(null);
+  const [shakeMapEvent, setShakeMapEvent] = useState<EarthquakeEvent | null>(null);
+  const [pagerEvent, setPagerEvent] = useState<EarthquakeEvent | null>(null);
+  const [dyfiEvent, setDyfiEvent] = useState<EarthquakeEvent | null>(null);
+  const [niedEvent, setNiedEvent] = useState<EarthquakeEvent | null>(null);
+  const [jshisEvent, setJshisEvent] = useState<EarthquakeEvent | null>(null);
+  const [jshisLocation, setJshisLocation] = useState<JshisLocationSnapshot | null>(null);
+  const [jshisFault, setJshisFault] = useState<JshisFaultShape | null>(null);
   const [updateBursts, setUpdateBursts] = useState<Record<string, number>>({});
   const [burstClock, setBurstClock] = useState(Date.now());
   const abortRef = useRef<AbortController | null>(null);
@@ -583,6 +612,8 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
                 baseLayer={baseLayer}
                 updateBursts={updateBursts}
                 burstClock={burstClock}
+                jshisLocation={jshisLocation}
+                jshisFault={jshisFault}
                 onSelect={chooseEvent}
               />
               <div className="earthquake-map-legend" aria-label="地图编码图例">
@@ -618,7 +649,12 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
                 {selectedEvent.note && <p className="earthquake-event-note">{selectedEvent.note}</p>}
                 <div className="earthquake-detail-actions">
                   <button onClick={() => chooseEvent(selectedEvent, true)}><MapPin size={15} />定位震中</button>
+                  {isNiedQueryable(selectedEvent) && <button onClick={() => setNiedEvent(selectedEvent)}><Activity size={15} />NIED 一键详情</button>}
                   {isMechanismQueryable(selectedEvent) && <button onClick={() => setMechanismEvent(selectedEvent)}><CircleGauge size={15} />{selectedEvent.source === "emsc" ? "查询 EMSC 机制解" : "官方机制解"}</button>}
+                  {isJshisPositionSupported(selectedEvent.latitude, selectedEvent.longitude) && <button onClick={() => setJshisEvent(selectedEvent)}><Layers3 size={15} />J-SHIS 位置产品</button>}
+                  {isShakeMapQueryable(selectedEvent) && <button onClick={() => setShakeMapEvent(selectedEvent)}><MapIcon size={15} />USGS ShakeMap</button>}
+                  {isPagerQueryable(selectedEvent) && <button onClick={() => setPagerEvent(selectedEvent)}><BarChart3 size={15} />USGS PAGER</button>}
+                  {isDyfiQueryable(selectedEvent) && <button onClick={() => setDyfiEvent(selectedEvent)}><MessageCircle size={15} />Did You Feel It?</button>}
                   <a href={selectedEvent.url} target="_blank" rel="noreferrer">官方记录<ExternalLink size={14} /></a>
                   {selectedEvent.shakeAlertReport?.summaryJsonUrl && <a href={selectedEvent.shakeAlertReport.summaryJsonUrl} target="_blank" rel="noreferrer">报告 JSON<ExternalLink size={14} /></a>}
                   {selectedEvent.shakeAlertReport?.summaryPdfUrl && <a href={selectedEvent.shakeAlertReport.summaryPdfUrl} target="_blank" rel="noreferrer">报告 PDF<ExternalLink size={14} /></a>}
@@ -695,7 +731,7 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
                     <td><span className="depth-readout"><i style={{ background: depthColor(event.depthKm) }} />{event.depthKm?.toFixed(0) ?? "--"} km</span></td>
                     <td>{intensityLabel(event)}</td>
                     <td>{event.status}</td>
-                    <td><div className="earthquake-product-actions">{event.shakeAlertReport && <button title="查看 ShakeAlert 性能报告" aria-label={`查看 ${event.place} ShakeAlert 性能报告`} onClick={() => chooseEvent(event)}><Radio size={14} /></button>}{isMechanismQueryable(event) && <button title={event.source === "emsc" ? "查询 EMSC 收录的机制解" : "查看官方机制解"} aria-label={`查看 ${event.place} 官方机制解`} onClick={() => setMechanismEvent(event)}><CircleGauge size={14} /></button>}<a href={event.url} target="_blank" rel="noreferrer" aria-label={`打开 ${event.place} 官方记录`}><ExternalLink size={14} /></a></div></td>
+                    <td><div className="earthquake-product-actions">{event.shakeAlertReport && <button title="查看 ShakeAlert 性能报告" aria-label={`查看 ${event.place} ShakeAlert 性能报告`} onClick={() => chooseEvent(event)}><Radio size={14} /></button>}{isNiedQueryable(event) && <button title="查看 NIED F-net / Hi-net 一键详情" aria-label={`查看 ${event.place} NIED 一键详情`} onClick={() => setNiedEvent(event)}><Activity size={14} /></button>}{isMechanismQueryable(event) && <button title={event.source === "emsc" ? "查询 EMSC 收录的机制解" : "查看官方机制解"} aria-label={`查看 ${event.place} 官方机制解`} onClick={() => setMechanismEvent(event)}><CircleGauge size={14} /></button>}{isJshisPositionSupported(event.latitude, event.longitude) && <button title="查看 J-SHIS 官方位置产品" aria-label={`查看 ${event.place} J-SHIS`} onClick={() => setJshisEvent(event)}><Layers3 size={14} /></button>}{isShakeMapQueryable(event) && <button title="查看已确认存在的 USGS ShakeMap" aria-label={`查看 ${event.place} USGS ShakeMap`} onClick={() => setShakeMapEvent(event)}><MapIcon size={14} /></button>}{isPagerQueryable(event) && <button title="查看已确认存在的 USGS PAGER 人口与损失估算" aria-label={`查看 ${event.place} USGS PAGER`} onClick={() => setPagerEvent(event)}><BarChart3 size={14} /></button>}{isDyfiQueryable(event) && <button title="查看已确认存在的 USGS Did You Feel It? 图片与图表" aria-label={`查看 ${event.place} USGS DYFI`} onClick={() => setDyfiEvent(event)}><MessageCircle size={14} /></button>}<a href={event.url} target="_blank" rel="noreferrer" aria-label={`打开 ${event.place} 官方记录`}><ExternalLink size={14} /></a></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -727,6 +763,18 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
         </footer>
       </main>
       {mechanismEvent && <FocalMechanismDialog event={mechanismEvent} onClose={() => setMechanismEvent(null)} />}
+      {niedEvent && <NiedProductsDialog event={niedEvent} timeZone={timeZone} onClose={() => setNiedEvent(null)} />}
+      {shakeMapEvent && <ShakeMapDialog event={shakeMapEvent} onClose={() => setShakeMapEvent(null)} />}
+      {pagerEvent && <UsgsPagerDialog event={pagerEvent} onClose={() => setPagerEvent(null)} />}
+      {dyfiEvent && <UsgsDyfiDialog event={dyfiEvent} onClose={() => setDyfiEvent(null)} />}
+      {jshisEvent && <JshisDialog
+        latitude={jshisEvent.latitude}
+        longitude={jshisEvent.longitude}
+        label={`${EARTHQUAKE_SOURCE_LABELS[jshisEvent.source]} · ${jshisEvent.place}`}
+        onLoaded={setJshisLocation}
+        onFaultLoaded={setJshisFault}
+        onClose={() => setJshisEvent(null)}
+      />}
     </>
   );
 }

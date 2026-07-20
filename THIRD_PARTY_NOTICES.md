@@ -19,6 +19,15 @@ under the Mozilla Public License 2.0.
 - Source: https://github.com/Vanilagy/mediabunny
 - License: https://github.com/Vanilagy/mediabunny/blob/main/LICENSE
 
+## SheetJS spreadsheet parser
+
+The CENC server adapter uses the `xlsx` package to parse the official
+ground-motion report export, including its published station latitude and
+longitude columns. `xlsx` 0.18.5 is distributed under the Apache License 2.0.
+
+- Source: https://github.com/SheetJS/sheetjs
+- License: https://github.com/SheetJS/sheetjs/blob/v0.18.5/LICENSE
+
 ## USGS earthquake-eventpages beachball renderer
 
 Files under `src/vendor/usgs-beachball/` originate from the United States
@@ -43,6 +52,65 @@ official warning channel.
 - NIED Strong-motion Monitor: https://www.kyoshin.bosai.go.jp/
 - Usage notes: https://www.kyoshin.bosai.go.jp/ja/about_kmoni/
 - Station list: https://www.kyoshin.bosai.go.jp/ja/stationlist/
+
+## GEM Global Active Faults Database
+
+`public/data/global-active-faults.geo.json` is a mechanically simplified and
+activity-classified derivative of the GEM Foundation Global Active Faults
+Database (GAF-DB). The source traces are grouped by the published
+`last_movement` field: historical/recent (red), Holocene (orange), late
+Quaternary (yellow), and older or unknown age (green). This visualization is a
+tectonic reference layer, not a real-time rupture forecast and not proof that
+an unmarked location has no fault.
+
+The GEM GAF-DB is licensed under CC BY-SA 4.0. The derivative retains source
+and license metadata in the GeoJSON file.
+
+- Source: https://github.com/GEMScienceTools/gem-global-active-faults
+- Publication: https://doi.org/10.1177/8755293020944182
+- License: https://creativecommons.org/licenses/by-sa/4.0/
+
+## J-SHIS official API products
+
+`server/jshis.mjs` requests the public J-SHIS Web API operated by Japan's
+National Research Institute for Earth Science and Disaster Resilience (NIED).
+The application keeps the probabilistic seismic-hazard mesh, shallow subsurface
+structure, earthquake-induced landslide containment result, fault contribution
+ranking, and selected fault geometry as distinct products. Long-term hazard
+probabilities and site conditions are not labelled as real-time earthquake
+observations or warnings. No J-SHIS dataset is bundled or rehosted.
+
+- J-SHIS Web API: https://www.j-shis.bosai.go.jp/en/api-list
+- J-SHIS Map: https://www.j-shis.bosai.go.jp/map/
+- Terms of use: https://www.j-shis.bosai.go.jp/en/terms
+
+## Authorized Early-est and GlobalQuake warning adapters
+
+`server/externalWarnings.mjs` accepts an operator-provided, authorized JSON or
+CAP feed for INGV Early-est and GlobalQuake. No private protocol, proprietary
+client code, credentials, or warning dataset from either project is bundled.
+The adapters stay disabled and are reported as unconfigured until an authorized
+feed URL is supplied. Bearer tokens remain server-side.
+
+- INGV Early-est: https://early-est.rm.ingv.it/
+- GlobalQuake: https://globalquake.net/
+
+## East Asia administrative boundaries
+
+The application loads simplified province-level boundaries from `cn-atlas`
+for mainland China, Hong Kong, and Macao, and county/city boundaries from
+`taiwan-atlas` for Taiwan. These files are distributed as separate map assets
+and are used only for local or official intensity-area visualization.
+
+`cn-atlas` is an ISC-licensed redistribution derived from the 2023
+`ruiduobao/shengshixian.com` administrative-boundary dataset. `taiwan-atlas`
+is MIT licensed and derives its county/city topology from the Taiwan Ministry
+of the Interior open-data boundary dataset.
+
+- China atlas: https://github.com/BarbarossaWang/cn-atlas
+- China source chain: https://github.com/ruiduobao/shengshixian.com
+- Taiwan atlas: https://github.com/dkaoster/taiwan-atlas
+- Taiwan county/city source: https://data.gov.tw/dataset/7442
 
 ## Reference applications
 

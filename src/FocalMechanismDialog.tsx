@@ -19,7 +19,11 @@ export function FocalMechanismDialog({ event, onClose }: FocalMechanismDialogPro
   const [mechanism, setMechanism] = useState<EarthquakeMechanism | null>(null);
   const [error, setError] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const providerLabel = event.source === "emsc" ? "EMSC 收录产品" : "USGS 官方产品";
+  const providerLabel = event.source === "emsc"
+    ? "EMSC 收录产品"
+    : event.source === "cenc"
+      ? "CENC 官方 CMT 产品"
+      : "USGS 官方产品";
 
   useEffect(() => {
     const controller = new AbortController();
@@ -71,7 +75,7 @@ export function FocalMechanismDialog({ event, onClose }: FocalMechanismDialogPro
         {error && <div className="error-banner">{error}</div>}
         {mechanism && (
           <div className="mechanism-content">
-            <div className="mechanism-beachball"><canvas ref={canvasRef} width="246" height="246" aria-label={`${providerLabel}地震机制解沙滩球`} /><small>压缩象限为深色 · {mechanism.source === "emsc" ? "EMSC 收录" : "USGS"} / {mechanism.productSource}</small></div>
+            <div className="mechanism-beachball"><canvas ref={canvasRef} width="246" height="246" aria-label={`${providerLabel}地震机制解沙滩球`} /><small>压缩象限为深色 · {mechanism.source === "emsc" ? "EMSC 收录" : mechanism.source === "cenc" ? "CENC" : "USGS"} / {mechanism.productSource}</small></div>
             <div className="mechanism-properties">
               <dl>
                 <div><dt>产品类型</dt><dd>{mechanism.type === "moment-tensor" ? "矩张量" : "震源机制"}</dd></div>
@@ -86,7 +90,7 @@ export function FocalMechanismDialog({ event, onClose }: FocalMechanismDialogPro
                   <tr><td>NP2</td><td>{property(mechanism.properties, "nodal-plane-2-strike")}°</td><td>{property(mechanism.properties, "nodal-plane-2-dip")}°</td><td>{property(mechanism.properties, "nodal-plane-2-rake")}°</td></tr>
                 </tbody>
               </table>
-              <a href={mechanism.officialUrl} target="_blank" rel="noreferrer">打开 {mechanism.source === "emsc" ? "EMSC 官方矩张量记录" : "USGS 官方产品页"}<ExternalLink size={14} /></a>
+              <a href={mechanism.officialUrl} target="_blank" rel="noreferrer">打开 {mechanism.source === "emsc" ? "EMSC 官方矩张量记录" : mechanism.source === "cenc" ? "CENC 官方 CMT 目录" : "USGS 官方产品页"}<ExternalLink size={14} /></a>
             </div>
           </div>
         )}
