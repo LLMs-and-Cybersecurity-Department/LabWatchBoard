@@ -1,10 +1,11 @@
-import { AlertTriangle, Loader2, Pause, Play, RefreshCw, RotateCcw, Waves } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Loader2, Pause, Play, RefreshCw, RotateCcw, Waves } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, XAxis, YAxis } from "recharts";
 
 import {
   FDSN_PROVIDER_COLORS,
   fetchFdsnWaveform,
+  resolveFdsnWaveformAutoPlayCursor,
   type FdsnWaveformSnapshot,
   type GlobalSeismicStation,
 } from "./fdsn";
@@ -21,7 +22,29 @@ function compactTime(value: number) {
   }).format(new Date(value));
 }
 
-export function FdsnWaveformPanel({ station }: { station: GlobalSeismicStation }) {
+type FdsnWaveformPanelProps = {
+  station: GlobalSeismicStation;
+  eventTime?: string | null;
+  verifiedIndex?: number;
+  verifiedCount?: number;
+  distanceKm?: number | null;
+  autoPlayKey?: string | null;
+  autoPlayLabel?: string;
+  onPrevious?: () => void;
+  onNext?: () => void;
+};
+
+export const FdsnWaveformPanel = memo(function FdsnWaveformPanel({
+  station,
+  eventTime,
+  verifiedIndex = -1,
+  verifiedCount = 0,
+  distanceKm = null,
+  autoPlayKey = null,
+  autoPlayLabel = "自动选站联动 · 已自动开始波形滚动",
+  onPrevious,
+  onNext,
+}: FdsnWaveformPanelProps) {
   const providerKey = station.providers.join(",");
   const [minutes, setMinutes] = useState(5);
   const [snapshot, setSnapshot] = useState<FdsnWaveformSnapshot | null>(null);
@@ -32,6 +55,7 @@ export function FdsnWaveformPanel({ station }: { station: GlobalSeismicStation }
   const [cursor, setCursor] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
   const lastTickRef = useRef(0);
+  const lastAutoPlayRef = useRef<{ key: string; snapshot: string } | null>(null);
 
   const load = useCallback(() => setReloadKey((value) => value + 1), []);
 
@@ -41,7 +65,7 @@ export function FdsnWaveformPanel({ station }: { station: GlobalSeismicStation }
     setError("");
     setLoadingProgress(1);
     setPlaying(false);
-    void fetchFdsnWaveform(station, minutes, controller.signal, setLoadingProgress)
+    void fetchFdsnWaveform(station, minutes, controller.signal, setLoadingProgress, eventTime)
       .then((next) => {
         if (controller.signal.aborted) return;
         setSnapshot(next);
@@ -55,12 +79,21 @@ export function FdsnWaveformPanel({ station }: { station: GlobalSeismicStation }
         setLoadingProgress(0);
       });
     return () => controller.abort();
-  }, [minutes, providerKey, reloadKey, station.id, station.network, station.stationCode]);
+  }, [eventTime, minutes, providerKey, reloadKey, station.id, station.network, station.stationCode]);
 
   const bounds = useMemo(() => snapshot ? {
     start: Math.min(...snapshot.traces.map((trace) => trace.startTime)),
     end: Math.max(...snapshot.traces.map((trace) => trace.endTime)),
   } : null, [snapshot]);
+
+  useEffect(() => {
+    if (!autoPlayKey || !snapshot || !bounds) return;
+    const snapshotKey = `${station.id}:${snapshot.providerId}:${bounds.start}:${bounds.end}:${reloadKey}`;
+    if (lastAutoPlayRef.current?.key === autoPlayKey && lastAutoPlayRef.current.snapshot === snapshotKey) return;
+    lastAutoPlayRef.current = { key: autoPlayKey, snapshot: snapshotKey };
+    setCursor(resolveFdsnWaveformAutoPlayCursor(bounds, eventTime, distanceKm));
+    setPlaying(true);
+  }, [autoPlayKey, bounds, distanceKm, eventTime, reloadKey, snapshot, station.id]);
 
   useEffect(() => {
     if (!playing || !bounds) return;
@@ -97,8 +130,13 @@ export function FdsnWaveformPanel({ station }: { station: GlobalSeismicStation }
   return (
     <section className="fdsn-waveform-panel" aria-live="polite">
       <header>
-        <div><Waves size={14} /><span><strong>原始地震仪波形</strong><small>{station.network} {station.stationCode} · {snapshot?.providerLabel ?? station.providers.join(" / ")}</small></span></div>
+        <div><Waves size={14} /><span><strong>原始地震仪波形</strong><small>{station.network} {station.stationCode} · {snapshot?.providerLabel ?? station.providers.join(" / ")}{distanceKm !== null ? ` · 震中距 ${distanceKm.toFixed(1)} km` : ""}</small></span></div>
         <div className="fdsn-waveform-actions">
+          <div className="fdsn-waveform-station-nav" aria-label="有原始波形的测站切换">
+            <button title="上一个有原始波形的测站" aria-label="上一个有原始波形的测站" onClick={onPrevious} disabled={!onPrevious || verifiedCount < 2}><ChevronLeft size={13} /></button>
+            <span>{verifiedIndex >= 0 ? `${verifiedIndex + 1}/${verifiedCount}` : `0/${verifiedCount}`}</span>
+            <button title="下一个有原始波形的测站" aria-label="下一个有原始波形的测站" onClick={onNext} disabled={!onNext || verifiedCount < 2}><ChevronRight size={13} /></button>
+          </div>
           <select aria-label="波形快照时长" value={minutes} onChange={(event) => setMinutes(Number(event.target.value))} disabled={loadingProgress > 0 && loadingProgress < 100}>
             <option value={5}>5 分钟</option><option value={10}>10 分钟</option><option value={20}>20 分钟</option>
           </select>
@@ -110,6 +148,7 @@ export function FdsnWaveformPanel({ station }: { station: GlobalSeismicStation }
         <span><Loader2 className="spin" size={15} />正在读取并解压 miniSEED <b>{loadingProgress}%</b></span>
         <progress max="100" value={loadingProgress} />
       </div> : error ? <div className="fdsn-waveform-error"><AlertTriangle size={16} /><span>{error}</span><button onClick={load}>重试</button></div> : snapshot && bounds ? <>
+        {autoPlayKey && lastAutoPlayRef.current?.key === autoPlayKey && <div className="fdsn-waveform-autoplay">{autoPlayLabel}</div>}
         <div className="fdsn-waveform-transport">
           <button className="primary" title={playing ? "暂停波形" : "播放波形"} aria-label={playing ? "暂停波形" : "播放波形"} onClick={togglePlayback}>{playing ? <Pause size={14} /> : <Play size={14} />}</button>
           <button title="回到快照起点" aria-label="回到快照起点" onClick={resetPlayback}><RotateCcw size={13} /></button>
@@ -129,4 +168,4 @@ export function FdsnWaveformPanel({ station }: { station: GlobalSeismicStation }
       </> : <div className="fdsn-waveform-loading"><span><Loader2 className="spin" size={15} />正在建立波形视图</span></div>}
     </section>
   );
-}
+});

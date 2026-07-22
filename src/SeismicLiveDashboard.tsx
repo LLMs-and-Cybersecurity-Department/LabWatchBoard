@@ -2,6 +2,7 @@ import {
   Activity,
   AlertTriangle,
   Antenna,
+  BarChart3,
   CheckCircle2,
   CircleGauge,
   Clock3,
@@ -14,7 +15,9 @@ import {
   Layers3,
   Loader2,
   LocateFixed,
+  Map as MapIcon,
   MapPin,
+  MessageCircle,
   Minus,
   Moon,
   Pause,
@@ -37,23 +40,28 @@ import { feature as topojsonFeature } from "topojson-client";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 
 import {
+  advanceMovieCameraQueue,
   buildNiedDetectionGridCells,
   buildStationNeighborMap,
   buildInstitutionHistoryReports,
   buildGlobalImpactContours,
+  calculateLocalIntensity,
   cencIntensityColor,
   collapseEewHistoryEvents,
   constrainHypocenterEstimate,
   estimateGroundMotion,
   eewReportKey,
+  enrichLiveEewWithOfficialAreas,
   filterEewHistoryEventsBySource,
   fetchCencIntensity,
   fetchEewRelay,
+  fetchExternalWarnings,
   fetchJmaTsunami,
   fetchKmaPews,
   fetchNiedRealtime,
   fetchNiedStations,
   fetchOceanStations,
+  fetchPalertStations,
   fetchSnetIntensity,
   haversineKm,
   inferHypocenter,
@@ -77,6 +85,8 @@ import {
   normalizeCencIntensityList,
   normalizeWolfxEew,
   replayNiedSoundIndex,
+  selectAutoLocatedGlobalEvent,
+  selectAutoLocatedGlobalEvents,
   JMA_SHINDO_LEGEND,
   MMI_LEGEND,
   jmaShindoColor,
@@ -103,6 +113,8 @@ import {
   type NiedStationCatalogue,
   type OceanStation,
   type OceanStationCatalogue,
+  type PalertStation,
+  type PalertSnapshot,
   type SnetIntensityEvent,
   type SnetIntensitySnapshot,
   type SeismicStation,
@@ -115,58 +127,87 @@ import {
 import {
   EARTHQUAKE_SOURCE_COLORS,
   EARTHQUAKE_SOURCE_LABELS,
+  filterShakeMapContours,
+  fetchEarthquakeShakeMap,
+  fetchEarthquakePager,
   fetchEarthquakeSnapshot,
   formatMagnitudeType,
+  isDyfiQueryable,
+  isMechanismQueryable,
+  isPagerQueryable,
+  isShakeMapQueryable,
   mergeEarthquakeEventHistory,
   normalizeEarthquakeRefreshSeconds,
+  shakeMapContourLevel,
+  SHAKEMAP_MMI_LEVELS,
   summarizeEarthquakeSourceAvailability,
   type EarthquakeEvent,
+  type EarthquakePager,
+  type EarthquakePagerCity,
+  type EarthquakeShakeMap,
 } from "./earthquake";
 import { usePersistentState } from "./usePersistentState";
 import { FdsnWaveformPanel } from "./FdsnWaveformPanel";
+import { FocalMechanismDialog } from "./FocalMechanismDialog";
+import { UsgsDyfiDialog } from "./UsgsDyfiDialog";
+import { UsgsPagerDialog } from "./UsgsPagerDialog";
+import { JshisDialog } from "./JshisDialog";
 import { SeismicCameraRelay } from "./SeismicCameraRelay";
 import { GNSS_STATIONS, type GnssStation } from "./gnssStations";
 import {
+  impactRegionMatchesName,
+  loadEastAsiaImpactRegions,
+  mergeImpactRegionCollections,
+  normalizeJapanImpactRegions,
+  type ImpactRegionCollection,
+  type ImpactRegionFeature,
+  type ImpactRegionProperties,
+} from "./impactRegions";
+import {
   FDSN_PROVIDER_COLORS,
-  GLOBAL_FDSN_PROVIDER_IDS,
-  buildEventStationViewport,
   fetchCwaStations,
-  fetchGlobalStations,
+  fetchWorldFdsnStations,
+  probeFdsnWaveform,
+  rankFdsnStationsByDistance,
+  rankNiedWaveformCandidates,
   sampleGlobalStationsForMap,
   type FdsnMapViewport,
+  type FdsnStationDistance,
   type GlobalSeismicStation,
   type GlobalStationSnapshot,
 } from "./fdsn";
+import {
+  isJshisPositionSupported,
+  type JshisFaultShape,
+  type JshisLocationSnapshot,
+} from "./jshis";
 
 type SeismicLiveDashboardProps = {
   onToggleSidebar: () => void;
   onOpenGlobal: () => void;
 };
 
-type PanelTab = "station" | "intensity" | "snet";
+type PanelTab = "station" | "intensity" | "snet" | "exposure";
 type BottomTab = "inference" | "replay" | "warnings" | "reports";
 type WarningOverlayTab = "latest" | "selected";
 type SeismicMapTheme = "dark" | "light";
-type SourceState = "connecting" | "online" | "stale" | "error";
+type MovieCameraMode = "locked" | "auto";
+type SourceState = "connecting" | "unconfigured" | "online" | "stale" | "error";
 type SnetViewMode = "measured" | "simulation";
-type StationSelectionReason = "manual" | "nied-auto";
+type StationSelectionReason = "manual" | "nied-auto" | "waveform-auto";
 type SelectableStation = SeismicStation | KmaStation | OceanStation | CencIntensityStation | GlobalSeismicStation;
-type MapFocusTarget = { key: string; latitude: number; longitude: number; zoom: number; exact?: boolean };
-type OceanResponseMode = "idle" | "measured" | "local" | "replay";
-type JmaRegionProperties = {
-  code?: string;
-  name: string;
-  namekana?: string;
-  rank?: number;
-  currentRank?: number;
-  arrived?: boolean;
-  scale?: "shindo" | "intensity";
-  source?: "local" | "official";
-  contour?: boolean;
-  phase?: "forecast" | "arrived";
+type MapFocusTarget = {
+  key: string;
+  latitude: number;
+  longitude: number;
+  zoom: number;
+  exact?: boolean;
+  radiusKm?: number;
 };
-type JmaRegionFeature = Feature<Geometry, JmaRegionProperties>;
-type JmaRegionCollection = FeatureCollection<Geometry, JmaRegionProperties>;
+type OceanResponseMode = "idle" | "measured" | "local" | "replay";
+type JmaRegionProperties = ImpactRegionProperties;
+type JmaRegionFeature = ImpactRegionFeature;
+type JmaRegionCollection = ImpactRegionCollection;
 type TsunamiRegionProperties = {
   code: string;
   name: string;
@@ -175,6 +216,24 @@ type TsunamiRegionProperties = {
   level?: number;
 };
 type TsunamiRegionCollection = FeatureCollection<Geometry, TsunamiRegionProperties>;
+type GlobalFaultProperties = {
+  level: 1 | 2 | 3 | 4;
+  label: string;
+  color: string;
+  featureCount: number;
+  traceCount: number;
+};
+type GlobalFaultCollection = FeatureCollection<Geometry, GlobalFaultProperties> & {
+  metadata?: {
+    title?: string;
+    source?: string;
+    license?: string;
+    generatedAt?: string;
+    sourceFeatureCount?: number;
+    traceCount?: number;
+    classification?: string;
+  };
+};
 
 const HISTORY_LIMIT = 180;
 const INSTITUTION_SOURCE_TOTAL = 9;
@@ -278,6 +337,85 @@ function geometryCenter(feature: JmaRegionFeature) {
   return center;
 }
 
+function pointInRing(longitude: number, latitude: number, ring: number[][]) {
+  let inside = false;
+  for (let current = 0, previous = ring.length - 1; current < ring.length; previous = current, current += 1) {
+    const [currentLongitude, currentLatitude] = ring[current] ?? [];
+    const [previousLongitude, previousLatitude] = ring[previous] ?? [];
+    if (![currentLongitude, currentLatitude, previousLongitude, previousLatitude].every(Number.isFinite)) continue;
+    const crosses = (currentLatitude > latitude) !== (previousLatitude > latitude)
+      && longitude < (previousLongitude - currentLongitude) * (latitude - currentLatitude)
+        / (previousLatitude - currentLatitude || Number.EPSILON) + currentLongitude;
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+function geometryContainsPoint(geometry: Geometry, latitude: number, longitude: number): boolean {
+  if (geometry.type === "Polygon") {
+    const rings = geometry.coordinates as number[][][];
+    return Boolean(rings[0] && pointInRing(longitude, latitude, rings[0]))
+      && !rings.slice(1).some((ring) => pointInRing(longitude, latitude, ring));
+  }
+  if (geometry.type === "MultiPolygon") {
+    return geometry.coordinates.some((polygon) => geometryContainsPoint(
+      { type: "Polygon", coordinates: polygon },
+      latitude,
+      longitude,
+    ));
+  }
+  if (geometry.type === "GeometryCollection") {
+    return geometry.geometries.some((child) => geometryContainsPoint(child, latitude, longitude));
+  }
+  return false;
+}
+
+function administrativeRegionSamples(region: JmaRegionFeature, event: LiveEew) {
+  const center = geometryCenter(region);
+  const boundaryPoints = geometryRings(region.geometry).flat();
+  const step = Math.max(1, Math.ceil(boundaryPoints.length / 48));
+  const sampledBoundary = boundaryPoints.filter((_, index) => index % step === 0);
+  const samples = [
+    ...(geometryContainsPoint(region.geometry, event.latitude, event.longitude)
+      ? [[event.longitude, event.latitude]]
+      : []),
+    ...(center ? [[center.longitude, center.latitude]] : []),
+    ...sampledBoundary,
+  ];
+  return samples
+    .filter(([longitude, latitude]) => Number.isFinite(latitude) && Number.isFinite(longitude))
+    .map(([longitude, latitude]) => ({ latitude, longitude }));
+}
+
+function simulateAdministrativeRegionImpact(
+  region: JmaRegionFeature,
+  event: LiveEew,
+  sites: JmaSeismicSiteCatalogue | null,
+  elapsedSeconds: number | null,
+) {
+  const center = geometryCenter(region);
+  if (!center) return null;
+  if (region.properties.scale !== "intensity") {
+    const regionSites = sites?.regions[region.properties.name]
+      ?? administrativeRegionSamples(region, event).map(({ latitude, longitude }) => [latitude, longitude, 1.4] as const);
+    return simulateJmaRegionImpact(event, regionSites, elapsedSeconds);
+  }
+  const samples = administrativeRegionSamples(region, event);
+  const intensity = Math.max(0, ...samples.map((sample) => calculateLocalIntensity(event, sample)));
+  const rank = Math.max(0, Math.min(10, Math.floor(intensity + 0.5)));
+  if (rank < 1) return null;
+  if (elapsedSeconds === null) {
+    return { rank, currentRank: rank, arrived: true };
+  }
+  const distanceKm = Math.min(
+    ...samples.map((sample) => Math.hypot(haversineKm(event, sample), Math.max(0, Number(event.depthKm ?? 10)))),
+  );
+  const sinceArrival = elapsedSeconds - distanceKm / 3.5;
+  if (sinceArrival < 0) return { rank, currentRank: 0, arrived: false };
+  const currentRank = Number((rank * Math.min(1, (sinceArrival + 0.5) / 2.5)).toFixed(2));
+  return { rank, currentRank, arrived: currentRank >= 0.5 };
+}
+
 function affectedRegionLayers(
   regions: JmaRegionCollection | null,
   sites: JmaSeismicSiteCatalogue | null,
@@ -317,27 +455,33 @@ function affectedRegionLayers(
     return contour.arrived ? contourFeature(radiusKm, contour.rank, true) ?? [] : [];
   });
   const contourFeatures = [...forecastContours, ...arrivedContours];
-  const localImpactRadiusKm = Math.max(0, ...contours.map((contour) => contour.radiusKm)) + 350;
   if (!regions) {
     return {
       local: { type: "FeatureCollection", features: contourFeatures },
       official: empty,
     };
   }
-  const officialRanks = new Map((event.affectedAreas ?? []).map((area) => [area.name, area.rank]));
   const localFeatures: JmaRegionFeature[] = [];
   const officialFeatures: JmaRegionFeature[] = [];
 
   for (const region of regions.features) {
-    const officialRank = officialRanks.get(region.properties.name);
-    if (officialRank !== undefined) {
-      officialFeatures.push({ ...region, properties: { ...region.properties, rank: officialRank, currentRank: officialRank, arrived: true, scale: "shindo", source: "official" } });
+    const officialArea = (event.affectedAreas ?? [])
+      .filter((area) => impactRegionMatchesName(region.properties, area.name))
+      .sort((left, right) => right.rank - left.rank)[0];
+    if (officialArea) {
+      officialFeatures.push({
+        ...region,
+        properties: {
+          ...region.properties,
+          rank: officialArea.rank,
+          currentRank: officialArea.rank,
+          arrived: true,
+          source: "official",
+        },
+      });
+      continue;
     }
-    const center = geometryCenter(region);
-    if (!center) continue;
-    if (haversineKm(event, center) > localImpactRadiusKm) continue;
-    const regionSites = sites?.regions[region.properties.name] ?? [[center.latitude, center.longitude, 1.4]];
-    const impact = simulateJmaRegionImpact(event, regionSites, elapsedSeconds);
+    const impact = simulateAdministrativeRegionImpact(region, event, sites, elapsedSeconds);
     if (!impact) continue;
     localFeatures.push({
       ...region,
@@ -346,7 +490,6 @@ function affectedRegionLayers(
         rank: impact.rank,
         currentRank: impact.currentRank,
         arrived: impact.arrived,
-        scale: "shindo",
         source: "local",
       },
     });
@@ -465,7 +608,15 @@ function OfficialHypocenterCard({ record, regions }: { record: EarthquakeEvent; 
   );
 }
 
-function InstitutionReportDetail({ record, onFocus }: { record: EarthquakeEvent; onFocus: () => void }) {
+function InstitutionReportDetail({ record, onFocus, onMechanism, onShakeMap, onPager, onDyfi, onJshis }: {
+  record: EarthquakeEvent;
+  onFocus: () => void;
+  onMechanism: (record: EarthquakeEvent) => void;
+  onShakeMap: (record: EarthquakeEvent) => void;
+  onPager: (record: EarthquakeEvent) => void;
+  onDyfi: (record: EarthquakeEvent) => void;
+  onJshis: (record: EarthquakeEvent) => void;
+}) {
   const report = record.shakeAlertReport;
   return (
     <aside className="seismic-institution-detail">
@@ -489,9 +640,32 @@ function InstitutionReportDetail({ record, onFocus }: { record: EarthquakeEvent;
         {report.cities.length > 0 && <div className="seismic-shakealert-cities">{report.cities.slice(0, 4).map((city) => <span key={city.name}><strong>{city.name}</strong><em>{city.mmi === null ? "--" : `MMI ${city.mmi.toFixed(0)}`} · {city.warningSeconds === null ? "--" : `${city.warningSeconds.toFixed(1)} s`}</em></span>)}</div>}
       </section>}
       {record.note && <p className="earthquake-event-note">{record.note}</p>}
-      <div className="seismic-institution-actions"><button onClick={onFocus}><LocateFixed size={14} />定位报告</button><a href={record.url} target="_blank" rel="noreferrer">机构原文<ExternalLink size={13} /></a>{report?.summaryJsonUrl && <a href={report.summaryJsonUrl} target="_blank" rel="noreferrer">报告 JSON<ExternalLink size={13} /></a>}{report?.summaryPdfUrl && <a href={report.summaryPdfUrl} target="_blank" rel="noreferrer">报告 PDF<ExternalLink size={13} /></a>}</div>
+      <div className="seismic-institution-actions"><button onClick={onFocus}><LocateFixed size={14} />定位报告</button>{isMechanismQueryable(record) && <button onClick={() => onMechanism(record)}><CircleGauge size={14} />{record.source === "usgs" ? "USGS 机制解" : "机制解"}</button>}{isJshisPositionSupported(record.latitude, record.longitude) && <button onClick={() => onJshis(record)}><Layers3 size={14} />J-SHIS</button>}{isShakeMapQueryable(record) && <button onClick={() => onShakeMap(record)}><MapIcon size={14} />叠加 ShakeMap</button>}{isPagerQueryable(record) && <button onClick={() => onPager(record)}><BarChart3 size={14} />PAGER 影响</button>}{isDyfiQueryable(record) && <button onClick={() => onDyfi(record)}><MessageCircle size={14} />DYFI</button>}<a href={record.url} target="_blank" rel="noreferrer">机构原文<ExternalLink size={13} /></a>{report?.summaryJsonUrl && <a href={report.summaryJsonUrl} target="_blank" rel="noreferrer">报告 JSON<ExternalLink size={13} /></a>}{report?.summaryPdfUrl && <a href={report.summaryPdfUrl} target="_blank" rel="noreferrer">报告 PDF<ExternalLink size={13} /></a>}</div>
     </aside>
   );
+}
+
+function PagerExposurePanel({ pager, loading, error }: {
+  pager: EarthquakePager | null;
+  loading: boolean;
+  error: string;
+}) {
+  if (loading) return <div className="seismic-empty"><Loader2 className="spin" size={28} /><strong>正在读取 Population Exposure</strong><span>数据来自所选 USGS 事件的 PAGER 官方产品。</span></div>;
+  if (error) return <div className="seismic-empty"><AlertTriangle size={28} /><strong>PAGER 暂不可用</strong><span>{error}</span></div>;
+  if (!pager) return <div className="seismic-empty"><BarChart3 size={28} /><strong>请选择带 PAGER 产品的 USGS 报告</strong><span>只有目录确认存在 losspager 产品时才会显示数据与入口。</span></div>;
+  const maximum = Math.max(1, ...pager.populationExposure.groups.map((group) => group.population));
+  return <>
+    <header className="seismic-section-heading"><div><strong>Population Exposure</strong><span>USGS PAGER · 按 MMI 分级人口</span></div><b className={`pager-level-${pager.alertLevel}`}>{pager.alertLevel.toUpperCase()}</b></header>
+    <div className="seismic-pager-exposure-summary"><div><span>总暴露人口</span><strong>{pager.populationExposure.totalPopulation.toLocaleString("zh-CN")}</strong></div><div><span>全部城市</span><strong>{pager.allCities.length}</strong></div><div><span>最大 MMI</span><strong>{pager.maxMmi?.toFixed(1) ?? "--"}</strong></div></div>
+    <div className="seismic-pager-exposure-list">
+      {pager.populationExposure.groups.map((group) => <article key={group.label}>
+        <span>MMI <strong>{group.label}</strong></span>
+        <div><i style={{ width: `${Math.max(group.population > 0 ? 2 : 0, group.population / maximum * 100)}%`, background: mmiIntensityColor(group.maximumMmi) }} /></div>
+        <b>{group.population.toLocaleString("zh-CN")} 人</b>
+      </article>)}
+    </div>
+    <p className="seismic-data-label">人数来自 USGS PAGER population_exposure；II 与 III 依照官方展示逻辑合并，其他等级逐级显示。该估算不是人口普查实时值。</p>
+  </>;
 }
 
 function blankDetection(network: ShakeDetectionStatus["network"]): ShakeDetectionStatus {
@@ -511,6 +685,8 @@ function blankDetection(network: ShakeDetectionStatus["network"]): ShakeDetectio
 function SourceIndicator({ label, state, latency }: { label: string; state: SourceState; latency: number | null }) {
   const status = state === "error"
     ? "异常 · 重试中"
+    : state === "unconfigured"
+      ? "待授权配置"
     : state === "stale"
       ? latency === null ? "缓存 · 重连中" : `缓存 · ${latency} ms`
       : latency === null
@@ -518,7 +694,7 @@ function SourceIndicator({ label, state, latency }: { label: string; state: Sour
         : `${latency} ms`;
   return (
     <div className="seismic-source-indicator">
-      <span className={`latency-dot ${state === "online" ? "green" : state === "connecting" ? "checking" : state === "stale" ? "yellow" : "red"}`} />
+      <span className={`latency-dot ${state === "online" ? "green" : state === "connecting" ? "checking" : state === "stale" ? "yellow" : state === "unconfigured" ? "muted" : "red"}`} />
       <strong>{label}</strong>
       <small>{status}</small>
     </div>
@@ -540,6 +716,21 @@ function SeismicMapFocus({ target }: { target: MapFocusTarget | null }) {
   useEffect(() => {
     if (!target || previous.current === target.key) return;
     previous.current = target.key;
+    if (target.radiusKm && target.radiusKm > 0) {
+      const latitudeDelta = target.radiusKm / 111.32;
+      const longitudeScale = Math.max(0.12, Math.cos(target.latitude * Math.PI / 180));
+      const longitudeDelta = target.radiusKm / (111.32 * longitudeScale);
+      map.fitBounds([
+        [Math.max(-89.9, target.latitude - latitudeDelta), Math.max(-180, target.longitude - longitudeDelta)],
+        [Math.min(89.9, target.latitude + latitudeDelta), Math.min(180, target.longitude + longitudeDelta)],
+      ], {
+        animate: true,
+        duration: 0.8,
+        padding: [54, 54],
+        maxZoom: 13,
+      });
+      return;
+    }
     map.setView(
       [target.latitude, target.longitude],
       target.exact ? target.zoom : Math.max(map.getZoom(), target.zoom),
@@ -586,6 +777,301 @@ function SeismicMapThemeClass({ theme }: { theme: SeismicMapTheme }) {
   return null;
 }
 
+function jshisPointPositions(collection: JshisFaultShape["features"]) {
+  const positions: number[] = [];
+  for (const feature of collection.features) {
+    const geometry = feature.geometry;
+    const source = geometry.type === "Point"
+      ? [geometry.coordinates]
+      : geometry.type === "MultiPoint"
+        ? geometry.coordinates
+        : [];
+    for (const coordinate of source) {
+      const longitude = Number(coordinate[0]);
+      const latitude = Number(coordinate[1]);
+      if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) continue;
+      const clampedLatitude = Math.max(-85.05112878, Math.min(85.05112878, latitude));
+      const sine = Math.sin(clampedLatitude * Math.PI / 180);
+      positions.push(
+        (longitude + 180) / 360,
+        0.5 - Math.log((1 + sine) / (1 - sine)) / (4 * Math.PI),
+      );
+    }
+  }
+  return new Float32Array(positions);
+}
+
+function jshisFaultMapExtent(collection: JshisFaultShape["features"]) {
+  let minLatitude = Number.POSITIVE_INFINITY;
+  let maxLatitude = Number.NEGATIVE_INFINITY;
+  let minLongitude = Number.POSITIVE_INFINITY;
+  let maxLongitude = Number.NEGATIVE_INFINITY;
+  const visitCoordinates = (value: unknown) => {
+    if (!Array.isArray(value)) return;
+    if (
+      value.length >= 2
+      && Number.isFinite(Number(value[0]))
+      && Number.isFinite(Number(value[1]))
+    ) {
+      const longitude = Number(value[0]);
+      const latitude = Number(value[1]);
+      minLatitude = Math.min(minLatitude, latitude);
+      maxLatitude = Math.max(maxLatitude, latitude);
+      minLongitude = Math.min(minLongitude, longitude);
+      maxLongitude = Math.max(maxLongitude, longitude);
+      return;
+    }
+    for (const child of value) visitCoordinates(child);
+  };
+  for (const feature of collection.features) {
+    if ("coordinates" in feature.geometry) visitCoordinates(feature.geometry.coordinates);
+  }
+  if (![minLatitude, maxLatitude, minLongitude, maxLongitude].every(Number.isFinite)) return null;
+  const latitude = (minLatitude + maxLatitude) / 2;
+  const longitude = (minLongitude + maxLongitude) / 2;
+  return {
+    latitude,
+    longitude,
+    radiusKm: Math.max(
+      12,
+      haversineKm({ latitude, longitude }, { latitude: minLatitude, longitude: minLongitude }),
+      haversineKm({ latitude, longitude }, { latitude: maxLatitude, longitude: maxLongitude }),
+    ),
+  };
+}
+
+function compileJshisShader(gl: WebGLRenderingContext, type: number, source: string) {
+  const shader = gl.createShader(type);
+  if (!shader) return null;
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (gl.getShaderParameter(shader, gl.COMPILE_STATUS)) return shader;
+  gl.deleteShader(shader);
+  return null;
+}
+
+const JshisFaultPointCloud = memo(function JshisFaultPointCloud(props: {
+  fault: JshisFaultShape;
+}) {
+  const map = useMap();
+  const normalizedPositions = useMemo(() => jshisPointPositions(props.fault.features), [props.fault.features]);
+
+  useEffect(() => {
+    if (!normalizedPositions.length) return undefined;
+    const container = map.getContainer();
+    const canvas = document.createElement("canvas");
+    canvas.className = "seismic-jshis-webgl-layer";
+    canvas.setAttribute("aria-hidden", "true");
+    container.appendChild(canvas);
+
+    const gl = canvas.getContext("webgl", {
+      alpha: true,
+      antialias: true,
+      depth: false,
+      preserveDrawingBuffer: false,
+    });
+    const context2d = gl ? null : canvas.getContext("2d");
+    let frame = 0;
+    let disposed = false;
+    let program: WebGLProgram | null = null;
+    let buffer: WebGLBuffer | null = null;
+
+    if (gl) {
+      const vertex = compileJshisShader(gl, gl.VERTEX_SHADER, `
+        attribute vec2 a_position;
+        uniform float u_world_scale;
+        uniform vec2 u_pixel_origin;
+        uniform vec2 u_viewport;
+        uniform float u_point_size;
+        void main() {
+          vec2 pixel = a_position * u_world_scale - u_pixel_origin;
+          vec2 clip = vec2(pixel.x / u_viewport.x * 2.0 - 1.0, 1.0 - pixel.y / u_viewport.y * 2.0);
+          gl_Position = vec4(clip, 0.0, 1.0);
+          gl_PointSize = u_point_size;
+        }
+      `);
+      const fragment = compileJshisShader(gl, gl.FRAGMENT_SHADER, `
+        precision mediump float;
+        void main() {
+          vec2 delta = gl_PointCoord - vec2(0.5);
+          float radius = length(delta);
+          if (radius > 0.5) discard;
+          float edge = 1.0 - smoothstep(0.34, 0.5, radius);
+          gl_FragColor = vec4(0.94, 0.16, 0.19, 0.82 * edge);
+        }
+      `);
+      if (vertex && fragment) {
+        program = gl.createProgram();
+        if (program) {
+          gl.attachShader(program, vertex);
+          gl.attachShader(program, fragment);
+          gl.linkProgram(program);
+          if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            gl.deleteProgram(program);
+            program = null;
+          }
+        }
+        gl.deleteShader(vertex);
+        gl.deleteShader(fragment);
+      }
+      buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, normalizedPositions, gl.STATIC_DRAW);
+    }
+
+    const draw = () => {
+      frame = 0;
+      if (disposed) return;
+      const size = map.getSize();
+      const pixelRatio = Math.min(2, window.devicePixelRatio || 1);
+      const width = Math.max(1, Math.round(size.x * pixelRatio));
+      const height = Math.max(1, Math.round(size.y * pixelRatio));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+        canvas.style.width = `${size.x}px`;
+        canvas.style.height = `${size.y}px`;
+      }
+      const origin = map.getPixelOrigin();
+      const worldScale = 256 * 2 ** map.getZoom();
+      if (gl && program && buffer) {
+        gl.viewport(0, 0, width, height);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.useProgram(program);
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        const position = gl.getAttribLocation(program, "a_position");
+        gl.enableVertexAttribArray(position);
+        gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+        gl.uniform1f(gl.getUniformLocation(program, "u_world_scale"), worldScale * pixelRatio);
+        gl.uniform2f(gl.getUniformLocation(program, "u_pixel_origin"), origin.x * pixelRatio, origin.y * pixelRatio);
+        gl.uniform2f(gl.getUniformLocation(program, "u_viewport"), width, height);
+        gl.uniform1f(gl.getUniformLocation(program, "u_point_size"), 4.5 * pixelRatio);
+        gl.drawArrays(gl.POINTS, 0, normalizedPositions.length / 2);
+        return;
+      }
+      if (context2d) {
+        context2d.clearRect(0, 0, width, height);
+        context2d.fillStyle = "rgba(239, 68, 68, 0.78)";
+        for (let index = 0; index < normalizedPositions.length; index += 2) {
+          const x = (normalizedPositions[index] * worldScale - origin.x) * pixelRatio;
+          const y = (normalizedPositions[index + 1] * worldScale - origin.y) * pixelRatio;
+          context2d.fillRect(x - pixelRatio, y - pixelRatio, 2 * pixelRatio, 2 * pixelRatio);
+        }
+      }
+    };
+    const scheduleDraw = () => {
+      if (!frame) frame = window.requestAnimationFrame(draw);
+    };
+    map.on("move zoom resize viewreset", scheduleDraw);
+    scheduleDraw();
+    return () => {
+      disposed = true;
+      if (frame) window.cancelAnimationFrame(frame);
+      map.off("move zoom resize viewreset", scheduleDraw);
+      if (gl) {
+        if (buffer) gl.deleteBuffer(buffer);
+        if (program) gl.deleteProgram(program);
+      }
+      canvas.remove();
+    };
+  }, [map, normalizedPositions]);
+
+  const nonPointFeatures = useMemo(() => ({
+    type: "FeatureCollection" as const,
+    features: props.fault.features.features.filter((feature) => !["Point", "MultiPoint"].includes(feature.geometry.type)),
+  }), [props.fault.features]);
+  return nonPointFeatures.features.length
+    ? <LeafletGeoJSON data={nonPointFeatures} interactive={false} style={{ color: "#ef4444", fillColor: "#dc2626", weight: 2.4, opacity: 0.98, fillOpacity: 0.24 }} />
+    : null;
+});
+
+const JshisMapLayers = memo(function JshisMapLayers(props: {
+  location: JshisLocationSnapshot | null;
+  fault: JshisFaultShape | null;
+  showHazard: boolean;
+  showSite: boolean;
+  showFault: boolean;
+}) {
+  const showGridLocator = Boolean(
+    props.location
+    && ((props.showHazard && props.location.hazard) || (props.showSite && props.location.site)),
+  );
+  const meshcode = props.location?.hazard?.meshcode ?? props.location?.site?.meshcode ?? "";
+  return <>
+    <Pane name="seismic-jshis-products" style={{ zIndex: 335, pointerEvents: "none" }}>
+      {props.showHazard && props.location?.hazard && <LeafletGeoJSON
+        key={`jshis-hazard:${props.location.hazard.meshcode}`}
+        data={props.location.hazard.feature}
+        interactive={false}
+        style={{ color: "#facc15", fillColor: "#f97316", weight: 3.4, opacity: 1, fillOpacity: 0.34, dashArray: "5 3" }}
+      />}
+      {props.showSite && props.location?.site && <LeafletGeoJSON
+        key={`jshis-site:${props.location.site.meshcode}`}
+        data={props.location.site.feature}
+        interactive={false}
+        style={{ color: "#22d3ee", fillColor: "#0891b2", weight: 2.6, opacity: 1, fillOpacity: 0.26 }}
+      />}
+      {props.showFault && props.fault && <JshisFaultPointCloud key={`jshis-fault:${props.fault.code}`} fault={props.fault} />}
+    </Pane>
+    {showGridLocator && props.location && <Pane name="seismic-jshis-locator" style={{ zIndex: 505, pointerEvents: "none" }}>
+      <CircleMarker
+        center={[props.location.latitude, props.location.longitude]}
+        radius={7}
+        interactive={false}
+        pathOptions={{ color: "#fef08a", fillColor: "#06b6d4", weight: 2.4, opacity: 1, fillOpacity: 0.9 }}
+      >
+        <LeafletTooltip permanent direction="top" offset={[0, -8]} className="seismic-jshis-grid-label">
+          J-SHIS {meshcode}
+        </LeafletTooltip>
+      </CircleMarker>
+    </Pane>}
+  </>;
+});
+
+const ShakeMapContourLayer = memo(function ShakeMapContourLayer(props: {
+  visible: boolean;
+  shakeMap: EarthquakeShakeMap | null;
+  contours: EarthquakeShakeMap["contours"] | null;
+}) {
+  return <Pane name="seismic-usgs-shakemap" style={{ zIndex: 340, pointerEvents: "none" }}>
+    {props.visible && props.shakeMap && props.contours && <LeafletGeoJSON
+      key={`${props.shakeMap.eventId}:${props.shakeMap.updateTime ?? "unknown"}:${props.contours.features.map((feature) => shakeMapContourLevel(feature.properties.value)).join(",")}`}
+      data={props.contours}
+      interactive={false}
+      style={(feature) => ({
+        color: String(feature?.properties?.color ?? "#38bdf8"),
+        weight: Math.max(2, Number(feature?.properties?.weight ?? 2)),
+        opacity: 0.96,
+        lineCap: "round",
+        lineJoin: "round",
+      })}
+    />}
+  </Pane>;
+});
+
+const PagerCityMapLayer = memo(function PagerCityMapLayer(props: {
+  visible: boolean;
+  cities: EarthquakePagerCity[];
+}) {
+  return <Pane name="seismic-usgs-pager-cities" style={{ zIndex: 465 }}>
+    {props.visible && props.cities.map((city) => {
+      const rank = Math.max(1, Math.min(10, city.mmi));
+      return <CircleMarker
+        key={`pager-city:${city.id}`}
+        center={[city.latitude, city.longitude]}
+        radius={2.2}
+        pathOptions={{ color: "#ffffff", fillColor: mmiIntensityColor(rank), weight: 0.8, opacity: 0.82, fillOpacity: 0.72 }}
+      >
+        <LeafletTooltip permanent direction="center" className={`pager-map-city-label mmi-${Math.round(rank)}`}>{intensityRomanLabel(rank)}</LeafletTooltip>
+        <Popup><strong>{city.name}</strong><br />USGS PAGER 城市估算<br />MMI {city.mmi.toFixed(1)} · {intensityRomanLabel(rank)}<br />人口 {city.population.toLocaleString("zh-CN")}<br />{city.onOfficialMap ? "USGS 默认地图城市" : "Show all cities 扩展城市"}</Popup>
+      </CircleMarker>;
+    })}
+  </Pane>;
+});
+
 const GlobalStationBaseMarkers = memo(function GlobalStationBaseMarkers(props: {
   stations: GlobalSeismicStation[];
   onSelectStation: (station: SelectableStation) => void;
@@ -596,12 +1082,86 @@ const GlobalStationBaseMarkers = memo(function GlobalStationBaseMarkers(props: {
       return <CircleMarker
         key={station.id}
         center={[station.latitude, station.longitude]}
-        radius={2.15}
-        pathOptions={{ color, fillColor: color, weight: 0.45, opacity: 0.92, fillOpacity: 0.72 }}
+        radius={2.35}
+        pathOptions={{
+          color,
+          fillColor: color,
+          weight: 0.5,
+          opacity: 0.82,
+          fillOpacity: 0.58,
+        }}
         eventHandlers={{ click: () => props.onSelectStation(station) }}
-      />;
+      >
+        <LeafletTooltip direction="top" offset={[0, -4]}><strong>{station.network} {station.stationCode}</strong><br />全球 FDSN 台站目录 · {station.stationName}</LeafletTooltip>
+      </CircleMarker>;
     })}
   </>;
+});
+
+const WaveformStationBaseMarkers = memo(function WaveformStationBaseMarkers(props: {
+  stations: GlobalSeismicStation[];
+  verifiedStationIds: string[];
+  onSelectStation: (station: SelectableStation) => void;
+}) {
+  const verifiedStationIds = useMemo(() => new Set(props.verifiedStationIds), [props.verifiedStationIds]);
+  return <>{props.stations.map((station) => {
+    const verified = verifiedStationIds.has(station.id);
+    return <CircleMarker
+      key={`waveform:${station.id}`}
+      center={[station.latitude, station.longitude]}
+      radius={verified ? 4.6 : 3.45}
+      pathOptions={{
+        color: verified ? "#ffffff" : "#fbcfe8",
+        fillColor: verified ? "#db2777" : "#f472b6",
+        weight: verified ? 1.6 : 0.85,
+        opacity: verified ? 1 : 0.88,
+        fillOpacity: verified ? 0.96 : 0.78,
+      }}
+      eventHandlers={{ click: () => props.onSelectStation(station) }}
+    >
+      <LeafletTooltip direction="top" offset={[0, -4]}><strong>{station.network} {station.stationCode}</strong><br />{verified ? "已核验存在原始波形" : "目录声明近实时波形通道"} · 点击读取 miniSEED</LeafletTooltip>
+    </CircleMarker>;
+  })}</>;
+});
+
+const WaveformStationResponseMarkers = memo(function WaveformStationResponseMarkers(props: {
+  stations: GlobalSeismicStation[];
+  ranks: Record<string, number>;
+  labeledStationIds: Set<string>;
+  selectedStationId: string | null;
+  onSelectStation: (station: SelectableStation) => void;
+}) {
+  const [pulseAt, setPulseAt] = useState(Date.now());
+  useEffect(() => {
+    if (!props.stations.length) return;
+    const timer = window.setInterval(() => setPulseAt(Date.now()), 220);
+    return () => window.clearInterval(timer);
+  }, [props.stations.length]);
+  return <>{props.stations.map((station) => {
+    const selected = props.selectedStationId === station.id;
+    const rank = props.ranks[station.id] ?? 0;
+    const active = rank >= 0.25;
+    const strength = Math.max(0, Math.min(1, rank / 8));
+    const periodMs = 1_550 - strength * 1_250;
+    const pulse = 0.5 + Math.sin(pulseAt / periodMs * Math.PI * 2) * 0.5;
+    const radius = selected ? 7 : 4.1 + pulse * (0.45 + strength * 2.4);
+    return <CircleMarker
+      key={`response:${station.id}`}
+      center={[station.latitude, station.longitude]}
+      radius={radius}
+      pathOptions={{
+        color: selected ? "#ffffff" : "#fbcfe8",
+        fillColor: strength >= 0.65 ? "#db2777" : strength >= 0.3 ? "#ec4899" : "#f472b6",
+        weight: selected ? 2.2 : 1.1 + strength,
+        opacity: 0.76 + pulse * (0.12 + strength * 0.12),
+        fillOpacity: 0.55 + pulse * (0.18 + strength * 0.24),
+      }}
+      eventHandlers={{ click: () => props.onSelectStation(station) }}
+    >
+      {selected && <Popup><strong>{station.network} {station.stationCode}</strong><br />{station.stationName}<br />FDSN：{station.providers.join(" / ")}<br />本地传播模拟 MMI {rank.toFixed(1)} · {intensityRomanLabel(rank)}<br />粉色脉冲强度随模拟响应变化；点击后核验并读取原始 miniSEED<br />海拔 {station.elevationM?.toFixed(0) ?? "--"} m</Popup>}
+      {active && props.labeledStationIds.has(station.id) && <LeafletTooltip permanent direction="center" className="kma-station-intensity-label global">{intensityRomanLabel(rank)}</LeafletTooltip>}
+    </CircleMarker>;
+  })}</>;
 });
 
 const NiedStationBaseMarkers = memo(function NiedStationBaseMarkers(props: {
@@ -673,9 +1233,29 @@ const GnssStationMarkers = memo(function GnssStationMarkers(props: { stations: r
   </CircleMarker>)}</>;
 });
 
+const PalertStationMarkers = memo(function PalertStationMarkers(props: { stations: PalertStation[] }) {
+  return <>{props.stations.map((station) => <CircleMarker
+    key={station.id}
+    center={[station.latitude, station.longitude]}
+    radius={2.3}
+    pathOptions={{ color: "#f0abfc", fillColor: "#d946ef", weight: 0.65, opacity: 0.96, fillOpacity: 0.82 }}
+  >
+    <Popup>
+      <strong>{station.stationName}（{station.stationCode}）</strong><br />
+      P-Alert 强震网 · {station.network}<br />
+      {station.area || "台湾"}{station.floor === null ? "" : ` · ${station.floor} 楼`}<br />
+      {station.latitude.toFixed(5)}, {station.longitude.toFixed(5)}<br />
+      海拔 {station.elevationM?.toFixed(0) ?? "--"} m
+    </Popup>
+  </CircleMarker>)}</>;
+});
+
 const GlobalStationBaseLayer = memo(function GlobalStationBaseLayer(props: { stations: GlobalSeismicStation[]; show: boolean; onSelectStation: (station: SelectableStation) => void }) {
-  const stations = useMemo(() => sampleGlobalStationsForMap(props.stations, 120), [props.stations]);
-  return <Pane name="seismic-station-base-global" style={{ zIndex: 460 }}>{props.show && <GlobalStationBaseMarkers stations={stations} onSelectStation={props.onSelectStation} />}</Pane>;
+  return <Pane name="seismic-station-base-global" style={{ zIndex: 458 }}>{props.show && <GlobalStationBaseMarkers stations={props.stations} onSelectStation={props.onSelectStation} />}</Pane>;
+});
+
+const WaveformStationBaseLayer = memo(function WaveformStationBaseLayer(props: { stations: GlobalSeismicStation[]; verifiedStationIds: string[]; show: boolean; onSelectStation: (station: SelectableStation) => void }) {
+  return <Pane name="seismic-station-base-waveform" className="seismic-waveform-station-pane" style={{ zIndex: 466 }}>{props.show && <WaveformStationBaseMarkers stations={props.stations} verifiedStationIds={props.verifiedStationIds} onSelectStation={props.onSelectStation} />}</Pane>;
 });
 
 const CwaStationBaseLayer = memo(function CwaStationBaseLayer(props: { stations: GlobalSeismicStation[]; show: boolean; onSelectStation: (station: SelectableStation) => void }) {
@@ -685,6 +1265,40 @@ const CwaStationBaseLayer = memo(function CwaStationBaseLayer(props: { stations:
 
 const GnssStationLayer = memo(function GnssStationLayer(props: { stations: readonly GnssStation[]; show: boolean }) {
   return <Pane name="seismic-station-base-gnss" style={{ zIndex: 455 }}>{props.show ? <GnssStationMarkers stations={props.stations} /> : null}</Pane>;
+});
+
+const GnssResponseMarkers = memo(function GnssResponseMarkers(props: {
+  stations: readonly GnssStation[];
+  ranks: Record<string, number>;
+  mode: "live" | "replay";
+}) {
+  const displayed = useMemo(() => sampleStationMarkers(
+    props.stations.filter((station) => (props.ranks[station.id] ?? 0) >= 0.25),
+    280,
+  ), [props.ranks, props.stations]);
+  const labeledIds = useMemo(() => new Set(
+    [...displayed]
+      .sort((a, b) => (props.ranks[b.id] ?? 0) - (props.ranks[a.id] ?? 0))
+      .slice(0, 36)
+      .map((station) => station.id),
+  ), [displayed, props.ranks]);
+  return <>{displayed.map((station) => {
+    const rank = props.ranks[station.id] ?? 0;
+    const color = mmiIntensityColor(rank);
+    return <CircleMarker
+      key={`gnss-response:${station.id}`}
+      center={[station.latitude, station.longitude]}
+      radius={Math.max(3.4, Math.min(6.8, 3.2 + rank * 0.34))}
+      pathOptions={{ color: "#ffffff", fillColor: color, weight: 1.2, opacity: 0.9, fillOpacity: 0.9 }}
+    >
+      <Popup><strong>{station.stationName}（{station.stationCode}）</strong><br />中国大陆 GNSS 站点<br />{props.mode === "replay" ? "历史事件回放" : "当前事件传播"}模拟 MMI {rank.toFixed(1)} · {intensityRomanLabel(rank)}<br /><small>确定性地震波传播模拟，不是 GNSS 实测烈度或位移</small></Popup>
+      {labeledIds.has(station.id) && <LeafletTooltip permanent direction="center" className="kma-station-intensity-label global">{intensityRomanLabel(rank)}</LeafletTooltip>}
+    </CircleMarker>;
+  })}</>;
+});
+
+const PalertStationLayer = memo(function PalertStationLayer(props: { stations: PalertStation[]; show: boolean }) {
+  return <Pane name="seismic-station-base-palert" style={{ zIndex: 458 }}>{props.show ? <PalertStationMarkers stations={props.stations} /> : null}</Pane>;
 });
 
 const NiedStationBaseLayer = memo(function NiedStationBaseLayer(props: { stations: SeismicStation[]; show: boolean; onSelectStation: (station: SelectableStation) => void }) {
@@ -721,9 +1335,11 @@ const SeismicMap = memo(function SeismicMap(props: {
   kmaStations: KmaStation[];
   oceanStations: OceanStation[];
   globalStations: GlobalSeismicStation[];
-  globalResponseStations: GlobalSeismicStation[];
+  waveformStations: GlobalSeismicStation[];
   cwaStations: GlobalSeismicStation[];
   gnssStations: readonly GnssStation[];
+  verifiedWaveformStationIds: string[];
+  palertStations: PalertStation[];
   cencReport: CencIntensityReport | null;
   niedFrame: NiedRealtimeFrame | null;
   kmaValues: number[];
@@ -734,8 +1350,10 @@ const SeismicMap = memo(function SeismicMap(props: {
   showOtherOcean: boolean;
   showCenc: boolean;
   showGlobal: boolean;
+  showWaveform: boolean;
   showCwa: boolean;
   showGnss: boolean;
+  showPalert: boolean;
   selectedStation: SelectableStation | null;
   selectedEvent: LiveEew | null;
   selectedReport: EarthquakeEvent | null;
@@ -744,14 +1362,28 @@ const SeismicMap = memo(function SeismicMap(props: {
   replayRanks: Record<string, number> | null;
   oceanRanks: Record<string, number>;
   globalRanks: Record<string, number>;
+  gnssRanks: Record<string, number>;
+  gnssMode: "live" | "replay";
   cwaRanks: Record<string, number>;
   oceanMode: OceanResponseMode;
   localRegions: JmaRegionCollection;
   officialRegions: JmaRegionCollection;
   tsunamiRegions: TsunamiRegionCollection;
+  globalFaults: GlobalFaultCollection | null;
+  jshisLocation: JshisLocationSnapshot | null;
+  jshisFault: JshisFaultShape | null;
+  shakeMap: EarthquakeShakeMap | null;
+  shakeMapContours: EarthquakeShakeMap["contours"] | null;
+  pagerCities: EarthquakePagerCity[];
   showLocalImpact: boolean;
   showOfficialImpact: boolean;
   showTsunami: boolean;
+  showGlobalFaults: boolean;
+  showJshisHazard: boolean;
+  showJshisSite: boolean;
+  showJshisFault: boolean;
+  showShakeMap: boolean;
+  showPagerCities: boolean;
   detectionStationIds: string[];
   detectionRanks: Record<string, number>;
   detectionMode: "live" | "replay";
@@ -806,28 +1438,38 @@ const SeismicMap = memo(function SeismicMap(props: {
   );
   const labeledOceanStationIds = new Set(
     props.oceanStations
-      .filter((station) => (props.oceanRanks[station.id] ?? 0) >= 1)
+      .filter((station) => props.oceanMode === "measured"
+        ? Object.prototype.hasOwnProperty.call(props.oceanRanks, station.id)
+        : (props.oceanRanks[station.id] ?? 0) >= 1)
       .sort((a, b) => (props.oceanRanks[b.id] ?? 0) - (props.oceanRanks[a.id] ?? 0))
-      .slice(0, 36)
+      .slice(0, props.oceanMode === "measured" ? 12 : 36)
       .map((station) => station.id),
   );
   const labeledKmaStationIds = new Set(
-    props.kmaReplayRanks === null
-      ? []
-      : props.kmaStations
-        .filter((station) => (props.kmaReplayRanks?.[station.id] ?? 0) >= 1)
-        .sort((a, b) => (props.kmaReplayRanks?.[b.id] ?? 0) - (props.kmaReplayRanks?.[a.id] ?? 0))
-        .slice(0, 36)
-        .map((station) => station.id),
+    props.kmaStations
+      .filter((station) => {
+        const rank = props.kmaReplayRanks === null
+          ? Number(props.kmaValues[station.index] ?? 0)
+          : Number(props.kmaReplayRanks[station.id] ?? 0);
+        return rank >= 1;
+      })
+      .sort((a, b) => {
+        const rank = (station: KmaStation) => props.kmaReplayRanks === null
+          ? Number(props.kmaValues[station.index] ?? 0)
+          : Number(props.kmaReplayRanks[station.id] ?? 0);
+        return rank(b) - rank(a);
+      })
+      .slice(0, 36)
+      .map((station) => station.id),
   );
   const labeledGlobalStationIds = new Set(
-    props.globalResponseStations
+    props.waveformStations
       .filter((station) => (props.globalRanks[station.id] ?? 0) >= 1)
       .sort((a, b) => (props.globalRanks[b.id] ?? 0) - (props.globalRanks[a.id] ?? 0))
       .slice(0, 30)
       .map((station) => station.id),
   );
-  const respondingGlobalStations = props.globalResponseStations.filter((station) => (
+  const respondingGlobalStations = props.waveformStations.filter((station) => (
     (props.globalRanks[station.id] ?? 0) >= 0.25
     || props.selectedStation?.id === station.id
   ));
@@ -863,7 +1505,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   const displayedOceanResponses = sampleStationMarkers(props.oceanStations.filter((station) => {
     const rank = props.oceanRanks[station.id] ?? 0;
     const measured = props.oceanMode === "measured" && Object.prototype.hasOwnProperty.call(props.oceanRanks, station.id);
-    return rank >= (measured ? 0.5 : 0.25) || props.selectedStation?.id === station.id;
+    return measured || rank >= 0.25 || props.selectedStation?.id === station.id;
   }), 96);
   if (props.selectedStation && isOceanStation(props.selectedStation)
     && !displayedOceanResponses.some((station) => station.id === props.selectedStation?.id)) {
@@ -880,8 +1522,33 @@ const SeismicMap = memo(function SeismicMap(props: {
         {props.showLocalImpact && props.localRegions.features.length > 0 && <LeafletGeoJSON key={`local:${props.selectedEvent?.id}:${props.selectedEvent?.serial}:${localRegionKey}`} data={props.localRegions} interactive={false} style={(feature) => { const rank = Number(feature?.properties?.rank ?? 0); const currentRank = Number(feature?.properties?.currentRank ?? 0); const arrived = Boolean(feature?.properties?.arrived); const scale = feature?.properties?.scale === "intensity" ? "intensity" : "shindo"; const displayRank = arrived ? Math.max(1, currentRank) : rank; const color = scale === "intensity" ? mmiIntensityColor(displayRank) : jmaShindoColor(displayRank); const contour = Boolean(feature?.properties?.contour); return { color, fillColor: color, weight: arrived ? contour ? 1.8 : 1.45 : 0.8, opacity: arrived ? 0.96 : 0.66, fillOpacity: arrived ? contour ? 0.28 : 0.44 : contour ? 0.08 : 0.16, dashArray: arrived ? undefined : "4 3" }; }} />}
       </Pane>
       <Pane name="seismic-impact-official" style={{ zIndex: 320, pointerEvents: "none" }}>
-        {props.showOfficialImpact && props.officialRegions.features.length > 0 && <LeafletGeoJSON key={`official:${props.selectedEvent?.id}:${props.selectedEvent?.serial}`} data={props.officialRegions} interactive={false} style={(feature) => { const rank = Number(feature?.properties?.rank ?? 0); return { color: "#ffffff", fillColor: jmaShindoColor(rank), weight: 1.5, opacity: 0.9, fillOpacity: 0.5 }; }} />}
+        {props.showOfficialImpact && props.officialRegions.features.length > 0 && <LeafletGeoJSON key={`official:${props.selectedEvent?.id}:${props.selectedEvent?.serial}`} data={props.officialRegions} interactive={false} style={(feature) => { const rank = Number(feature?.properties?.rank ?? 0); const scale = feature?.properties?.scale === "intensity" ? "intensity" : "shindo"; const color = scale === "intensity" ? mmiIntensityColor(rank) : jmaShindoColor(rank); return { color: "#ffffff", fillColor: color, weight: 1.5, opacity: 0.94, fillOpacity: 0.56 }; }} />}
       </Pane>
+      <Pane name="seismic-global-faults" style={{ zIndex: 330, pointerEvents: "none" }}>
+        {props.showGlobalFaults && props.globalFaults && <LeafletGeoJSON
+          data={props.globalFaults}
+          interactive={false}
+          style={(feature) => {
+            const level = Number(feature?.properties?.level ?? 1);
+            return {
+              color: String(feature?.properties?.color ?? "#22c55e"),
+              weight: level >= 4 ? 1.8 : level === 3 ? 1.5 : 1.1,
+              opacity: level >= 3 ? 0.9 : 0.68,
+              dashArray: level === 1 ? "3 4" : undefined,
+              lineCap: "round",
+              lineJoin: "round",
+            };
+          }}
+        />}
+      </Pane>
+      <JshisMapLayers
+        location={props.jshisLocation}
+        fault={props.jshisFault}
+        showHazard={props.showJshisHazard}
+        showSite={props.showJshisSite}
+        showFault={props.showJshisFault}
+      />
+      <ShakeMapContourLayer visible={props.showShakeMap} shakeMap={props.shakeMap} contours={props.shakeMapContours} />
       <Pane name="seismic-wave-pane" style={{ zIndex: 390, pointerEvents: "none" }}>
         {props.selectedEvent && !props.selectedEvent.cancelled && <>
           {pRadius > 0 && <Circle center={[props.selectedEvent.latitude, props.selectedEvent.longitude]} radius={pRadius * 1000} interactive={false} pathOptions={{ color: "#38bdf8", weight: 2, opacity: 0.8, fillOpacity: 0.03 }} />}
@@ -912,23 +1579,24 @@ const SeismicMap = memo(function SeismicMap(props: {
           <LeafletTooltip permanent direction="bottom" offset={[0, 9]} className="seismic-estimate-tooltip"><strong>{props.estimateMode === "replay" ? "回放反演" : "NIED 本地推算"}</strong><span>{props.estimate.latitude.toFixed(3)}, {props.estimate.longitude.toFixed(3)} · 深 {props.estimate.depthKm.toFixed(0)} km</span></LeafletTooltip>
         </CircleMarker>}
       </Pane>
+      <PagerCityMapLayer visible={props.showPagerCities} cities={props.pagerCities} />
       <CwaStationBaseLayer stations={props.cwaStations} show={props.showCwa && baseLayerStage >= 1} onSelectStation={props.onSelectStation} />
       <GnssStationLayer stations={props.gnssStations} show={props.showGnss} />
+      <PalertStationLayer stations={props.palertStations} show={props.showPalert} />
       <GlobalStationBaseLayer stations={props.globalStations} show={props.showGlobal && baseLayerStage >= 2} onSelectStation={props.onSelectStation} />
+      <WaveformStationBaseLayer stations={props.waveformStations} verifiedStationIds={props.verifiedWaveformStationIds} show={props.showWaveform && baseLayerStage >= 2} onSelectStation={props.onSelectStation} />
       <OceanStationBaseLayer stations={props.oceanStations} showSnet={props.showOcean && baseLayerStage >= 3} showOther={props.showOtherOcean && baseLayerStage >= 3} onSelectStation={props.onSelectStation} />
       <KmaStationBaseLayer stations={props.kmaStations} show={props.showKma && baseLayerStage >= 4} onSelectStation={props.onSelectStation} />
       <NiedStationBaseLayer stations={props.niedStations} show={props.showNied && baseLayerStage >= 5} onSelectStation={props.onSelectStation} />
       <Pane name="seismic-station-response-pane" style={{ zIndex: 470 }}>
-        {props.showGlobal && displayedGlobalResponses.map((station) => {
-          const selected = props.selectedStation?.id === station.id;
-          const rank = props.globalRanks[station.id] ?? 0;
-          const active = rank >= 0.25;
-          const color = active ? mmiIntensityColor(rank) : FDSN_PROVIDER_COLORS[station.providerId] ?? "#38bdf8";
-          return <CircleMarker key={`response:${station.id}`} center={[station.latitude, station.longitude]} radius={selected ? 6 : blinkOn ? 5 : 4.2} pathOptions={{ color: "#ffffff", fillColor: color, weight: selected ? 2 : 1.4, opacity: 0.92, fillOpacity: 0.96 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
-            {selected && <Popup><strong>{station.network} {station.stationCode}</strong><br />{station.stationName}<br />FDSN：{station.providers.join(" / ")}<br />本地传播估算 MMI {rank.toFixed(1)} · {intensityRomanLabel(rank)}<br />海拔 {station.elevationM?.toFixed(0) ?? "--"} m</Popup>}
-            {active && labeledGlobalStationIds.has(station.id) && <LeafletTooltip permanent direction="center" className="kma-station-intensity-label global">{intensityRomanLabel(rank)}</LeafletTooltip>}
-          </CircleMarker>;
-        })}
+        {props.showGnss && <GnssResponseMarkers stations={props.gnssStations} ranks={props.gnssRanks} mode={props.gnssMode} />}
+        {props.showWaveform && <WaveformStationResponseMarkers
+          stations={displayedGlobalResponses}
+          ranks={props.globalRanks}
+          labeledStationIds={labeledGlobalStationIds}
+          selectedStationId={props.selectedStation && isGlobalStation(props.selectedStation) && props.selectedStation.providerId !== "cwa" ? props.selectedStation.id : null}
+          onSelectStation={props.onSelectStation}
+        />}
         {props.showCwa && displayedCwaResponses.map((station) => {
           const selected = props.selectedStation?.id === station.id;
           const rank = props.cwaRanks[station.id] ?? 0;
@@ -956,12 +1624,12 @@ const SeismicMap = memo(function SeismicMap(props: {
           const rank = props.kmaReplayRanks === null
             ? Math.max(0, Number(props.kmaValues[station.index] ?? 0))
             : Math.max(0, Number(props.kmaReplayRanks[station.id] ?? 0));
-          const active = props.kmaReplayRanks !== null && rank >= 0.25;
+          const active = rank >= 0.25;
           const selected = props.selectedStation?.id === station.id;
           const color = mmiIntensityColor(rank);
           return <CircleMarker key={`response:${station.id}`} center={[station.latitude, station.longitude]} radius={selected ? 6 : active ? blinkOn ? 5.2 : 4.4 : 3.2} pathOptions={{ color: "#ffffff", fillColor: color, weight: selected ? 2 : 1.5, fillOpacity: rank >= 1 ? 0.94 : 0.82 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
             {selected && <Popup><strong>{station.stationName}</strong><br />KMA-PEWS {props.kmaReplayRanks === null ? "官方实时" : "回放模拟"}测站<br />烈度 {intensityRomanLabel(rank)} · MMI {rank.toFixed(1)}</Popup>}
-            {active && labeledKmaStationIds.has(station.id) && <LeafletTooltip permanent direction="center" className="kma-station-intensity-label">{intensityRomanLabel(rank)}</LeafletTooltip>}
+            {active && labeledKmaStationIds.has(station.id) && <LeafletTooltip permanent direction="center" className="kma-station-intensity-label" aria-label={`KMA ${station.stationCode} 烈度 ${intensityRomanLabel(rank)}`}>{intensityRomanLabel(rank)}</LeafletTooltip>}
           </CircleMarker>;
         })}
         {displayedOceanResponses.filter((station) => (
@@ -976,12 +1644,12 @@ const SeismicMap = memo(function SeismicMap(props: {
           const sampleLabel = props.oceanMode === "replay" ? "回放模拟震度" : props.oceanMode === "measured" ? "MSIL 实测色值反算震度" : props.oceanMode === "local" ? "本地预测震度" : "等待数据";
           return <CircleMarker key={`response:${station.id}`} center={[station.latitude, station.longitude]} radius={selected ? 6 : active ? blinkOn ? 5 : 4.3 : 3.2} pathOptions={{ color: "#ffffff", fillColor: color, weight: selected ? 2.2 : 1.5, fillOpacity: active ? 0.96 : 0.82 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
             {selected && <Popup><strong>{station.network} {station.stationCode}</strong><br />海底深度 {station.depthM.toFixed(0)} m<br />{sampleLabel}{measured ? ` ${rank.toFixed(2)} [${displayRankLabel(rank)}]` : active ? ` ${displayRankLabel(rank)}` : ""}<br /><a href={station.waveformUrl} target="_blank" rel="noreferrer">查看官方延迟波形</a></Popup>}
-            {active && labeledOceanStationIds.has(station.id) && <LeafletTooltip permanent direction="center" className={`nied-station-intensity-label ocean rank-${Math.min(7, Math.floor(rank))}`}>{displayRankLabel(rank)}</LeafletTooltip>}
+            {labeledOceanStationIds.has(station.id) && (measured || active) && <LeafletTooltip permanent direction="center" className={`nied-station-intensity-label ocean rank-${Math.max(0, Math.min(7, Math.floor(rank)))}`}>{measured ? `${rank.toFixed(2)} [${displayRankLabel(rank)}]` : displayRankLabel(rank)}</LeafletTooltip>}
           </CircleMarker>;
         })}
         {props.showCenc && props.cencReport && <>
-          <CircleMarker center={[props.cencReport.latitude, props.cencReport.longitude]} radius={8} pathOptions={{ color: "#fef3c7", fillColor: "#dc2626", weight: 2, fillOpacity: 0.92 }}><Popup><strong>CENC 仪器烈度报告</strong><br />{props.cencReport.place}<br />M {props.cencReport.magnitude?.toFixed(1) ?? "--"} · {props.cencReport.stations.length} 站</Popup></CircleMarker>
-          {props.cencReport.stations.map((station) => { const selected = props.selectedStation?.id === station.id; const color = cencIntensityColor(station.intensity); return <CircleMarker key={station.id} center={[station.latitude, station.longitude]} radius={selected ? 7 : Math.max(3, Math.min(6, station.intensity / 1.8))} pathOptions={{ color: selected ? "#ffffff" : color, fillColor: color, weight: selected ? 2 : 0.8, fillOpacity: 0.92 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>{selected && <Popup><strong>{station.stationName} ({station.stationCode})</strong><br />仪器烈度 {intensityRomanLabel(station.intensity)} · {station.intensity.toFixed(1)}<br />PGA {station.pgaGal?.toFixed(1) ?? "--"} gal · PGV {station.pgvCms?.toFixed(1) ?? "--"} cm/s</Popup>}</CircleMarker>; })}
+          <CircleMarker center={[props.cencReport.latitude, props.cencReport.longitude]} radius={8} pathOptions={{ color: "#fef3c7", fillColor: "#dc2626", weight: 2, fillOpacity: 0.92 }}><Popup><strong>CENC 仪器烈度报告</strong><br />{props.cencReport.place}<br />M {props.cencReport.magnitude?.toFixed(1) ?? "--"} · {props.cencReport.stationMetrics.length} 站报告 / {props.cencReport.stations.length} 站有坐标</Popup></CircleMarker>
+          {props.cencReport.stations.map((station) => { const selected = props.selectedStation?.id === station.id; const color = cencIntensityColor(station.intensity); return <CircleMarker key={station.id} center={[station.latitude, station.longitude]} radius={selected ? 7 : Math.max(3, Math.min(6, station.intensity / 1.8))} pathOptions={{ color: selected ? "#ffffff" : color, fillColor: color, weight: selected ? 2 : 0.8, fillOpacity: 0.92 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>{selected && <Popup><strong>{station.stationName} ({station.stationCode})</strong><br />仪器烈度 {intensityRomanLabel(station.intensity)} · {station.intensity.toFixed(1)}<br />PGA {station.pgaGal?.toFixed(1) ?? "--"} gal · PGV {station.pgvCms?.toFixed(1) ?? "--"} cm/s</Popup>}<LeafletTooltip permanent direction="center" className="kma-station-intensity-label cenc" aria-label={`CENC ${station.stationCode} 烈度 ${intensityRomanLabel(station.intensity)}`}>{intensityRomanLabel(station.intensity)}</LeafletTooltip></CircleMarker>; })}
         </>}
       </Pane>
       <SeismicMapFocus target={props.focusTarget} />
@@ -1003,8 +1671,24 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   const [showOtherOcean, setShowOtherOcean] = usePersistentState("seismic-show-other-ocean", false);
   const [showCenc, setShowCenc] = usePersistentState("seismic-show-cenc-intensity", true);
   const [showGlobalStations, setShowGlobalStations] = usePersistentState("seismic-show-global-fdsn", true);
+  const [showWaveformStations, setShowWaveformStations] = usePersistentState("seismic-show-waveform-fdsn", true);
+  const [autoLocateGlobalEarthquakes, setAutoLocateGlobalEarthquakes] = usePersistentState("seismic-auto-locate-global-earthquakes", true);
+  const [autoLocateMagnitude, setAutoLocateMagnitude] = usePersistentState("seismic-auto-locate-global-magnitude", 5);
+  const [movieModeEnabled, setMovieModeEnabled] = usePersistentState("seismic-movie-mode-enabled", false);
+  const [movieCameraMode, setMovieCameraMode] = usePersistentState<MovieCameraMode>("seismic-movie-camera-mode", "locked");
   const [showCwaStations, setShowCwaStations] = usePersistentState("seismic-show-cwa-cwasn", true);
   const [showGnssStations, setShowGnssStations] = usePersistentState("seismic-show-china-gnss", false);
+  const [showPalertStations, setShowPalertStations] = usePersistentState("seismic-show-palert", true);
+  const [showGlobalFaults, setShowGlobalFaults] = usePersistentState("seismic-show-global-faults", false);
+  const [showJshisHazard, setShowJshisHazard] = usePersistentState("seismic-show-jshis-hazard", true);
+  const [showJshisSite, setShowJshisSite] = usePersistentState("seismic-show-jshis-site", true);
+  const [showJshisFault, setShowJshisFault] = usePersistentState("seismic-show-jshis-fault", true);
+  const [showUsgsShakeMap, setShowUsgsShakeMap] = usePersistentState("seismic-show-usgs-shakemap", true);
+  const [shakeMapMmiLevels, setShakeMapMmiLevels] = usePersistentState<number[]>(
+    "seismic-usgs-shakemap-mmi-levels",
+    [...SHAKEMAP_MMI_LEVELS],
+  );
+  const [showPagerCities, setShowPagerCities] = usePersistentState("seismic-show-usgs-pager-cities", true);
   const [showJmaTsunami, setShowJmaTsunami] = usePersistentState("seismic-show-jma-tsunami", true);
   const [showLocalImpact, setShowLocalImpact] = usePersistentState("seismic-show-local-impact", true);
   const [showOfficialImpact, setShowOfficialImpact] = usePersistentState("seismic-show-official-impact", true);
@@ -1020,6 +1704,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   const [selectedSnetEventId, setSelectedSnetEventId] = useState<string | null>(null);
   const [selectedSnetReportId, setSelectedSnetReportId] = useState<string | null>(null);
   const [jmaRegions, setJmaRegions] = useState<JmaRegionCollection | null>(null);
+  const [eastAsiaImpactRegions, setEastAsiaImpactRegions] = useState<JmaRegionCollection | null>(null);
   const [jmaSeismicSites, setJmaSeismicSites] = useState<JmaSeismicSiteCatalogue | null>(null);
   const [tsunamiRegions, setTsunamiRegions] = useState<TsunamiRegionCollection | null>(null);
   const [jmaTsunami, setJmaTsunami] = useState<JmaTsunamiSnapshot | null>(null);
@@ -1031,21 +1716,28 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   const [kmaState, setKmaState] = useState<SourceState>("connecting");
   const [wolfxState, setWolfxState] = useState<SourceState>("connecting");
   const [fanState, setFanState] = useState<SourceState>("connecting");
+  const [earlyEstState, setEarlyEstState] = useState<SourceState>("connecting");
+  const [globalQuakeState, setGlobalQuakeState] = useState<SourceState>("connecting");
   const [fallbackLatency, setFallbackLatency] = useState<number | null>(null);
   const [niedCatalogueError, setNiedCatalogueError] = useState("");
   const [oceanCatalogueError, setOceanCatalogueError] = useState("");
   const [jmaCatalogueError, setJmaCatalogueError] = useState("");
+  const [regionalBoundaryError, setRegionalBoundaryError] = useState("");
   const [tsunamiCatalogueError, setTsunamiCatalogueError] = useState("");
   const [globalStationSnapshot, setGlobalStationSnapshot] = useState<GlobalStationSnapshot | null>(null);
-  const [eventGlobalStationSnapshot, setEventGlobalStationSnapshot] = useState<{
-    eventKey: string;
-    snapshot: GlobalStationSnapshot;
-  } | null>(null);
   const [globalStationState, setGlobalStationState] = useState<SourceState>("connecting");
   const [globalStationError, setGlobalStationError] = useState("");
+  const [waveformStationSnapshot, setWaveformStationSnapshot] = useState<GlobalStationSnapshot | null>(null);
+  const [waveformStationState, setWaveformStationState] = useState<SourceState>("connecting");
+  const [waveformStationError, setWaveformStationError] = useState("");
   const [cwaStationSnapshot, setCwaStationSnapshot] = useState<GlobalStationSnapshot | null>(null);
   const [cwaStationState, setCwaStationState] = useState<SourceState>("connecting");
   const [cwaStationError, setCwaStationError] = useState("");
+  const [palertSnapshot, setPalertSnapshot] = useState<PalertSnapshot | null>(null);
+  const [palertState, setPalertState] = useState<SourceState>("connecting");
+  const [palertError, setPalertError] = useState("");
+  const [globalFaults, setGlobalFaults] = useState<GlobalFaultCollection | null>(null);
+  const [globalFaultError, setGlobalFaultError] = useState("");
   const [globalStationReloadKey, setGlobalStationReloadKey] = useState(0);
   const [mapViewport, setMapViewport] = useState<FdsnMapViewport>({
     minLatitude: 20,
@@ -1060,6 +1752,8 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   const [kmaSampleTime, setKmaSampleTime] = useState(0);
   const [kmaLatency, setKmaLatency] = useState<number | null>(null);
   const [wolfxLatency, setWolfxLatency] = useState<number | null>(null);
+  const [earlyEstLatency, setEarlyEstLatency] = useState<number | null>(null);
+  const [globalQuakeLatency, setGlobalQuakeLatency] = useState<number | null>(null);
   const [cencLatency, setCencLatency] = useState<number | null>(null);
   const [cencProvider, setCencProvider] = useState("CENC 后端聚合");
   const [eews, setEews] = useState<LiveEew[]>([]);
@@ -1072,6 +1766,20 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   const [officialLatency, setOfficialLatency] = useState<number | null>(null);
   const [institutionSourceCount, setInstitutionSourceCount] = useState(0);
   const [selectedInstitutionReportId, setSelectedInstitutionReportId] = useState<string | null>(null);
+  const [mechanismEvent, setMechanismEvent] = useState<EarthquakeEvent | null>(null);
+  const [pagerEvent, setPagerEvent] = useState<EarthquakeEvent | null>(null);
+  const [shakeMapReport, setShakeMapReport] = useState<EarthquakeEvent | null>(null);
+  const [pagerReport, setPagerReport] = useState<EarthquakeEvent | null>(null);
+  const [dyfiEvent, setDyfiEvent] = useState<EarthquakeEvent | null>(null);
+  const [jshisTarget, setJshisTarget] = useState<{ latitude: number; longitude: number; label: string } | null>(null);
+  const [jshisLocation, setJshisLocation] = useState<JshisLocationSnapshot | null>(null);
+  const [jshisFault, setJshisFault] = useState<JshisFaultShape | null>(null);
+  const [usgsShakeMap, setUsgsShakeMap] = useState<EarthquakeShakeMap | null>(null);
+  const [usgsShakeMapLoading, setUsgsShakeMapLoading] = useState(false);
+  const [usgsShakeMapError, setUsgsShakeMapError] = useState("");
+  const [usgsPager, setUsgsPager] = useState<EarthquakePager | null>(null);
+  const [usgsPagerLoading, setUsgsPagerLoading] = useState(false);
+  const [usgsPagerError, setUsgsPagerError] = useState("");
   const [expandedOfficialKey, setExpandedOfficialKey] = useState<string | null>(null);
   const [selectedEewKey, setSelectedEewKey] = useState<string | null>(null);
   const [selectedPreviewUntil, setSelectedPreviewUntil] = useState(0);
@@ -1082,6 +1790,13 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
   const [selectedGlobalStation, setSelectedGlobalStation] = useState<GlobalSeismicStation | null>(null);
   const [stationSelectionReason, setStationSelectionReason] = useState<StationSelectionReason>("manual");
+  const [verifiedWaveformStations, setVerifiedWaveformStations] = useState<FdsnStationDistance[]>([]);
+  const [waveformProbeState, setWaveformProbeState] = useState<"idle" | "probing" | "ready" | "unavailable">("idle");
+  const [waveformProbeAttempt, setWaveformProbeAttempt] = useState(0);
+  const [waveformAutoPlayKey, setWaveformAutoPlayKey] = useState<string | null>(null);
+  const [autoGlobalEventKey, setAutoGlobalEventKey] = useState<string | null>(null);
+  const [movieCameraEventKey, setMovieCameraEventKey] = useState<string | null>(null);
+  const [movieCameraEnteredAt, setMovieCameraEnteredAt] = useState(0);
   const [stationSearch, setStationSearch] = useState("");
   const [history, setHistory] = useState<StationSample[]>([]);
   const [triggers, setTriggers] = useState<TriggerObservation[]>([]);
@@ -1101,7 +1816,49 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   const niedAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const niedAudioBuffersRef = useRef(new Map<NiedSoundCue, AudioBuffer>());
   const autoNiedSelectionSession = useRef<string | null>(null);
+  const autoWaveformSelection = useRef<{ eventKey: string; stationId: string; distanceKm: number } | null>(null);
+  const autoNiedWaveformSelection = useRef<{ sessionKey: string; stationId: string; mode: "inside" | "nearest" } | null>(null);
+  const niedWaveformProbeSession = useRef<string | null>(null);
+  const handledGlobalAutoEvent = useRef<string | null>(null);
+  const movieCameraQueueState = useRef({
+    currentKey: null as string | null,
+    enteredAt: 0,
+    knownKeys: [] as string[],
+  });
   const globalRefreshSeconds = normalizeEarthquakeRefreshSeconds(storedGlobalRefreshSeconds);
+  const autoMagnitudeThreshold = Math.max(4, Math.min(8, Number(autoLocateMagnitude) || 5));
+  const focusJshisLocation = useCallback((snapshot: JshisLocationSnapshot) => {
+    const meshcode = snapshot.hazard?.meshcode ?? snapshot.site?.meshcode ?? "unknown";
+    setMapFocus({
+      key: `jshis-grid:${meshcode}:${Date.now()}`,
+      latitude: snapshot.latitude,
+      longitude: snapshot.longitude,
+      zoom: 13,
+      exact: true,
+    });
+  }, []);
+  const focusJshisFault = useCallback((fault: JshisFaultShape) => {
+    const extent = jshisFaultMapExtent(fault.features);
+    if (!extent) return;
+    setMapFocus({
+      key: `jshis-fault:${fault.code}:${Date.now()}`,
+      latitude: extent.latitude,
+      longitude: extent.longitude,
+      zoom: 8,
+      radiusKm: extent.radiusKm,
+    });
+  }, []);
+  const handleJshisLoaded = useCallback((snapshot: JshisLocationSnapshot) => {
+    setJshisLocation(snapshot);
+    setShowJshisHazard(Boolean(snapshot.hazard));
+    setShowJshisSite(Boolean(snapshot.site));
+    focusJshisLocation(snapshot);
+  }, [focusJshisLocation, setShowJshisHazard, setShowJshisSite]);
+  const handleJshisFaultLoaded = useCallback((fault: JshisFaultShape) => {
+    setJshisFault(fault);
+    setShowJshisFault(true);
+    focusJshisFault(fault);
+  }, [focusJshisFault, setShowJshisFault]);
 
   useEffect(() => {
     setEewHistory((current) => {
@@ -1113,14 +1870,22 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   useEffect(() => {
     const legacyPanel = String(panelTab);
     if (legacyPanel === "inference" || legacyPanel === "replay") setBottomTab(legacyPanel);
-    if (legacyPanel !== "station" && legacyPanel !== "intensity" && legacyPanel !== "snet") setPanelTab("station");
+    if (legacyPanel !== "station" && legacyPanel !== "intensity" && legacyPanel !== "snet" && legacyPanel !== "exposure") setPanelTab("station");
     if (!["inference", "replay", "warnings", "reports"].includes(String(bottomTab))) setBottomTab("warnings");
     if (warningSourceFilter !== "ALL" && !LIVE_EEW_SOURCE_ORDER.includes(warningSourceFilter as LiveEewSource)) setWarningSourceFilter("ALL");
   }, [bottomTab, panelTab, setBottomTab, setPanelTab, setWarningSourceFilter, warningSourceFilter]);
 
-  const focusMap = useCallback((id: string, latitude: number, longitude: number, zoom: number, exact = false) => {
-    setMapFocus({ key: `${id}:${Date.now()}`, latitude, longitude, zoom, exact });
-  }, []);
+  const focusMap = useCallback((
+    id: string,
+    latitude: number,
+    longitude: number,
+    zoom: number,
+    exact = false,
+    radiusKm?: number,
+  ) => {
+    if (movieModeEnabled && movieCameraMode === "locked") return;
+    setMapFocus({ key: `${id}:${Date.now()}`, latitude, longitude, zoom, exact, radiusKm });
+  }, [movieCameraMode, movieModeEnabled]);
 
   const updateMapViewport = useCallback((next: FdsnMapViewport) => {
     mapViewportZoomRef.current = next.zoom;
@@ -1289,10 +2054,6 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   }, [loadCatalogues]);
 
   useEffect(() => {
-    if (!showGlobalStations) {
-      setGlobalStationState("stale");
-      return;
-    }
     let active = true;
     let timer = 0;
     let controller: AbortController | null = null;
@@ -1303,7 +2064,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
       setGlobalStationError("");
       let nextDelay = 10 * 60_000;
       try {
-        const snapshot = await fetchGlobalStations(mapViewport, controller.signal, GLOBAL_FDSN_PROVIDER_IDS);
+        const snapshot = await fetchWorldFdsnStations(controller.signal, false);
         if (!active) return;
         setGlobalStationSnapshot(snapshot);
         setGlobalStationState(snapshot.stale ? "stale" : "online");
@@ -1322,7 +2083,39 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
       window.clearTimeout(timer);
       controller?.abort();
     };
-  }, [globalStationReloadKey, mapViewport, showGlobalStations]);
+  }, [globalStationReloadKey]);
+
+  useEffect(() => {
+    let active = true;
+    let timer = 0;
+    let controller: AbortController | null = null;
+    const load = async () => {
+      controller?.abort();
+      controller = new AbortController();
+      setWaveformStationState("connecting");
+      setWaveformStationError("");
+      let nextDelay = 10 * 60_000;
+      try {
+        const snapshot = await fetchWorldFdsnStations(controller.signal, true);
+        if (!active) return;
+        setWaveformStationSnapshot(snapshot);
+        setWaveformStationState(snapshot.stale ? "stale" : "online");
+      } catch (error) {
+        if (!active || (error instanceof DOMException && error.name === "AbortError")) return;
+        nextDelay = 15_000;
+        setWaveformStationState("error");
+        setWaveformStationError(error instanceof Error ? error.message : String(error));
+      } finally {
+        if (active) timer = window.setTimeout(load, nextDelay);
+      }
+    };
+    timer = window.setTimeout(load, 520);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      controller?.abort();
+    };
+  }, [globalStationReloadKey]);
 
   useEffect(() => {
     if (!showCwaStations) {
@@ -1361,6 +2154,62 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   }, [globalStationReloadKey, showCwaStations]);
 
   useEffect(() => {
+    if (!showPalertStations) {
+      setPalertState("stale");
+      return;
+    }
+    let active = true;
+    let timer = 0;
+    let controller: AbortController | null = null;
+    const load = async () => {
+      controller?.abort();
+      controller = new AbortController();
+      setPalertError("");
+      let nextDelay = 10 * 60_000;
+      try {
+        const snapshot = await fetchPalertStations(controller.signal);
+        if (!active) return;
+        setPalertSnapshot(snapshot);
+        setPalertState(snapshot.state);
+        setPalertError(snapshot.error ?? "");
+      } catch (error) {
+        if (!active || (error instanceof DOMException && error.name === "AbortError")) return;
+        nextDelay = 20_000;
+        setPalertState("error");
+        setPalertError(error instanceof Error ? error.message : String(error));
+      } finally {
+        if (active) timer = window.setTimeout(load, nextDelay);
+      }
+    };
+    void load();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      controller?.abort();
+    };
+  }, [showPalertStations]);
+
+  useEffect(() => {
+    if (!showGlobalFaults || globalFaults) return;
+    const controller = new AbortController();
+    setGlobalFaultError("");
+    void fetch("/data/global-active-faults.geo.json", { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const collection = await response.json() as GlobalFaultCollection;
+        if (collection?.type !== "FeatureCollection" || !Array.isArray(collection.features)) {
+          throw new Error("断裂带数据格式无效");
+        }
+        setGlobalFaults(collection);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setGlobalFaultError(error instanceof Error ? error.message : String(error));
+      });
+    return () => controller.abort();
+  }, [globalFaults, showGlobalFaults]);
+
+  useEffect(() => {
     let active = true;
     let timer = 0;
     let controller: AbortController | null = null;
@@ -1374,10 +2223,10 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
         setSnetState(snapshot.stale ? "stale" : "online");
         setSelectedSnetEventId((current) => current && snapshot.events.some((event) => event.id === current)
           ? current
-          : snapshot.events[0]?.id ?? null);
+          : null);
         setSelectedSnetReportId((current) => current && snapshot.events.some((event) => event.reports?.some((report) => report.id === current))
           ? current
-          : snapshot.events[0]?.reports?.slice(-1)[0]?.id ?? null);
+          : null);
       } catch (error) {
         if (!active || (error instanceof DOMException && error.name === "AbortError")) return;
         setSnetState("error");
@@ -1410,12 +2259,28 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
       .then(([topology, sites]) => {
         if (!topology.objects?.region) throw new Error("JMA 区域边界格式无效");
         if (!sites.regions || !Object.keys(sites.regions).length) throw new Error("JMA 观测点目录格式无效");
-        setJmaRegions(topojsonFeature(topology, topology.objects.region) as JmaRegionCollection);
+        setJmaRegions(normalizeJapanImpactRegions(
+          topojsonFeature(topology, topology.objects.region) as JmaRegionCollection,
+        ));
         setJmaSeismicSites(sites);
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setJmaCatalogueError((current) => current || (error instanceof Error ? error.message : String(error)));
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadEastAsiaImpactRegions(controller.signal)
+      .then((regions) => {
+        setEastAsiaImpactRegions(regions);
+        setRegionalBoundaryError("");
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setRegionalBoundaryError(error instanceof Error ? error.message : String(error));
       });
     return () => controller.abort();
   }, []);
@@ -1587,9 +2452,42 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
     let active = true;
     let timer = 0;
     let controller: AbortController | null = null;
+    const poll = async () => {
+      controller?.abort();
+      controller = new AbortController();
+      try {
+        const snapshot = await fetchExternalWarnings(controller.signal);
+        if (!active) return;
+        snapshot.events.forEach(ingestEew);
+        setEarlyEstState(snapshot.sources["early-est"].state);
+        setEarlyEstLatency(snapshot.sources["early-est"].latencyMs);
+        setGlobalQuakeState(snapshot.sources.globalquake.state);
+        setGlobalQuakeLatency(snapshot.sources.globalquake.latencyMs);
+      } catch (error) {
+        if (!active || (error instanceof DOMException && error.name === "AbortError")) return;
+        setEarlyEstState("error");
+        setEarlyEstLatency(null);
+        setGlobalQuakeState("error");
+        setGlobalQuakeLatency(null);
+      } finally {
+        if (active) timer = window.setTimeout(poll, 3_000);
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      controller?.abort();
+    };
+  }, [ingestEew]);
+
+  useEffect(() => {
+    let active = true;
+    let timer = 0;
+    let controller: AbortController | null = null;
     let hasCachedData = cencReports.length > 0 || cencReport !== null;
     let listSignature = cencReports.map((report) => report.id).join("|");
-    let detailSignature = cencReport ? `${cencReport.id}:${cencReport.createdAt}:${cencReport.stationMetrics?.length ?? cencReport.stations.length}` : "";
+    let detailSignature = cencReport ? `${cencReport.id}:${cencReport.createdAt}:${cencReport.stationMetrics.length}:${cencReport.stations.length}` : "";
     const poll = async () => {
       controller?.abort();
       controller = new AbortController();
@@ -1610,7 +2508,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
         const report = normalizeCencIntensityDetail(snapshot.detailEnvelope);
         if (report && (!selectedCencId || report.id === selectedCencId)) {
           hasCachedData = true;
-          const nextDetailSignature = `${report.id}:${report.createdAt}:${report.stationMetrics.length}`;
+          const nextDetailSignature = `${report.id}:${report.createdAt}:${report.stationMetrics.length}:${report.stations.length}`;
           if (nextDetailSignature !== detailSignature) {
             detailSignature = nextDetailSignature;
             setCencReport(report);
@@ -1745,7 +2643,141 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
       : null;
     return selected ?? historyEvents[0]?.latestReport ?? latestEvent ?? null;
   }, [historyEvents, institutionEewReports, latestEvent, regionalHistory, selectedEewKey]);
+  const movieAutoTracking = movieModeEnabled && movieCameraMode === "auto" && autoLocateGlobalEarthquakes;
+  const eligibleGlobalEvents = useMemo(
+    () => selectAutoLocatedGlobalEvents(activeEews, autoMagnitudeThreshold, clock),
+    [activeEews, autoMagnitudeThreshold, clock],
+  );
+
+  useEffect(() => {
+    const next = advanceMovieCameraQueue(
+      movieAutoTracking ? eligibleGlobalEvents : [],
+      movieCameraQueueState.current,
+      clock,
+    );
+    movieCameraQueueState.current = next;
+    setMovieCameraEventKey((current) => current === next.currentKey ? current : next.currentKey);
+    setMovieCameraEnteredAt((current) => current === next.enteredAt ? current : next.enteredAt);
+  }, [clock, eligibleGlobalEvents, movieAutoTracking]);
+
+  const movieCameraEvent = useMemo(
+    () => eligibleGlobalEvents.find((event) => `${event.id}:${event.originTime}` === movieCameraEventKey) ?? null,
+    [eligibleGlobalEvents, movieCameraEventKey],
+  );
+  const autoGlobalEvent = useMemo(() => {
+    if (!autoLocateGlobalEarthquakes) return null;
+    if (movieAutoTracking) return movieCameraEvent;
+    return selectAutoLocatedGlobalEvent(activeEews, autoMagnitudeThreshold, clock);
+  }, [activeEews, autoLocateGlobalEarthquakes, autoMagnitudeThreshold, clock, movieAutoTracking, movieCameraEvent]);
+
+  useEffect(() => {
+    if (!autoLocateGlobalEarthquakes || !autoGlobalEvent) {
+      handledGlobalAutoEvent.current = null;
+      setAutoGlobalEventKey(null);
+      return;
+    }
+    const reportKey = eewReportKey(autoGlobalEvent);
+    const physicalEventKey = `${autoGlobalEvent.id}:${autoGlobalEvent.originTime}`;
+    setAutoGlobalEventKey((current) => current === reportKey ? current : reportKey);
+    if (!movieAutoTracking && handledGlobalAutoEvent.current === physicalEventKey) return;
+    handledGlobalAutoEvent.current = physicalEventKey;
+    const institutionReport = institutionReports.find((report) => {
+      const event = institutionReportToLiveEew(report);
+      return event?.id === autoGlobalEvent.id && event.originTime === autoGlobalEvent.originTime;
+    });
+    setSelectedEewKey(reportKey);
+    setSelectedInstitutionReportId(institutionReport?.id ?? null);
+    setWarningOverlayTab("selected");
+    setSelectedPreviewUntil(Date.now() + 20_000);
+    setShowWaveformStations(true);
+    const movieRadiusKm = movieAutoTracking
+      ? Math.max(1, Math.floor((clock - movieCameraEnteredAt) / 1_000) + 1)
+      : undefined;
+    focusMap(
+      `${movieAutoTracking ? "movie" : "global-auto"}:${reportKey}:${movieRadiusKm ?? "fixed"}`,
+      autoGlobalEvent.latitude,
+      autoGlobalEvent.longitude,
+      6,
+      true,
+      movieRadiusKm,
+    );
+  }, [
+    autoGlobalEvent,
+    autoLocateGlobalEarthquakes,
+    clock,
+    focusMap,
+    institutionReports,
+    movieAutoTracking,
+    movieCameraEnteredAt,
+    setShowWaveformStations,
+  ]);
+
   const selectedInstitutionReport = institutionReports.find((report) => report.id === selectedInstitutionReportId) ?? null;
+  const enabledShakeMapMmiLevels = useMemo(
+    () => SHAKEMAP_MMI_LEVELS.filter((level) => shakeMapMmiLevels.includes(level)),
+    [shakeMapMmiLevels],
+  );
+  const availableShakeMapMmiLevels = useMemo(
+    () => new Set((usgsShakeMap?.contours.features ?? []).map((feature) => (
+      shakeMapContourLevel(feature.properties.value)
+    ))),
+    [usgsShakeMap],
+  );
+  const visibleShakeMapContours = useMemo(
+    () => usgsShakeMap
+      ? filterShakeMapContours(usgsShakeMap, enabledShakeMapMmiLevels)
+      : null,
+    [enabledShakeMapMmiLevels, usgsShakeMap],
+  );
+  const toggleShakeMapMmiLevel = useCallback((level: number) => {
+    setShakeMapMmiLevels((current) => (
+      current.includes(level)
+        ? current.filter((candidate) => candidate !== level)
+        : [...current, level].sort((a, b) => a - b)
+    ));
+  }, [setShakeMapMmiLevels]);
+  useEffect(() => {
+    if (!shakeMapReport || !isShakeMapQueryable(shakeMapReport)) {
+      setUsgsShakeMapLoading(false);
+      setUsgsShakeMapError("");
+      return;
+    }
+    const controller = new AbortController();
+    setUsgsShakeMap(null);
+    setUsgsShakeMapLoading(true);
+    setUsgsShakeMapError("");
+    fetchEarthquakeShakeMap(shakeMapReport, controller.signal)
+      .then(setUsgsShakeMap)
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setUsgsShakeMapError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setUsgsShakeMapLoading(false);
+      });
+    return () => controller.abort();
+  }, [shakeMapReport]);
+  useEffect(() => {
+    if (!pagerReport || !isPagerQueryable(pagerReport)) {
+      setUsgsPagerLoading(false);
+      setUsgsPagerError("");
+      return;
+    }
+    const controller = new AbortController();
+    setUsgsPager(null);
+    setUsgsPagerLoading(true);
+    setUsgsPagerError("");
+    fetchEarthquakePager(pagerReport, controller.signal)
+      .then(setUsgsPager)
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setUsgsPagerError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setUsgsPagerLoading(false);
+      });
+    return () => controller.abort();
+  }, [pagerReport]);
   const cwaStations = useMemo(
     () => cwaStationSnapshot?.stations ?? [],
     [cwaStationSnapshot],
@@ -1754,10 +2786,15 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
     () => (globalStationSnapshot?.stations ?? []).filter((station) => station.providerId !== "cwa"),
     [globalStationSnapshot],
   );
+  const waveformFdsnStations = useMemo(
+    () => (waveformStationSnapshot?.stations ?? []).filter((station) => station.providerId !== "cwa"),
+    [waveformStationSnapshot],
+  );
   const stationProviderSources = useMemo(() => [
     ...(globalStationSnapshot?.sources ?? []),
+    ...(waveformStationSnapshot?.sources ?? []),
     ...(cwaStationSnapshot?.sources ?? []),
-  ], [cwaStationSnapshot, globalStationSnapshot]);
+  ], [cwaStationSnapshot, globalStationSnapshot, waveformStationSnapshot]);
   const allSelectableStations = useMemo<SelectableStation[]>(() => {
     const stations = [
       ...(catalogue?.stations ?? []),
@@ -1765,11 +2802,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
       ...(oceanCatalogue?.stations ?? []),
       ...(cencReport?.stations ?? []),
       ...globalFdsnStations,
-      ...(eventGlobalStationSnapshot?.snapshot.stations ?? []).filter((station) => station.providerId !== "cwa"),
+      ...waveformFdsnStations,
       ...cwaStations,
     ];
     return [...new Map(stations.map((station) => [station.id, station])).values()];
-  }, [catalogue, cencReport, cwaStations, eventGlobalStationSnapshot, globalFdsnStations, kmaStations, oceanCatalogue]);
+  }, [catalogue, cencReport, cwaStations, globalFdsnStations, kmaStations, oceanCatalogue, waveformFdsnStations]);
   const selectedStation = allSelectableStations.find((station) => station.id === selectedStationId)
     ?? (selectedGlobalStation?.id === selectedStationId ? selectedGlobalStation : null);
   const replayEvent = selectedEvent && (replayPlaying || replaySeconds > 0) ? selectedEvent : null;
@@ -1779,7 +2816,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   const kmaReplaySimulation = useMemo(() => replayEvent && kmaStations.length
     ? simulateReplayStationResponse(replayEvent, kmaStations, replaySeconds, "intensity")
     : null, [kmaStations, replayEvent, replaySeconds]);
-  const oceanResponseEvent = replayEvent ?? latestEvent;
+  const oceanResponseEvent = replayEvent ?? autoGlobalEvent ?? latestEvent;
   const oceanResponseElapsed = oceanResponseEvent
     ? replayEvent
       ? replaySeconds
@@ -1789,55 +2826,48 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
     ? simulateReplayStationResponse(oceanResponseEvent, oceanCatalogue.stations, oceanResponseElapsed)
     : null, [oceanCatalogue, oceanResponseElapsed, oceanResponseEvent]);
   const eventStationKey = oceanResponseEvent
-    ? `${oceanResponseEvent.id}:${oceanResponseEvent.latitude.toFixed(4)}:${oceanResponseEvent.longitude.toFixed(4)}`
+    ? `${oceanResponseEvent.source}:${oceanResponseEvent.id}`
     : null;
+  const [waveformEventWindow, setWaveformEventWindow] = useState<{
+    eventKey: string;
+    originTime: string;
+  } | null>(null);
   useEffect(() => {
-    if (!showGlobalStations || !oceanResponseEvent || !eventStationKey) {
-      setEventGlobalStationSnapshot(null);
+    if (!eventStationKey || !oceanResponseEvent) {
+      setWaveformEventWindow(null);
       return;
     }
-    let active = true;
-    const controller = new AbortController();
-    setEventGlobalStationSnapshot((current) => current?.eventKey === eventStationKey ? current : null);
-    void fetchGlobalStations(
-      buildEventStationViewport(oceanResponseEvent.latitude, oceanResponseEvent.longitude),
-      controller.signal,
-      GLOBAL_FDSN_PROVIDER_IDS,
-    ).then((snapshot) => {
-      if (active) setEventGlobalStationSnapshot({ eventKey: eventStationKey, snapshot });
-    }).catch((error) => {
-      if (active && !(error instanceof DOMException && error.name === "AbortError")) {
-        setGlobalStationError(error instanceof Error ? error.message : String(error));
-      }
-    });
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [eventStationKey, globalStationReloadKey, oceanResponseEvent?.latitude, oceanResponseEvent?.longitude, showGlobalStations]);
-  const globalResponseStations = useMemo(() => {
-    const merged = new Map(globalFdsnStations.map((station) => [station.id, station]));
-    if (eventGlobalStationSnapshot?.eventKey === eventStationKey) {
-      for (const station of eventGlobalStationSnapshot.snapshot.stations) {
-        if (station.providerId !== "cwa") merged.set(station.id, station);
-      }
-    }
-    return [...merged.values()];
-  }, [eventGlobalStationSnapshot, eventStationKey, globalFdsnStations]);
-  const mapGlobalFdsnStations = useMemo(
-    () => sampleGlobalStationsForMap(globalFdsnStations),
-    [globalFdsnStations],
-  );
-  const globalSimulation = useMemo(() => oceanResponseEvent && globalResponseStations.length
-    ? simulateReplayStationResponse(oceanResponseEvent, globalResponseStations, oceanResponseElapsed, "intensity")
-    : null, [globalResponseStations, oceanResponseElapsed, oceanResponseEvent]);
+    setWaveformEventWindow((current) => current?.eventKey === eventStationKey
+      ? current
+      : { eventKey: eventStationKey, originTime: oceanResponseEvent.originTime });
+  }, [eventStationKey, oceanResponseEvent]);
+  const waveformEventTime = waveformEventWindow?.eventKey === eventStationKey
+    ? waveformEventWindow.originTime
+    : oceanResponseEvent?.originTime ?? null;
+  const manualFdsnStations = useMemo(() => [...waveformFdsnStations].sort((a, b) => (
+    a.network.localeCompare(b.network)
+    || a.stationCode.localeCompare(b.stationCode)
+  )), [waveformFdsnStations]);
+  const waveformCandidates = useMemo(() => oceanResponseEvent
+    ? rankFdsnStationsByDistance(
+      waveformFdsnStations,
+      oceanResponseEvent.latitude,
+      oceanResponseEvent.longitude,
+      waveformEventTime,
+    ).slice(0, 18)
+    : [], [oceanResponseEvent, waveformEventTime, waveformFdsnStations]);
+  const globalSimulation = useMemo(() => oceanResponseEvent && waveformFdsnStations.length
+    ? simulateReplayStationResponse(oceanResponseEvent, waveformFdsnStations, oceanResponseElapsed, "intensity")
+    : null, [oceanResponseElapsed, oceanResponseEvent, waveformFdsnStations]);
   const cwaSimulation = useMemo(() => oceanResponseEvent && cwaStations.length
     ? simulateReplayStationResponse(oceanResponseEvent, cwaStations, oceanResponseElapsed, "shindo")
     : null, [cwaStations, oceanResponseElapsed, oceanResponseEvent]);
-  const oceanMode: OceanResponseMode = replayEvent ? "replay" : latestEvent ? "local" : "idle";
+  const gnssSimulation = useMemo(() => showGnssStations && oceanResponseEvent
+    ? simulateReplayStationResponse(oceanResponseEvent, GNSS_STATIONS, oceanResponseElapsed, "intensity")
+    : null, [oceanResponseElapsed, oceanResponseEvent, showGnssStations]);
+  const oceanMode: OceanResponseMode = replayEvent ? "replay" : oceanResponseEvent ? "local" : "idle";
   const selectedSnetEvent = useMemo<SnetIntensityEvent | null>(() => (
     snetSnapshot?.events.find((event) => event.id === selectedSnetEventId)
-      ?? snetSnapshot?.events[0]
       ?? null
   ), [selectedSnetEventId, snetSnapshot]);
   const selectedSnetReport = selectedSnetEvent?.reports?.find((report) => report.id === selectedSnetReportId)
@@ -1911,6 +2941,81 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
     setPanelTab("station");
     focusMap(`station:${station.id}`, station.latitude, station.longitude, isCencStation(station) ? 9 : isGlobalStation(station) ? Math.max(6, mapViewportZoomRef.current) : 7);
   }, [focusMap, setPanelTab]);
+
+  useEffect(() => {
+    setVerifiedWaveformStations([]);
+    setWaveformProbeState(eventStationKey ? "probing" : "idle");
+    setWaveformProbeAttempt(0);
+    autoWaveformSelection.current = null;
+  }, [eventStationKey]);
+
+  useEffect(() => {
+    if (
+      !oceanResponseEvent
+      || !eventStationKey
+      || !waveformCandidates.length
+    ) return;
+    let active = true;
+    let retryTimer: number | undefined;
+    const controller = new AbortController();
+    const matches: FdsnStationDistance[] = [];
+    setWaveformProbeState("probing");
+
+    const run = async () => {
+      for (let offset = 0; offset < waveformCandidates.length && matches.length < 6; offset += 3) {
+        const batch = waveformCandidates.slice(offset, offset + 3);
+        const results = await Promise.all(batch.map(async (candidate) => {
+          try {
+            return await probeFdsnWaveform(
+              candidate.station,
+              5,
+              oceanResponseEvent.originTime,
+              controller.signal,
+            ) ? candidate : null;
+          } catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") throw error;
+            return null;
+          }
+        }));
+        if (!active || controller.signal.aborted) return;
+        matches.push(...results.filter((candidate): candidate is FdsnStationDistance => candidate !== null));
+        matches.sort((a, b) => a.distanceKm - b.distanceKm || a.station.id.localeCompare(b.station.id));
+        setVerifiedWaveformStations([...matches]);
+
+        const nearest = matches[0];
+        const previous = autoWaveformSelection.current;
+        if (nearest && !autoNiedWaveformSelection.current?.stationId && (
+          previous?.eventKey !== eventStationKey
+          || nearest.distanceKm + 0.01 < previous.distanceKm
+        )) {
+          autoWaveformSelection.current = {
+            eventKey: eventStationKey,
+            stationId: nearest.station.id,
+            distanceKm: nearest.distanceKm,
+          };
+          setShowWaveformStations(true);
+          focusStation(nearest.station, "waveform-auto");
+          const autoPrefix = autoGlobalEventKey === eewReportKey(oceanResponseEvent) ? "global" : "event";
+          setWaveformAutoPlayKey(`${autoPrefix}:${eventStationKey}:${nearest.station.id}`);
+        }
+      }
+      if (!active) return;
+      setWaveformProbeState(matches.length ? "ready" : "unavailable");
+      const originAgeMs = Date.now() - Date.parse(oceanResponseEvent.originTime);
+      if (!matches.length && originAgeMs >= -60_000 && originAgeMs < 15 * 60_000) {
+        retryTimer = window.setTimeout(() => setWaveformProbeAttempt((attempt) => attempt + 1), 30_000);
+      }
+    };
+    void run().catch((error) => {
+      if (!active || error instanceof DOMException && error.name === "AbortError") return;
+      setWaveformProbeState("unavailable");
+    });
+    return () => {
+      active = false;
+      controller.abort();
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
+  }, [autoGlobalEventKey, eventStationKey, focusStation, oceanResponseEvent, setShowWaveformStations, waveformCandidates, waveformProbeAttempt]);
 
   useEffect(() => {
     if (selectedStationId || !catalogue?.stations.length) return;
@@ -2032,6 +3137,34 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
     focusMap(`institution:${report.id}`, report.latitude, report.longitude, report.source === "shakealert" ? 6 : 5, true);
   };
 
+  const chooseShakeMapReport = (report: EarthquakeEvent) => {
+    setShakeMapReport(report);
+    setShowUsgsShakeMap(true);
+    chooseInstitutionReport(report);
+  };
+
+  const choosePagerReport = (report: EarthquakeEvent) => {
+    setPagerReport(report);
+    setShowPagerCities(true);
+    setPagerEvent(report);
+    setPanelTab("exposure");
+    chooseInstitutionReport(report);
+  };
+
+  const chooseDyfiReport = (report: EarthquakeEvent) => {
+    setDyfiEvent(report);
+    chooseInstitutionReport(report);
+  };
+
+  const chooseJshisReport = (report: EarthquakeEvent) => {
+    setJshisTarget({
+      latitude: report.latitude,
+      longitude: report.longitude,
+      label: `${EARTHQUAKE_SOURCE_LABELS[report.source]} · ${report.place}`,
+    });
+    chooseInstitutionReport(report);
+  };
+
   const chooseCencReport = (reportId: string, shouldFocus = true) => {
     setSelectedCencId(reportId);
     setPanelTab("intensity");
@@ -2040,6 +3173,13 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   };
 
   const chooseSnetEvent = (eventId: string) => {
+    if (eventId === "__live__") {
+      setSelectedSnetEventId(null);
+      setSelectedSnetReportId(null);
+      setSnetViewMode("measured");
+      setPanelTab("snet");
+      return;
+    }
     setSelectedSnetEventId(eventId);
     const selected = snetSnapshot?.events.find((event) => event.id === eventId);
     setSelectedSnetReportId(selected?.reports?.slice(-1)[0]?.id ?? null);
@@ -2072,9 +3212,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   };
 
   const focusStrongestOceanResponse = () => {
-    const threshold = displayedOceanMode === "measured" ? 0.5 : 0.25;
     const strongest = [...(oceanCatalogue?.stations ?? [])]
-      .filter((station) => (displayedOceanRanks[station.id] ?? Number.NEGATIVE_INFINITY) >= threshold)
+      .filter((station) => {
+        const rank = displayedOceanRanks[station.id];
+        return displayedOceanMode === "measured" ? Number.isFinite(rank) : (rank ?? Number.NEGATIVE_INFINITY) >= 0.25;
+      })
       .sort((a, b) => (displayedOceanRanks[b.id] ?? 0) - (displayedOceanRanks[a.id] ?? 0))[0];
     if (strongest) focusStation(strongest);
     setPanelTab("snet");
@@ -2097,18 +3239,28 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
     : jmaShindoColor(selectedRank ?? 0);
   const selectedOrigin = selectedEvent ? Date.parse(selectedEvent.originTime) : 0;
   const previewEvent = warningOverlayTab === "selected" && selectedEvent && clock < selectedPreviewUntil ? selectedEvent : null;
-  const mapEvent = replayEvent ?? previewEvent ?? latestEvent;
-  const cameraEvent = replayEvent ?? latestEvent;
+  const rawMapEvent = replayEvent ?? previewEvent ?? autoGlobalEvent ?? latestEvent;
+  const mapEvent = useMemo(
+    () => enrichLiveEewWithOfficialAreas(rawMapEvent, institutionReports),
+    [institutionReports, rawMapEvent],
+  );
+  const cameraEvent = replayEvent ?? autoGlobalEvent ?? latestEvent;
   const mapOrigin = mapEvent ? Date.parse(mapEvent.originTime) : 0;
   const impactElapsed = replayEvent
     ? replaySeconds
-    : mapEvent === latestEvent && mapOrigin
+    : (rawMapEvent === latestEvent || rawMapEvent === autoGlobalEvent) && mapOrigin
       ? Math.max(0, Math.min(300, (clock - mapOrigin) / 1000))
       : null;
-  const affectedLayers = useMemo(
-    () => affectedRegionLayers(jmaRegions, jmaSeismicSites, mapEvent, impactElapsed),
-    [impactElapsed, jmaRegions, jmaSeismicSites, mapEvent],
+  const impactRegions = useMemo(
+    () => mergeImpactRegionCollections(jmaRegions, eastAsiaImpactRegions),
+    [eastAsiaImpactRegions, jmaRegions],
   );
+  const affectedLayers = useMemo(
+    () => affectedRegionLayers(impactRegions, jmaSeismicSites, mapEvent, impactElapsed),
+    [impactElapsed, impactRegions, jmaSeismicSites, mapEvent],
+  );
+  const localAdministrativeRegionCount = affectedLayers.local.features
+    .filter((feature) => !feature.properties.contour).length;
   const activeTsunamiRegions = useMemo<TsunamiRegionCollection>(() => {
     if (!tsunamiRegions || !jmaTsunami?.active) return { type: "FeatureCollection", features: [] };
     const activeAreas = new Map(jmaTsunami.areas.map((area) => [area.name, area]));
@@ -2128,12 +3280,17 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
     };
   }, [jmaTsunami, tsunamiRegions]);
   const waveNow = replayEvent ? mapOrigin + replaySeconds * 1000 : mapOrigin ? Math.min(clock, mapOrigin + 300_000) : clock;
-  const showWaves = replayEvent ? replaySeconds > 0 : Boolean(mapEvent === latestEvent && latestEvent && !latestEvent.cancelled);
-  const rawMapDetectionStationIds = replayEvent
-    ? replaySimulation?.activeStationIds ?? EMPTY_STATION_IDS
-    : niedDetection.detected
-      ? niedDetection.activeStationIds
-      : EMPTY_STATION_IDS;
+  const showWaves = replayEvent
+    ? replaySeconds > 0
+    : Boolean(rawMapEvent && !rawMapEvent.cancelled && (rawMapEvent === latestEvent || rawMapEvent === autoGlobalEvent));
+  const globalAutoPresentation = Boolean(!replayEvent && autoGlobalEvent && rawMapEvent === autoGlobalEvent);
+  const rawMapDetectionStationIds = globalAutoPresentation
+    ? EMPTY_STATION_IDS
+    : replayEvent
+      ? replaySimulation?.activeStationIds ?? EMPTY_STATION_IDS
+      : niedDetection.detected
+        ? niedDetection.activeStationIds
+        : EMPTY_STATION_IDS;
   const mapDetectionStationIds = rawMapDetectionStationIds.length ? rawMapDetectionStationIds : EMPTY_STATION_IDS;
   const rawMapDetectionRanks = replayEvent ? replaySimulation?.ranks ?? EMPTY_RANKS : liveDetectionRanks;
   const mapDetectionRanks = mapDetectionStationIds.length ? rawMapDetectionRanks : EMPTY_RANKS;
@@ -2144,13 +3301,16 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   const activeNiedCount = replayEvent ? replaySimulation?.activeStationIds.length ?? 0 : niedDetection.activeStationIds.length;
   const activeKmaCount = replayEvent ? kmaReplaySimulation?.activeStationIds.length ?? 0 : kmaDetection.activeStationIds.length;
   const activeOceanCount = Object.values(displayedOceanRanks).filter((rank) => rank >= (displayedOceanMode === "measured" ? 0.5 : 0.25)).length;
+  const measuredOceanCount = displayedOceanMode === "measured" ? Object.keys(displayedOceanRanks).length : 0;
   const activeGlobalCount = globalSimulation?.activeStationIds.length ?? 0;
   const activeCwaCount = cwaSimulation?.activeStationIds.length ?? 0;
   const oceanHistorySelected = displayedOceanMode === "measured" && Boolean(snetMeasuredFrame) && !selectedSnetEvent?.active;
   const oceanResponseActive = displayedOceanMode === "measured"
     ? Boolean(selectedSnetEvent?.active && activeOceanCount)
     : Boolean(activeOceanCount);
-  const overlayEvent = warningOverlayTab === "selected" ? selectedEvent ?? latestEvent : latestEvent;
+  const overlayEvent = warningOverlayTab === "selected"
+    ? selectedEvent ?? autoGlobalEvent ?? latestEvent
+    : autoGlobalEvent ?? latestEvent;
   const cencMetrics = cencReport?.stationMetrics?.length ? cencReport.stationMetrics : cencReport?.stations ?? [];
   const cencMaxIntensity = cencMetrics[0]?.intensity ?? null;
   const cencMaxPga = cencMetrics.length ? cencMetrics.reduce((max, station) => Math.max(max, station.pgaGal ?? 0), 0) : null;
@@ -2177,13 +3337,115 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   }), [snetMeasuredFrame, snetStations]);
   const snetSimulationActiveCount = snetStations.filter((station) => (oceanSimulation?.ranks[station.id] ?? 0) >= 0.25).length;
   const snetSimulationMaxRank = Math.max(0, ...snetStations.map((station) => oceanSimulation?.ranks[station.id] ?? 0));
+  const niedWaveformCandidates = useMemo(() => {
+    if (!mapDetectionSelectionActive || !mapDetectionStationIds.length || !catalogue?.stations.length) return [];
+    const activeIds = new Set(mapDetectionStationIds);
+    const strongest = catalogue.stations
+      .filter((station) => activeIds.has(station.id))
+      .sort((a, b) => (mapDetectionRanks[b.id] ?? 0) - (mapDetectionRanks[a.id] ?? 0))[0];
+    if (!strongest) return [];
+    const cells = buildNiedDetectionGridCells(
+      catalogue.stations,
+      mapDetectionStationIds,
+      mapDetectionRanks,
+      niedGridAnchor(strongest),
+    );
+    return rankNiedWaveformCandidates(
+      waveformFdsnStations,
+      cells,
+      strongest.latitude,
+      strongest.longitude,
+      waveformEventTime,
+    );
+  }, [catalogue, mapDetectionRanks, mapDetectionSelectionActive, mapDetectionStationIds, waveformEventTime, waveformFdsnStations]);
+  const niedWaveformCandidateKey = niedWaveformCandidates
+    .slice(0, 30)
+    .map((candidate) => `${candidate.mode}:${candidate.station.id}`)
+    .join("|");
+  const niedWaveformCandidatesRef = useRef(niedWaveformCandidates);
+  niedWaveformCandidatesRef.current = niedWaveformCandidates;
+  const niedWaveformSessionKey = mapDetectionSelectionActive && mapDetectionStationIds.length
+    ? replayEvent ? `replay:${eewReportKey(replayEvent)}` : "live"
+    : null;
+  const hasNiedWaveformCandidates = Boolean(niedWaveformCandidateKey);
 
   useEffect(() => {
+    if (!niedWaveformSessionKey) {
+      autoNiedWaveformSelection.current = null;
+      niedWaveformProbeSession.current = null;
+      if (waveformAutoPlayKey?.startsWith("nied:")) setWaveformAutoPlayKey(null);
+      return;
+    }
+    if (niedWaveformProbeSession.current === niedWaveformSessionKey || !hasNiedWaveformCandidates) return;
+    niedWaveformProbeSession.current = niedWaveformSessionKey;
+    const controller = new AbortController();
+    let active = true;
+    const run = async () => {
+      const candidates = niedWaveformCandidatesRef.current;
+      const inside = candidates.filter((candidate) => candidate.mode === "inside").slice(0, 12);
+      const nearest = candidates.filter((candidate) => candidate.mode === "nearest").slice(0, 24);
+      let selected: typeof candidates[number] | null = null;
+      for (const group of [inside, nearest]) {
+        for (let offset = 0; offset < group.length && !selected; offset += 3) {
+          const batch = group.slice(offset, offset + 3);
+          const checks = await Promise.all(batch.map(async (candidate) => {
+            try {
+              const available = await probeFdsnWaveform(
+                candidate.station,
+                5,
+                waveformEventTime,
+                controller.signal,
+              );
+              return available ? candidate : null;
+            } catch (error) {
+              if (error instanceof DOMException && error.name === "AbortError") throw error;
+              return null;
+            }
+          }));
+          selected = checks.find((candidate): candidate is typeof group[number] => candidate !== null) ?? null;
+        }
+        if (selected) break;
+      }
+      if (!active || !selected) return;
+      autoNiedWaveformSelection.current = {
+        sessionKey: niedWaveformSessionKey,
+        stationId: selected.station.id,
+        mode: selected.mode,
+      };
+      autoNiedSelectionSession.current = niedWaveformSessionKey;
+      setVerifiedWaveformStations((current) => [
+        selected,
+        ...current.filter((candidate) => candidate.station.id !== selected.station.id),
+      ].sort((a, b) => a.distanceKm - b.distanceKm));
+      setShowWaveformStations(true);
+      focusStation(selected.station, "waveform-auto");
+      setWaveformAutoPlayKey(`nied:${selected.mode}:${niedWaveformSessionKey}:${selected.station.id}`);
+    };
+    void run().catch((error) => {
+      if (!active || error instanceof DOMException && error.name === "AbortError") return;
+      niedWaveformProbeSession.current = null;
+    });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [focusStation, hasNiedWaveformCandidates, niedWaveformSessionKey, setShowWaveformStations, waveformAutoPlayKey, waveformEventTime]);
+
+  useEffect(() => {
+    const sessionKey = replayEvent ? `replay:${eewReportKey(replayEvent)}` : "live";
+    if (autoNiedWaveformSelection.current?.sessionKey === sessionKey
+      && autoNiedWaveformSelection.current.stationId) {
+      autoNiedSelectionSession.current = sessionKey;
+      return;
+    }
+    if (eventStationKey && autoWaveformSelection.current?.eventKey === eventStationKey && verifiedWaveformStations.length) {
+      autoNiedSelectionSession.current = null;
+      return;
+    }
     if (!mapDetectionSelectionActive || !mapDetectionStationIds.length) {
       autoNiedSelectionSession.current = null;
       return;
     }
-    const sessionKey = replayEvent ? `replay:${replayEvent.id}` : "live";
     if (autoNiedSelectionSession.current === sessionKey) return;
     const activeIds = new Set(mapDetectionStationIds);
     const strongest = [...(catalogue?.stations ?? [])]
@@ -2192,7 +3454,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
     if (!strongest) return;
     autoNiedSelectionSession.current = sessionKey;
     focusStation(strongest, "nied-auto");
-  }, [catalogue, focusStation, mapDetectionRanks, mapDetectionSelectionActive, mapDetectionStationIds, replayEvent]);
+  }, [catalogue, eventStationKey, focusStation, mapDetectionRanks, mapDetectionSelectionActive, mapDetectionStationIds, replayEvent, verifiedWaveformStations.length]);
 
   const focusReplayDetection = () => {
     const activeStationSet = new Set(replaySimulation?.activeStationIds ?? []);
@@ -2210,6 +3472,37 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
     }
     setReplayPlaying((value) => !value);
   };
+
+  const verifiedWaveformIndex = selectedStation
+    ? verifiedWaveformStations.findIndex(({ station }) => station.id === selectedStation.id)
+    : -1;
+  const focusVerifiedWaveformStation = useCallback((direction: -1 | 1) => {
+    if (verifiedWaveformStations.length < 2) return;
+    const currentIndex = verifiedWaveformIndex >= 0 ? verifiedWaveformIndex : 0;
+    const nextIndex = (currentIndex + direction + verifiedWaveformStations.length) % verifiedWaveformStations.length;
+    focusStation(verifiedWaveformStations[nextIndex].station, "waveform-auto");
+  }, [focusStation, verifiedWaveformIndex, verifiedWaveformStations]);
+  const focusPreviousVerifiedWaveformStation = useCallback(
+    () => focusVerifiedWaveformStation(-1),
+    [focusVerifiedWaveformStation],
+  );
+  const focusNextVerifiedWaveformStation = useCallback(
+    () => focusVerifiedWaveformStation(1),
+    [focusVerifiedWaveformStation],
+  );
+  const selectedWaveformDistance = verifiedWaveformIndex >= 0
+    ? verifiedWaveformStations[verifiedWaveformIndex].distanceKm
+    : null;
+  const selectedWaveformAutoPlayKey = selectedStation && isGlobalStation(selectedStation)
+    && (autoNiedWaveformSelection.current?.stationId === selectedStation.id
+      || autoWaveformSelection.current?.stationId === selectedStation.id)
+    ? waveformAutoPlayKey
+    : null;
+  const selectedWaveformAutoPlayLabel = selectedWaveformAutoPlayKey?.startsWith("nied:nearest:")
+    ? "NIED 框内无可用波形 · 最近站已切换，从预计 P 波到时滚动"
+    : selectedWaveformAutoPlayKey?.startsWith("nied:inside:")
+      ? "NIED 框内波形站联动 · 已从预计 P 波到时开始滚动"
+      : "自动选站联动 · 已自动开始波形滚动";
 
   return (
     <>
@@ -2233,15 +3526,24 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
               <SourceIndicator label="KMA-PEWS 官方实时" state={kmaState} latency={kmaLatency} />
               <SourceIndicator label="Wolfx HTTP 多机构 EEW" state={wolfxState} latency={wolfxLatency} />
               <SourceIndicator label="P2P / JMA EEW 回退" state={fanState} latency={fallbackLatency} />
+              <SourceIndicator label="INGV Early-est 授权源" state={earlyEstState} latency={earlyEstLatency} />
+              <SourceIndicator label="GlobalQuake 授权源" state={globalQuakeState} latency={globalQuakeLatency} />
               <SourceIndicator label="JMA 海啸预报 code 552" state={jmaTsunamiState} latency={jmaTsunamiLatency} />
               <SourceIndicator label="CENC 烈度多源后端" state={cencState} latency={cencLatency} />
               <SourceIndicator label="MSIL S-net 实测历史" state={snetState} latency={snetSnapshot?.latencyMs ?? null} />
               <SourceIndicator label={`全球机构报告 ${institutionSourceCount}/${INSTITUTION_SOURCE_TOTAL}`} state={officialState} latency={officialLatency} />
               <SourceIndicator
-                label={`全球 FDSN 测站 ${globalStationSnapshot?.returnedCount ?? 0}`}
+                label={`全球 FDSN 目录 ${globalStationSnapshot?.returnedCount ?? 0}`}
                 state={globalStationState}
                 latency={globalStationSnapshot
                   ? Math.max(0, ...globalStationSnapshot.sources.filter((source) => source.status === "ok").map((source) => source.latencyMs ?? 0)) || null
+                  : null}
+              />
+              <SourceIndicator
+                label={`FDSN 原始波形通道 ${waveformStationSnapshot?.returnedCount ?? 0}`}
+                state={waveformStationState}
+                latency={waveformStationSnapshot
+                  ? Math.max(0, ...waveformStationSnapshot.sources.filter((source) => source.status === "ok").map((source) => source.latencyMs ?? 0)) || null
                   : null}
               />
               <SourceIndicator
@@ -2255,7 +3557,38 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
               <input type="range" min="1" max="60" step="1" value={globalRefreshSeconds} aria-label="实时地震全球机构刷新间隔（秒）" onInput={(event) => setGlobalRefreshSeconds(normalizeEarthquakeRefreshSeconds(event.currentTarget.value))} />
               <small><span>1 秒</span><span>60 秒</span></small>
             </label>
-            {(globalStationError || cwaStationError) && <p className="seismic-source-error">{[globalStationError, cwaStationError].filter(Boolean).join("；")}</p>}
+            <div className="seismic-global-auto-locate">
+              <label className="toggle-row"><input type="checkbox" checked={movieModeEnabled} onChange={(event) => setMovieModeEnabled(event.target.checked)} />电影模式 <em>{!movieModeEnabled ? "关闭" : movieCameraMode === "locked" ? "固定视野" : `${eligibleGlobalEvents.length} 个震源轮巡`}</em></label>
+              <div className="seismic-movie-camera-modes" role="group" aria-label="电影模式镜头方式">
+                <button
+                  type="button"
+                  className={movieCameraMode === "locked" ? "active" : ""}
+                  disabled={!movieModeEnabled}
+                  onClick={() => setMovieCameraMode("locked")}
+                ><MapIcon size={13} />固定当前视野</button>
+                <button
+                  type="button"
+                  className={movieCameraMode === "auto" ? "active" : ""}
+                  disabled={!movieModeEnabled}
+                  onClick={() => {
+                    setMovieCameraMode("auto");
+                    setAutoLocateGlobalEarthquakes(true);
+                  }}
+                ><LocateFixed size={13} />阈值自动镜头</button>
+              </div>
+              {movieModeEnabled && movieCameraMode === "locked" && <small>程序化镜头已锁定在当前范围：纬度 {mapViewport.minLatitude.toFixed(2)}–{mapViewport.maxLatitude.toFixed(2)}、经度 {mapViewport.minLongitude.toFixed(2)}–{mapViewport.maxLongitude.toFixed(2)}；仍可手动平移缩放，点击测站只更新详情。</small>}
+              {movieModeEnabled && movieCameraMode === "auto" && <small>{autoGlobalEvent
+                ? `镜头 ${autoGlobalEvent.place} · M ${(autoGlobalEvent.magnitude ?? 0).toFixed(1)} · 半径每秒扩大 1 km（当前 ${Math.max(1, Math.floor((clock - movieCameraEnteredAt) / 1_000) + 1)} km）；${eligibleGlobalEvents.length > 1 ? `每 5 秒轮巡 ${eligibleGlobalEvents.length} 个震源，新震源立即抢占。` : "等待其他震源进入队列。"}`
+                : "等待达到阈值的全球机构或授权预警；新震源会立即抢占镜头。"
+              }</small>}
+              <label className="toggle-row"><input type="checkbox" checked={autoLocateGlobalEarthquakes} disabled={movieModeEnabled && movieCameraMode === "locked"} onChange={(event) => setAutoLocateGlobalEarthquakes(event.target.checked)} />全球地震达到阈值时自动定位 <em>{autoGlobalEvent ? "已激活" : "监视中"}</em></label>
+              <label>
+                <span><strong>自动定位震级阈值</strong><output>M {autoMagnitudeThreshold.toFixed(1)}</output></span>
+                <input type="range" min="4" max="8" step="0.5" value={autoMagnitudeThreshold} disabled={!autoLocateGlobalEarthquakes || (movieModeEnabled && movieCameraMode === "locked")} aria-label="全球地震自动定位震级阈值" onInput={(event) => setAutoLocateMagnitude(Number(event.currentTarget.value))} />
+              </label>
+              {!movieModeEnabled && <small>{autoGlobalEvent ? `正在跟踪 ${autoGlobalEvent.place} · M ${(autoGlobalEvent.magnitude ?? 0).toFixed(1)}；无 NIED 检知框，已激活传播测站与最近波形站。` : "达到阈值后自动定位震中、激活全球测站，并核验最近可用原始波形。"}</small>}
+            </div>
+            {(globalStationError || waveformStationError || cwaStationError) && <p className="seismic-source-error">{[globalStationError, waveformStationError, cwaStationError].filter(Boolean).join("；")}</p>}
           </section>
           <section className="control-section seismic-tsunami-control">
             <div className="section-title"><span><Waves /></span><strong>JMA 海啸预报</strong></div>
@@ -2276,14 +3609,107 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
             <div className="section-title"><span><Layers3 /></span><strong>测站图层</strong></div>
             <label className="toggle-row"><input type="checkbox" checked={showNied} onChange={(event) => setShowNied(event.target.checked)} />NIED K-NET / KiK-net <em>{catalogue?.stations.length ?? "--"}</em></label>
             <label className="toggle-row"><input type="checkbox" checked={showKma} onChange={(event) => setShowKma(event.target.checked)} />韩国 KMA-PEWS <em>{kmaStations.length || "--"}</em></label>
-            <label className="toggle-row"><input type="checkbox" checked={showCenc} onChange={(event) => setShowCenc(event.target.checked)} />CENC 仪器烈度 <em>{cencReport ? cencMetrics.length : "--"}</em></label>
+            <label className="toggle-row"><input type="checkbox" checked={showCenc} onChange={(event) => setShowCenc(event.target.checked)} />CENC 仪器烈度 <em>{cencReport ? `${cencReport.stations.length} / ${cencMetrics.length} 可定位` : "--"}</em></label>
             <label className="toggle-row"><input type="checkbox" checked={showOcean} onChange={(event) => setShowOcean(event.target.checked)} />S-net 海底测站 <em>{oceanCatalogue?.counts["S-net"] ?? "--"}</em></label>
             <label className="toggle-row"><input type="checkbox" checked={showOtherOcean} onChange={(event) => setShowOtherOcean(event.target.checked)} />DONET / N-net <em>{oceanCatalogue ? (oceanCatalogue.counts.DONET1 ?? 0) + (oceanCatalogue.counts.DONET2 ?? 0) + (oceanCatalogue.counts["N-net"] ?? 0) : "--"}</em></label>
             <label className="toggle-row"><input type="checkbox" checked={showGlobalStations} onChange={(event) => setShowGlobalStations(event.target.checked)} />全球 FDSN 测站 <em>{globalFdsnStations.length || "--"}</em></label>
+            <label className="toggle-row"><input type="checkbox" checked={showWaveformStations} onChange={(event) => setShowWaveformStations(event.target.checked)} />FDSN 原始波形测站（粉色） <em>{waveformFdsnStations.length || "--"}</em></label>
+            <div className="fdsn-manual-picker">
+              <select
+                aria-label="手动选择 FDSN 原始波形测站"
+                value={selectedStation && isGlobalStation(selectedStation) && selectedStation.providerId !== "cwa" ? selectedStation.id : ""}
+                onChange={(event) => {
+                  const station = manualFdsnStations.find((candidate) => candidate.id === event.target.value);
+                  if (station) focusStation(station);
+                }}
+                disabled={!manualFdsnStations.length}
+              >
+                <option value="">手动选择波形测站（待机也可查看）</option>
+                {manualFdsnStations.map((station) => <option key={station.id} value={station.id}>{station.network} {station.stationCode} · {station.stationName}</option>)}
+              </select>
+              <span>粉色层表示目录声明近实时波形通道；点击后实际核验并读取最新 5 分钟 miniSEED</span>
+            </div>
             <label className="toggle-row"><input type="checkbox" checked={showCwaStations} onChange={(event) => setShowCwaStations(event.target.checked)} />CWA 台湾 CWASN <em>{cwaStations.length || "--"}</em></label>
-            <label className="toggle-row"><input type="checkbox" checked={showGnssStations} onChange={(event) => setShowGnssStations(event.target.checked)} />中国大陆GNSS站点 <em>{GNSS_STATIONS.length}</em></label>
-            <label className="toggle-row"><input type="checkbox" checked={showLocalImpact} onChange={(event) => setShowLocalImpact(event.target.checked)} />本地预测烈度 / 震度区域 <em>{affectedLayers.local.features.length}</em></label>
+            <label className="toggle-row"><input type="checkbox" checked={showPalertStations} onChange={(event) => setShowPalertStations(event.target.checked)} />台湾 P-Alert 强震网 <em>{palertSnapshot?.stations.length || "--"}</em></label>
+            <label className="toggle-row"><input type="checkbox" checked={showGnssStations} onChange={(event) => setShowGnssStations(event.target.checked)} />中国大陆GNSS站点 · 模拟 MMI <em>{showGnssStations && gnssSimulation ? `${GNSS_STATIONS.length} · ${gnssSimulation.maxRank.toFixed(1)}` : GNSS_STATIONS.length}</em></label>
+            <label className="toggle-row"><input type="checkbox" checked={showLocalImpact} onChange={(event) => setShowLocalImpact(event.target.checked)} />本地预测烈度 / 震度区域 <em>{localAdministrativeRegionCount} / {impactRegions?.features.length ?? "--"} 区</em></label>
             <label className="toggle-row"><input type="checkbox" checked={showOfficialImpact} onChange={(event) => setShowOfficialImpact(event.target.checked)} />官方影响地区 <em>{affectedLayers.official.features.length}</em></label>
+            {regionalBoundaryError && <p className="seismic-source-error">中港台行政区边界：{regionalBoundaryError}</p>}
+            <a className="seismic-tsunami-source-link" href={palertSnapshot?.sourceUrl ?? "https://palert.earth.sinica.edu.tw/stations"} target="_blank" rel="noreferrer">打开 P-Alert 官方站点目录<ExternalLink size={12} /></a>
+            {palertState !== "online" && palertError && <p className="seismic-source-error">P-Alert：{palertError}</p>}
+          </section>
+          <section className="control-section seismic-fault-control">
+            <div className="section-title"><span><Layers3 /></span><strong>地质构造图层</strong></div>
+            <label className="toggle-row"><input type="checkbox" checked={showGlobalFaults} onChange={(event) => setShowGlobalFaults(event.target.checked)} />全球断裂带 <em>{globalFaults?.metadata?.sourceFeatureCount ?? (showGlobalFaults ? "加载中" : "关闭")}</em></label>
+            <div className="seismic-fault-legend" aria-label="全球断裂带最近活动年代分级">
+              <span><i className="older" />年代较老 / 未知</span>
+              <span><i className="late-quaternary" />晚第四纪</span>
+              <span><i className="holocene" />全新世</span>
+              <span><i className="recent" />历史 / 近期</span>
+            </div>
+            <p className="seismic-fault-note">按 GEM 的 last_movement 字段分级：绿色不代表“无断层”，仅表示活动年代较老或资料未知。</p>
+            <a className="seismic-tsunami-source-link" href="https://github.com/GEMScienceTools/gem-global-active-faults" target="_blank" rel="noreferrer">打开 GEM 全球活动断层数据库<ExternalLink size={12} /></a>
+            {globalFaultError && <p className="seismic-source-error">全球断裂带：{globalFaultError}</p>}
+          </section>
+          <section className="control-section seismic-jshis-control">
+            <div className="section-title"><span><Layers3 /></span><strong>J-SHIS 日本官方产品</strong></div>
+            <label className="toggle-row"><input type="checkbox" checked={showJshisHazard} disabled={!jshisLocation?.hazard} onChange={(event) => { setShowJshisHazard(event.target.checked); if (event.target.checked && jshisLocation) focusJshisLocation(jshisLocation); }} />概率地震动网格 <em>{jshisLocation?.hazard?.meshcode ?? "未查询"}</em></label>
+            <label className="toggle-row"><input type="checkbox" checked={showJshisSite} disabled={!jshisLocation?.site} onChange={(event) => { setShowJshisSite(event.target.checked); if (event.target.checked && jshisLocation) focusJshisLocation(jshisLocation); }} />浅层地盘网格 <em>{jshisLocation?.site?.meshcode ?? "未查询"}</em></label>
+            <label className="toggle-row"><input type="checkbox" checked={showJshisFault} disabled={!jshisFault} onChange={(event) => { setShowJshisFault(event.target.checked); if (event.target.checked && jshisFault) focusJshisFault(jshisFault); }} />所选断层面 <em>{jshisFault?.code ?? "未选择"}</em></label>
+            {jshisLocation
+              ? <><div className="seismic-jshis-actions"><button onClick={() => focusJshisLocation(jshisLocation)}><LocateFixed size={12} />定位网格</button><button onClick={() => setJshisTarget({ latitude: jshisLocation.latitude, longitude: jshisLocation.longitude, label: `J-SHIS 网格 ${jshisLocation.hazard?.meshcode ?? jshisLocation.site?.meshcode ?? ""}` })}>查看四类位置产品</button>{jshisFault && <button onClick={() => focusJshisFault(jshisFault)}><LocateFixed size={12} />定位断层</button>}</div><p className="seismic-fault-note">官方位置 API 返回单个约 250 米网格，载入及重新开启图层时会定位到 13 级；黄色为长期概率危险度，青色为浅层地盘，红色断层点云使用 WebGL。</p></>
+              : <p className="seismic-fault-note">选择日本周边测站或机构报告后点击 J-SHIS，才会读取官方位置端点；不会在全球范围伪造结果。</p>}
+            <a className="seismic-tsunami-source-link" href="https://www.j-shis.bosai.go.jp/en/api-list" target="_blank" rel="noreferrer">打开 J-SHIS API 文档<ExternalLink size={12} /></a>
+          </section>
+          <section className="control-section seismic-shakemap-control">
+            <div className="section-title"><span><MapIcon /></span><strong>USGS ShakeMap</strong></div>
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={showUsgsShakeMap}
+                disabled={!shakeMapReport || (!usgsShakeMap && !usgsShakeMapLoading)}
+                onChange={(event) => setShowUsgsShakeMap(event.target.checked)}
+              />
+              官方 MMI 等值线
+              <em>{usgsShakeMapLoading ? "加载中" : usgsShakeMap ? `${visibleShakeMapContours?.features.length ?? 0}/${usgsShakeMap.contours.features.length} 组` : "未选择"}</em>
+            </label>
+            {usgsShakeMap && <div className="seismic-shakemap-levels" aria-label="ShakeMap MMI 分级图层">
+              {SHAKEMAP_MMI_LEVELS.map((level) => {
+                const available = availableShakeMapMmiLevels.has(level);
+                return <label key={level} className={available ? "" : "unavailable"} title={available ? `显示或隐藏 MMI ${intensityRomanLabel(level)} 等值线` : `当前官方产品没有 MMI ${intensityRomanLabel(level)} 等值线`}>
+                  <input
+                    type="checkbox"
+                    checked={enabledShakeMapMmiLevels.includes(level)}
+                    disabled={!available}
+                    onChange={() => toggleShakeMapMmiLevel(level)}
+                  />
+                  <i style={{ background: mmiIntensityColor(level) }} />
+                  <span>{intensityRomanLabel(level)}</span>
+                </label>;
+              })}
+            </div>}
+            {usgsShakeMap
+              ? <><div className="seismic-shakemap-meta"><span>最大 MMI <strong>{usgsShakeMap.maxMmi.toFixed(1)}</strong></span><span>{usgsShakeMap.reviewStatus}</span></div><p className="seismic-fault-note">已锁定：{shakeMapReport?.place ?? usgsShakeMap.eventId}。自动轮巡不会清空或重新请求此图层。</p></>
+              : <p className="seismic-fault-note">在机构报告中选择带 ShakeMap 标记的 USGS 地震后叠加；没有官方产品时不会显示按钮或图层。</p>}
+            {usgsShakeMap && <a className="seismic-tsunami-source-link" href={usgsShakeMap.officialUrl} target="_blank" rel="noreferrer">打开 USGS ShakeMap 产品页<ExternalLink size={12} /></a>}
+            {usgsShakeMapError && <p className="seismic-source-error">ShakeMap：{usgsShakeMapError}</p>}
+          </section>
+          <section className="control-section seismic-shakemap-control">
+            <div className="section-title"><span><BarChart3 /></span><strong>USGS PAGER</strong></div>
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={showPagerCities}
+                disabled={!pagerReport || (!usgsPager && !usgsPagerLoading)}
+                onChange={(event) => setShowPagerCities(event.target.checked)}
+              />
+              Show all cities 烈度标
+              <em>{usgsPagerLoading ? "加载中" : usgsPager ? `${usgsPager.allCities.length} 城市` : "未选择"}</em>
+            </label>
+            {usgsPager
+              ? <><div className="seismic-shakemap-meta"><span>人口暴露 <strong>{usgsPager.populationExposure.totalPopulation.toLocaleString("zh-CN")}</strong></span><span>{usgsPager.alertLevel.toUpperCase()}</span></div><p className="seismic-fault-note">已锁定：{pagerReport?.place ?? usgsPager.eventId}。轮巡仅切换震中，不刷新已发布人口产品。</p><button className="seismic-control-product-button" onClick={() => pagerReport && setPagerEvent(pagerReport)}>打开三图与结构摘要</button></>
+              : <p className="seismic-fault-note">选择带 PAGER 标记的 USGS 报告后，地图会绘制官方 all_cities 全部城市，不只显示默认 on_map 子集。</p>}
+            {usgsPagerError && <p className="seismic-source-error">PAGER：{usgsPagerError}</p>}
           </section>
           <section className="control-section seismic-station-search">
             <div className="section-title"><span><Search /></span><strong>观测测站</strong></div>
@@ -2300,7 +3726,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
           </section>
           <section className="control-section seismic-legal-note">
             <div className="section-title"><span><AlertTriangle /></span><strong>数据级别</strong></div>
-            <p>NIED 帧经 Yahoo 公开边缘端点读取；S-net 实测历史来自 MSIL 观测瓦片色值反算。JMA 海啸状态由 P2P 地震信息转发的气象厅 code 552 报文驱动，海岸预报线来自 JMA 官方 GIS；全球台站来自 FDSN Station，CWASN 位置来自 CWA GDMS。所有本地推算和传播回放均不作为官方预警。</p>
+            <p>NIED 帧经 Yahoo 公开边缘端点读取；S-net 实测历史来自 MSIL 观测瓦片色值反算。JMA 海啸状态由 P2P 地震信息转发的气象厅 code 552 报文驱动，海岸预报线来自 JMA 官方 GIS；全球台站来自 FDSN Station，CWASN 位置来自 CWA GDMS，P-Alert 仅实时读取中研院官方站点目录并遵守其资料使用说明。全球断裂带来自 GEM GAF-DB（CC BY-SA 4.0），是地质背景参考，不代表实时风险。所有本地推算和传播回放均不作为官方预警。</p>
           </section>
         </div>
       </aside>
@@ -2319,11 +3745,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
             <div className="earthquake-status-pill"><span>本地时间</span><strong>{formatTime(clock)}</strong></div>
           </div>
         </header>
-        {(niedCatalogueError || oceanCatalogueError || jmaCatalogueError || tsunamiCatalogueError) && <div className="error-banner">台网目录更新失败：{[
+        {(niedCatalogueError || oceanCatalogueError || jmaCatalogueError || tsunamiCatalogueError || regionalBoundaryError) && <div className="error-banner">台网目录更新失败：{[
           niedCatalogueError && `NIED：${niedCatalogueError}`,
           oceanCatalogueError && `海底台网：${oceanCatalogueError}`,
           jmaCatalogueError && `JMA：${jmaCatalogueError}`,
           tsunamiCatalogueError && `JMA 海啸：${tsunamiCatalogueError}`,
+          regionalBoundaryError && `中港台边界：${regionalBoundaryError}`,
         ].filter(Boolean).join("；")}</div>}
 
         <section className="seismic-primary-grid">
@@ -2331,7 +3758,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
             <header className="earthquake-panel-header">
               <div><strong>全球实时测站与烈震度影响地图</strong><span>{replayEvent ? "预测区先显示；S 波到区后加深，全球与 CWASN 测站按到时激活" : "区域实时台网、全球 FDSN 与 CWA CWASN 台站均可点击"}</span></div>
               <div className="seismic-map-header-actions">
-                <div className="seismic-map-summary"><span><i className="nied" />NIED {catalogue?.stations.length ?? 0}</span><span><i className="kma" />KMA {kmaStations.length}</span><span><i className="cenc" />CENC {cencMetrics.length}</span><span><i className="ocean" />海底 {oceanCatalogue?.stations.length ?? 0}</span><span><i className="fdsn" />FDSN {globalFdsnStations.length}</span><span><i className="cwa" />CWA {cwaStations.length}</span><span><i className="gnss" />GNSS {GNSS_STATIONS.length}</span></div>
+                <div className="seismic-map-summary"><span><i className="nied" />NIED {catalogue?.stations.length ?? 0}</span><span><i className="kma" />KMA {kmaStations.length}</span><span><i className="cenc" />CENC {cencReport?.stations.length ?? 0}/{cencMetrics.length}</span><span><i className="ocean" />海底 {oceanCatalogue?.stations.length ?? 0}</span><span><i className="fdsn" />FDSN {globalFdsnStations.length}</span><span><i className="waveform" />波形层 {waveformFdsnStations.length} · {waveformProbeState === "probing" ? `事件核验中${verifiedWaveformStations.length ? ` ${verifiedWaveformStations.length}` : ""}` : waveformProbeState === "ready" ? `事件已核验 ${verifiedWaveformStations.length}` : waveformProbeState === "unavailable" ? "事件暂无" : "待机"}</span><span><i className="cwa" />CWA {cwaStations.length}</span><span><i className="palert" />P-Alert {palertSnapshot?.stations.length ?? 0}</span><span><i className="gnss" />GNSS {GNSS_STATIONS.length}{showGnssStations && gnssSimulation ? ` · MMI ${gnssSimulation.maxRank.toFixed(1)}` : ""}</span>{showGlobalFaults && <span><i className="fault" />断裂 {globalFaults?.metadata?.sourceFeatureCount ?? "--"}</span>}{jshisLocation && <span><i className="jshis" />J-SHIS {jshisLocation.hazard?.meshcode ?? jshisLocation.site?.meshcode}</span>}{showUsgsShakeMap && usgsShakeMap && <span><i className="shakemap" />ShakeMap {visibleShakeMapContours?.features.length ?? 0}/{usgsShakeMap.contours.features.length}</span>}{showPagerCities && usgsPager && <span><i className="pager" />PAGER 城市 {usgsPager.allCities.length}</span>}</div>
                 <button className="seismic-map-theme-button" title="全球测站视图" aria-label="全球测站视图" onClick={() => setMapFocus({ key: `global:${Date.now()}`, latitude: 18, longitude: 0, zoom: 2, exact: true })}><Globe2 size={15} /></button>
                 <button className="seismic-map-theme-button" title={mapTheme === "dark" ? "切换为浅色地图" : "切换为深色地图"} aria-label={mapTheme === "dark" ? "切换为浅色地图" : "切换为深色地图"} onClick={() => setMapTheme((value) => value === "dark" ? "light" : "dark")}>{mapTheme === "dark" ? <Sun size={15} /> : <Moon size={15} />}</button>
               </div>
@@ -2343,10 +3770,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
                 niedStations={catalogue?.stations ?? []}
                 kmaStations={kmaStations}
                 oceanStations={oceanCatalogue?.stations ?? []}
-                globalStations={mapGlobalFdsnStations}
-                globalResponseStations={globalResponseStations}
+                globalStations={globalFdsnStations}
+                waveformStations={waveformFdsnStations}
                 cwaStations={cwaStations}
                 gnssStations={GNSS_STATIONS}
+                verifiedWaveformStationIds={verifiedWaveformStations.map(({ station }) => station.id)}
+                palertStations={palertSnapshot?.stations ?? []}
                 cencReport={showCenc ? cencReport : null}
                 niedFrame={mapDetectionStationIds.length ? niedFrame : null}
                 kmaValues={kmaDetection.activeStationIds.length ? kmaValues : EMPTY_NUMBERS}
@@ -2357,8 +3786,10 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
                 showOtherOcean={showOtherOcean}
                 showCenc={showCenc}
                 showGlobal={showGlobalStations}
+                showWaveform={showWaveformStations}
                 showCwa={showCwaStations}
                 showGnss={showGnssStations}
+                showPalert={showPalertStations}
                 selectedStation={selectedStation}
                 selectedEvent={mapEvent ?? null}
                 selectedReport={selectedInstitutionReport}
@@ -2367,14 +3798,28 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
                 replayRanks={replayEvent ? replaySimulation?.ranks ?? EMPTY_RANKS : null}
                 oceanRanks={displayedOceanRanks}
                 globalRanks={globalSimulation?.ranks ?? EMPTY_RANKS}
+                gnssRanks={gnssSimulation?.ranks ?? EMPTY_RANKS}
+                gnssMode={replayEvent ? "replay" : "live"}
                 cwaRanks={cwaSimulation?.ranks ?? EMPTY_RANKS}
                 oceanMode={displayedOceanMode}
                 localRegions={affectedLayers.local}
                 officialRegions={affectedLayers.official}
                 tsunamiRegions={activeTsunamiRegions}
+                globalFaults={globalFaults}
+                jshisLocation={jshisLocation}
+                jshisFault={jshisFault}
+                shakeMap={usgsShakeMap}
+                shakeMapContours={visibleShakeMapContours}
+                pagerCities={usgsPager?.allCities ?? []}
                 showLocalImpact={showLocalImpact}
                 showOfficialImpact={showOfficialImpact}
                 showTsunami={showJmaTsunami}
+                showGlobalFaults={showGlobalFaults}
+                showJshisHazard={showJshisHazard}
+                showJshisSite={showJshisSite}
+                showJshisFault={showJshisFault}
+                showShakeMap={showUsgsShakeMap}
+                showPagerCities={showPagerCities}
                 detectionStationIds={mapDetectionStationIds}
                 detectionRanks={mapDetectionRanks}
                 detectionMode={replayEvent ? "replay" : "live"}
@@ -2421,8 +3866,8 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
                   <button className={activeKmaCount ? "detected" : ""} onClick={() => focusStrongestDetection("KMA-PEWS")} disabled={!activeKmaCount}>
                     <span><i />KMA-PEWS</span><strong>{replayEvent ? `烈度 ${intensityRomanLabel(kmaReplaySimulation?.maxRank ?? 0)}` : kmaDetection.currentMaxLabel}</strong><small>{replayEvent ? `${activeKmaCount} 站 · 回放模拟` : kmaDetection.detected ? `${kmaDetection.activeStationIds.length} 站 · ${kmaDetection.clusterCount} 簇` : "实时摇晃检知待机"}</small><time>{replayEvent ? `T+${replaySeconds.toFixed(2)} s` : kmaDetection.updatedAt ? formatTime(kmaDetection.updatedAt) : "建立 60 秒基线"}</time>
                   </button>
-                  <button className={oceanResponseActive ? "detected ocean" : "ocean"} onClick={focusStrongestOceanResponse} disabled={!activeOceanCount}>
-                    <span><i />S-net / DONET / N-net</span><strong>{displayedOceanMode === "measured" && snetMeasuredFrame ? `震度 ${displayRankLabel(snetMeasuredFrame.maxIntensity)}` : oceanSimulation ? `震度 ${oceanSimulation.maxRank.toFixed(1)}` : "待机"}</strong><small>{activeOceanCount ? displayedOceanMode === "measured" ? oceanHistorySelected ? `${activeOceanCount} 站 · 历史已结束` : `${activeOceanCount} 站 · MSIL 实测反算` : `${activeOceanCount} 站 · ${oceanMode === "replay" ? "回放模拟" : "EEW 本地预测"}` : displayedOceanMode === "measured" ? "S-net 实测待机" : "等待有效地震事件"}</small><time>{displayedOceanMode === "measured" && snetMeasuredFrame ? formatTime(snetMeasuredFrame.timestamp) : oceanResponseEvent ? `T+${oceanResponseElapsed.toFixed(2)} s` : "等待数据"}</time>
+                  <button className={oceanResponseActive ? "detected ocean" : "ocean"} onClick={focusStrongestOceanResponse} disabled={displayedOceanMode === "measured" ? !snetMeasuredRows.length : !activeOceanCount}>
+                    <span><i />S-net / DONET / N-net</span><strong>{displayedOceanMode === "measured" && snetMeasuredFrame ? `震度 ${displayRankLabel(snetMeasuredFrame.maxIntensity)} · ${snetMeasuredFrame.maxIntensity.toFixed(2)}` : oceanSimulation ? `震度 ${oceanSimulation.maxRank.toFixed(1)}` : "待机"}</strong><small>{displayedOceanMode === "measured" && snetMeasuredFrame ? selectedSnetEvent ? oceanHistorySelected ? `${measuredOceanCount} 站观测 · 历史已结束` : `${measuredOceanCount} 站观测 · MSIL 实测反算` : `${measuredOceanCount} 站观测 · 最新帧（微小值也显示）` : activeOceanCount ? `${activeOceanCount} 站 · ${oceanMode === "replay" ? "回放模拟" : "EEW 本地预测"}` : "等待有效地震事件"}</small><time>{displayedOceanMode === "measured" && snetMeasuredFrame ? formatTime(snetMeasuredFrame.timestamp) : oceanResponseEvent ? `T+${oceanResponseElapsed.toFixed(2)} s` : "等待数据"}</time>
                   </button>
                 </div>
               </div>
@@ -2434,15 +3879,25 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
               <button className={panelTab === "station" ? "active" : ""} title="测站数据" onClick={() => setPanelTab("station")}><Antenna size={15} /><span>测站详情</span></button>
               <button className={panelTab === "intensity" ? "active" : ""} title="CENC 仪器烈度" onClick={() => setPanelTab("intensity")}><Database size={15} /><span>CENC 烈度</span></button>
               <button className={panelTab === "snet" ? "active" : ""} title="S-net 震度情报" onClick={() => setPanelTab("snet")}><Waves size={15} /><span>S-net 震度</span></button>
+              <button className={panelTab === "exposure" ? "active" : ""} title="USGS PAGER 人口暴露" onClick={() => setPanelTab("exposure")}><BarChart3 size={15} /><span>人口暴露</span></button>
             </nav>
             <div className="seismic-panel-body">
               {panelTab === "station" && (
                 selectedStation ? (
                   isGlobalStation(selectedStation) ? <>
                     <header className="seismic-station-heading"><span style={{ background: selectedDisplayColor }} /><div><strong>{selectedStation.stationName}</strong><small>{selectedStation.network} · {selectedStation.stationCode}</small></div><b>{isCwaStation(selectedStation) ? `CWASN · 震度 ${jmaShindoLabel(selectedRank ?? 0)}` : `FDSN · MMI ${(selectedRank ?? 0).toFixed(1)}`}</b></header>
+                    {!isCwaStation(selectedStation) && oceanResponseEvent && <div className={`fdsn-waveform-discovery ${waveformProbeState}`}>
+                      {waveformProbeState === "probing" ? <Loader2 className="spin" size={13} /> : <Waves size={13} />}
+                      <span>{waveformProbeState === "probing"
+                        ? `正在按震中距核验原始波形${verifiedWaveformStations.length ? ` · 已找到 ${verifiedWaveformStations.length} 站` : ""}`
+                        : waveformProbeState === "ready"
+                          ? `已核验 ${verifiedWaveformStations.length} 个发震时段原始波形测站`
+                          : "暂未找到发震时段可读取的原始波形，实时事件会自动重试"}</span>
+                    </div>}
                     <dl className="earthquake-detail-list"><div><dt>坐标</dt><dd>{selectedStation.latitude.toFixed(4)}, {selectedStation.longitude.toFixed(4)}</dd></div><div><dt>海拔</dt><dd>{selectedStation.elevationM?.toFixed(0) ?? "--"} m</dd></div><div><dt>启用时间</dt><dd>{selectedStation.startTime ? formatTime(selectedStation.startTime, false) : "--"}</dd></div><div><dt>目录节点</dt><dd>{selectedStation.providers.join(" / ")}</dd></div><div><dt>事件响应</dt><dd>{oceanResponseEvent ? `${isCwaStation(selectedStation) ? `本地估算震度 ${jmaShindoLabel(selectedRank ?? 0)}` : `本地估算 MMI ${(selectedRank ?? 0).toFixed(1)}`} · T+${oceanResponseElapsed.toFixed(1)} s` : "等待有效地震事件"}</dd></div></dl>
                     <div className="fdsn-provider-links">{stationProviderSources.filter((source) => selectedStation.providers.includes(source.id)).map((source) => <a key={source.id} href={source.officialUrl} target="_blank" rel="noreferrer"><i style={{ background: FDSN_PROVIDER_COLORS[source.id] }} />{source.label}<small>{source.status === "ok" ? `${source.latencyMs ?? "--"} ms` : "当前异常"}</small><ExternalLink size={12} /></a>)}</div>
                     <p className="seismic-data-label">{isCwaStation(selectedStation) ? "台站位置来自 CWA GDMS 的 CWASN 官方目录；地图变色与下方滚动是明确标注的本地传播估算，不是 CWA 实时波形或官方震度报告。" : "台站位置来自 FDSN Station；地图响应是本地传播估算，下方波形仅显示 Dataselect 返回并由浏览器解压的 miniSEED 原始计数，不从震度或震级合成。"}</p>
+                    {isJshisPositionSupported(selectedStation.latitude, selectedStation.longitude) && <button className="seismic-station-jshis-button" onClick={() => setJshisTarget({ latitude: selectedStation.latitude, longitude: selectedStation.longitude, label: `${selectedStation.network} ${selectedStation.stationCode} · ${selectedStation.stationName}` })}><Layers3 size={14} />J-SHIS 位置风险 / 地盘 / 滑坡 / 断层</button>}
                   </> : isCencStation(selectedStation) ? <>
                     <header className="seismic-station-heading"><span style={{ background: cencIntensityColor(selectedStation.intensity) }} /><div><strong>{selectedStation.stationName}</strong><small>CENC 仪器烈度 · {selectedStation.stationCode}</small></div><b>烈度 {intensityRomanLabel(selectedStation.intensity)}</b></header>
                     <div className="seismic-gauge-grid"><article><Gauge size={18} /><span>仪器烈度</span><strong>{intensityRomanLabel(selectedStation.intensity)} · {selectedStation.intensity.toFixed(1)}</strong><meter min="0" max="12" value={selectedStation.intensity} /></article><article><Activity size={18} /><span>PGA 实测</span><strong>{selectedStation.pgaGal?.toFixed(1) ?? "--"} gal</strong><meter min="0" max="2000" value={selectedStation.pgaGal ?? 0} /></article><article><Waves size={18} /><span>PGV 实测</span><strong>{selectedStation.pgvCms?.toFixed(1) ?? "--"} cm/s</strong><meter min="0" max="100" value={selectedStation.pgvCms ?? 0} /></article></div>
@@ -2454,36 +3909,39 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
                     <dl className="earthquake-detail-list"><div><dt>坐标</dt><dd>{selectedStation.latitude.toFixed(4)}, {selectedStation.longitude.toFixed(4)}</dd></div><div><dt>海底深度</dt><dd>{selectedStation.depthM.toFixed(0)} m</dd></div><div><dt>当前样本</dt><dd>{displayedOceanMode === "measured" ? snetMeasuredFrame ? `${formatTime(snetMeasuredFrame.timestamp)} MSIL 观测帧` : "等待 MSIL 帧" : oceanMode === "replay" ? `T+${replaySeconds.toFixed(2)} s 回放` : oceanMode === "local" ? `T+${oceanResponseElapsed.toFixed(2)} s 本地预测` : "等待有效事件"}</dd></div><div><dt>数据性质</dt><dd>{displayedOceanMode === "measured" ? "海しる强震动观测瓦片色值反算" : "事件驱动确定性传播计算"}</dd></div></dl>
                     <a className="seismic-station-link" href={selectedStation.waveformUrl} target="_blank" rel="noreferrer">打开官方延迟波形<ExternalLink size={13} /></a>
                     <p className="seismic-data-label">{displayedOceanMode === "measured" ? "这是 MSIL 每分钟观测瓦片的色标反算值，与截图所用方法一致；它不是 NIED 发布的官方震度公告，也不是原始波形计算结果。" : "地图变色和滚动值来自当前 EEW 或回放事件的确定性传播计算，不是 NIED 官方实时观测。"}</p>
+                    {isJshisPositionSupported(selectedStation.latitude, selectedStation.longitude) && <button className="seismic-station-jshis-button" onClick={() => setJshisTarget({ latitude: selectedStation.latitude, longitude: selectedStation.longitude, label: `${selectedStation.network} ${selectedStation.stationCode}` })}><Layers3 size={14} />J-SHIS 位置风险 / 地盘 / 滑坡 / 断层</button>}
                   </> : <>
                     <header className="seismic-station-heading"><span style={{ background: selectedDisplayColor }} /><div><strong>{selectedStation.stationName}</strong><small>{selectedStation.network} · {selectedStation.stationCode}</small></div><b>{isNiedStation(selectedStation) ? `震度 ${jmaShindoLabel(selectedRank ?? 0)}` : `烈度 ${intensityRomanLabel(selectedRank ?? 0)}`}</b></header>
                     <div className="seismic-gauge-grid"><article><Gauge size={18} /><span>{isNiedStation(selectedStation) ? "震度" : "烈度"}</span><strong>{isNiedStation(selectedStation) ? `${jmaShindoLabel(selectedRank ?? 0)} · ${(selectedRank ?? 0).toFixed(1)}` : `${intensityRomanLabel(selectedRank ?? 0)} · ${(selectedRank ?? 0).toFixed(1)}`}</strong><meter min="0" max={isKmaStation(selectedStation) ? 12 : 7} value={selectedRank ?? 0} /></article><article><Activity size={18} /><span>PGA 经验估算</span><strong>{motion.pgaGal.toFixed(2)} gal</strong><meter min="0" max="1000" value={motion.pgaGal} /></article><article><Waves size={18} /><span>PGV 经验估算</span><strong>{motion.pgvCms.toFixed(2)} cm/s</strong><meter min="0" max="100" value={motion.pgvCms} /></article></div>
                     <dl className="earthquake-detail-list"><div><dt>坐标</dt><dd>{selectedStation.latitude.toFixed(4)}, {selectedStation.longitude.toFixed(4)}</dd></div><div><dt>最新采样</dt><dd>{replayEvent ? `T+${replaySeconds.toFixed(2)} s` : rollingHistory.length ? formatTime(rollingHistory[rollingHistory.length - 1].timestamp) : "等待数据"}</dd></div><div><dt>采样类型</dt><dd>{isNiedStation(selectedStation) ? replayEvent ? "历史事件确定性回放模拟" : "NIED 离散实时强度" : replayEvent ? "历史事件确定性回放模拟" : "KMA-PEWS 官方逐秒 MMI"}</dd></div></dl>
                     <p className="seismic-data-label">{replayEvent ? "当前值来自历史事件的传播回放，不是 NIED 实测；PGA/PGV 仍为经验换算。" : "PGA/PGV 为根据震度换算的经验估算，不是测站原始加速度计数据。"}</p>
+                    {isJshisPositionSupported(selectedStation.latitude, selectedStation.longitude) && <button className="seismic-station-jshis-button" onClick={() => setJshisTarget({ latitude: selectedStation.latitude, longitude: selectedStation.longitude, label: `${selectedStation.network} ${selectedStation.stationCode} · ${selectedStation.stationName}` })}><Layers3 size={14} />J-SHIS 位置风险 / 地盘 / 滑坡 / 断层</button>}
                   </>
                 ) : <div className="seismic-empty"><MapPin size={28} /><strong>请在地图或搜索结果中选择测站</strong></div>
               )}
 
               {panelTab === "intensity" && <>
-                <header className="seismic-section-heading"><div><strong>CENC 仪器烈度分布</strong><span>后端单例聚合 · {cencProvider}</span></div><b className={cencState === "online" ? "online" : ""}>{cencState === "online" ? "在线" : cencState === "stale" ? "缓存 · 重连中" : cencState === "error" ? "中断 · 重试中" : "连接中"}</b></header>
+                <header className="seismic-section-heading"><div><strong>CENC 仪器烈度分布</strong><span>公开 24 列坐标导出 + 实时中继合并 · {cencProvider}</span></div><b className={cencState === "online" ? "online" : ""}>{cencState === "online" ? "在线" : cencState === "stale" ? "缓存 · 重连中" : cencState === "error" ? "中断 · 重试中" : "连接中"}</b></header>
                 <div className="seismic-cenc-picker"><select value={selectedCencId ?? ""} onChange={(event) => chooseCencReport(event.target.value)} disabled={!cencReports.length}><option value="">等待烈度报告</option>{cencReports.map((report) => <option key={report.id} value={report.id}>{formatTime(report.originTime)} · {report.place} M{report.magnitude?.toFixed(1) ?? "--"}</option>)}</select><button title="在地图定位报告" aria-label="在地图定位报告" disabled={!selectedCencId} onClick={() => selectedCencId && chooseCencReport(selectedCencId)}><LocateFixed size={16} /></button></div>
                 {cencReport && cencReport.id === selectedCencId ? <>
                   <h3>{cencReport.place}</h3>
-                  <div className="seismic-eew-metrics"><div><span>震级 / 深度</span><strong>M {cencReport.magnitude?.toFixed(1) ?? "--"} · {cencReport.depthKm?.toFixed(0) ?? "--"} km</strong></div><div><span>最大仪器烈度</span><strong>{cencMaxIntensity === null ? "--" : `${intensityRomanLabel(cencMaxIntensity)} · ${cencMaxIntensity.toFixed(1)}`}</strong></div><div><span>报告测站</span><strong>{cencMetrics.length}</strong></div></div>
+                  <div className="seismic-eew-metrics"><div><span>震级 / 深度</span><strong>M {cencReport.magnitude?.toFixed(1) ?? "--"} · {cencReport.depthKm?.toFixed(0) ?? "--"} km</strong></div><div><span>最大仪器烈度</span><strong>{cencMaxIntensity === null ? "--" : `${intensityRomanLabel(cencMaxIntensity)} · ${cencMaxIntensity.toFixed(1)}`}</strong></div><div><span>报告 / 可定位测站</span><strong>{cencMetrics.length} / {cencReport.stations.length}</strong></div></div>
+                  {cencMetrics.length > cencReport.stations.length && <p className="seismic-source-error">国家地震科学数据中心公开表提供烈度、PGA 与震中距，但未公开这些记录的台站经纬度；应用只绘制实时源曾返回并已核验坐标的测站，不按震中距伪造位置。</p>}
                   <dl className="earthquake-detail-list"><div><dt>发震时刻</dt><dd>{formatTime(cencReport.originTime)}</dd></div><div><dt>报告生成</dt><dd>{formatTime(cencReport.createdAt)}</dd></div><div><dt>最大 PGA</dt><dd>{cencMaxPga?.toFixed(1) ?? "--"} gal</dd></div><div><dt>坐标</dt><dd>{cencReport.latitude.toFixed(3)}, {cencReport.longitude.toFixed(3)}</dd></div></dl>
-                  <div className="seismic-cenc-station-list"><div><span>测站</span><span>仪器烈度</span><span>PGA</span></div>{cencMetrics.slice(0, 24).map((metric) => { const mappedStation = cencReport.stations.find((station) => station.stationCode === metric.stationCode); const networkCode = "networkCode" in metric ? metric.networkCode : "CENC"; return <button key={metric.id} disabled={!mappedStation} title={mappedStation ? "在地图定位测站" : "官方公开页未提供该测站坐标"} onClick={() => mappedStation && focusStation(mappedStation)}><span><i style={{ background: cencIntensityColor(metric.intensity) }} /><b>{metric.stationName}</b><small>{networkCode} · {metric.stationCode}</small></span><strong>{intensityRomanLabel(metric.intensity)}</strong><em>{metric.pgaGal?.toFixed(1) ?? "--"} gal</em></button>; })}</div>
+                  <div className="seismic-cenc-station-list"><div><span>测站</span><span>仪器烈度</span><span>PGA</span></div>{cencMetrics.slice(0, 24).map((metric) => { const mappedStation = cencReport.stations.find((station) => station.stationCode === metric.stationCode); const networkCode = "networkCode" in metric ? metric.networkCode : "CENC"; return <button key={metric.id} disabled={!mappedStation} title={mappedStation ? "在地图定位测站" : "该条速报的官方坐标导出仍在更新"} onClick={() => mappedStation && focusStation(mappedStation)}><span><i style={{ background: cencIntensityColor(metric.intensity) }} /><b>{metric.stationName}</b><small>{networkCode} · {metric.stationCode}</small></span><strong>{intensityRomanLabel(metric.intensity)}</strong><em>{metric.pgaGal?.toFixed(1) ?? "--"} gal</em></button>; })}</div>
                   <p className="seismic-data-label">烈度、PGA 与 PGV 均来自当前实际提供方；国家地震科学数据中心公开页没有给出测站坐标时只列实测值，不在地图伪造测站位置。</p>
                 </> : <div className="seismic-empty"><Loader2 className="spin" size={28} /><strong>正在读取 CENC 烈度详情</strong><span>{cencState === "stale" ? "后端正在切换公开源，已保留最后有效报告。" : cencState === "error" ? "FAN 与国家地震科学数据中心当前均不可达；未使用模拟烈度补数。" : "列表和详情由后端多源聚合统一更新。"}</span></div>}
               </>}
 
               {panelTab === "snet" && <>
-                <header className="seismic-section-heading"><div><strong>S-net 震度情报</strong><span>{snetViewMode === "measured" ? selectedSnetEvent?.source === "screenshot" ? `截图补录 · ${selectedSnetEvent.reportCount} 份报告` : `海しる MSIL · ${snetSnapshot?.availableFrameCount ?? 0} 个观测帧${snetSnapshot && !snetSnapshot.backfillComplete && snetSnapshot.backfillPendingFrameCount !== null ? ` · 历史补录剩余 ${snetSnapshot.backfillPendingFrameCount} 帧` : ""}` : oceanResponseEvent ? `${oceanMode === "replay" ? "历史事件回放" : "当前 EEW 本地响应"} · ${oceanResponseEvent.place}` : "等待有效地震事件"}</span></div><b className={snetState === "online" ? "online" : "experimental"}>{snetViewMode === "measured" ? selectedSnetEvent?.source === "screenshot" ? "截图补录" : snetState === "online" ? snetSnapshot?.backfillComplete ? "实测在线" : "实时在线 · 补录中" : snetState === "stale" ? "缓存" : snetState === "error" ? "中断" : "加载中" : "实验性"}</b></header>
+                <header className="seismic-section-heading"><div><strong>S-net 震度情报</strong><span>{snetViewMode === "measured" ? selectedSnetEvent?.source === "screenshot" ? `截图补录 · ${selectedSnetEvent.reportCount} 份报告` : selectedSnetEvent ? `海しる MSIL 历史检知 · ${selectedSnetEvent.reportCount} 报` : `海しる MSIL 最新观测 · ${snetSnapshot?.availableFrameCount ?? 0} 个帧缓存${snetSnapshot && !snetSnapshot.backfillComplete && snetSnapshot.backfillPendingFrameCount !== null ? ` · 历史补录剩余 ${snetSnapshot.backfillPendingFrameCount} 帧` : ""}` : oceanResponseEvent ? `${oceanMode === "replay" ? "历史事件回放" : "当前 EEW 本地响应"} · ${oceanResponseEvent.place}` : "等待有效地震事件"}</span></div><b className={snetState === "online" ? "online" : "experimental"}>{snetViewMode === "measured" ? selectedSnetEvent?.source === "screenshot" ? "截图补录" : selectedSnetEvent ? "历史实测" : snetState === "online" ? snetSnapshot?.backfillComplete ? "最新实测在线" : "实时在线 · 补录中" : snetState === "stale" ? "缓存" : snetState === "error" ? "中断" : "加载中" : "实验性"}</b></header>
                 <nav className="seismic-snet-mode-tabs" aria-label="S-net 数据模式">
                   <button className={snetViewMode === "measured" ? "active" : ""} onClick={() => setSnetViewMode("measured")}><Database size={14} />实测历史</button>
                   <button className={snetViewMode === "simulation" ? "active" : ""} onClick={() => setSnetViewMode("simulation")}><CircleGauge size={14} />本地推算</button>
                 </nav>
                 {snetViewMode === "measured" ? <>
-                  <div className="seismic-snet-summary three"><div><span>{selectedSnetReport ? `${selectedSnetReport.source === "screenshot" ? "截图补录" : "MSIL"} 第 ${selectedSnetReport.reportNumber} 报` : "MSIL 观测帧"}</span><strong>{selectedSnetReport ? formatTime(selectedSnetReport.observedAt) : snetMeasuredFrame ? formatTime(snetMeasuredFrame.timestamp) : "--"}</strong></div><div><span>最大震度</span><strong>{snetMeasuredFrame ? `${displayRankLabel(snetMeasuredFrame.maxIntensity)} · ${snetMeasuredFrame.maxIntensity.toFixed(2)}` : "-"}</strong></div><div><span>震度 1 以上</span><strong>{snetMeasuredFrame?.activeStationCount ?? 0} 站</strong></div></div>
-                  <div className="seismic-snet-picker"><select aria-label="S-net 检知事件" value={selectedSnetEventId ?? ""} onChange={(event) => chooseSnetEvent(event.target.value)} disabled={!snetSnapshot?.events.length}><option value="">暂无检知历史</option>{snetSnapshot?.events.map((event) => <option key={event.id} value={event.id}>{formatTime(event.peakAt)} · {event.reportCount ?? event.reports?.length ?? 1} 报 · 最大震度 {displayRankLabel(event.maxIntensity)}{event.source === "screenshot" ? " · 截图补录" : ""}</option>)}</select><button title="定位最强 S-net 测站" aria-label="定位最强 S-net 测站" onClick={focusStrongestOceanResponse} disabled={!snetMeasuredRows.length}><LocateFixed size={16} /></button></div>
+                  <div className="seismic-snet-summary three"><div><span>{selectedSnetReport ? `${selectedSnetReport.source === "screenshot" ? "截图补录" : "MSIL"} 第 ${selectedSnetReport.reportNumber} 报` : selectedSnetEvent ? "MSIL 历史观测帧" : "MSIL 最新观测帧"}</span><strong>{selectedSnetReport ? formatTime(selectedSnetReport.observedAt) : snetMeasuredFrame ? formatTime(snetMeasuredFrame.timestamp) : "--"}</strong></div><div><span>最大连续震度</span><strong>{snetMeasuredFrame ? `${displayRankLabel(snetMeasuredFrame.maxIntensity)} · ${snetMeasuredFrame.maxIntensity.toFixed(2)}` : "-"}</strong></div><div><span>全部 / 震度 1 以上</span><strong>{snetMeasuredFrame ? `${snetMeasuredFrame.stations.length} / ${snetMeasuredFrame.activeStationCount}` : "0 / 0"} 站</strong></div></div>
+                  <div className="seismic-snet-picker"><select aria-label="S-net 检知事件" value={selectedSnetEventId ?? "__live__"} onChange={(event) => chooseSnetEvent(event.target.value)} disabled={!snetSnapshot?.latestFrame}><option value="__live__">{snetSnapshot?.latestFrame ? `最新观测 ${formatTime(snetSnapshot.latestFrame.timestamp)} · 最大连续震度 ${snetSnapshot.latestFrame.maxIntensity.toFixed(2)}（微小值也显示）` : "等待最新观测"}</option>{snetSnapshot?.events.map((event) => <option key={event.id} value={event.id}>{formatTime(event.peakAt)} · {event.reportCount ?? event.reports?.length ?? 1} 报 · 最大震度 {displayRankLabel(event.maxIntensity)}{event.source === "screenshot" ? " · 截图补录" : ""}</option>)}</select><button title="定位最强 S-net 测站" aria-label="定位最强 S-net 测站" onClick={focusStrongestOceanResponse} disabled={!snetMeasuredRows.length}><LocateFixed size={16} /></button></div>
                   {selectedSnetEvent?.reports?.length ? <div className="seismic-snet-picker reports"><select aria-label="S-net 事件报次" value={selectedSnetReport?.id ?? ""} onChange={(event) => chooseSnetReport(event.target.value)}>{selectedSnetEvent.reports.map((report) => <option key={report.id} value={report.id}>第 {report.reportNumber} 报 · {formatTime(report.observedAt)} · 震度 {displayRankLabel(report.maxIntensity)} · {report.stationCount} 站{report.source === "screenshot" ? " · 补录" : ""}</option>)}</select></div> : null}
                   {snetMeasuredRows.length ? <div className="seismic-snet-ranking measured">{snetMeasuredRows.map(({ station, rank }) => <button key={station.id} onClick={() => focusStation(station)}><span><i style={{ background: intensityColor(Math.max(0, rank)) }} /><strong>{station.stationCode}</strong></span><em>{rank.toFixed(2)} <small>[{displayRankLabel(rank)}]</small></em></button>)}</div> : <div className="seismic-snet-waiting"><Loader2 className={snetState === "connecting" ? "spin" : ""} size={18} /><span>{snetState === "error" ? "MSIL 暂不可用，保留已持久化历史并继续重试。" : "正在回补 MSIL 最近一小时 S-net 观测瓦片。"}</span></div>}
                   {snetSnapshot?.events.length ? <div className="seismic-snet-history"><header><strong>检知历史</strong><span>同一连续震动为一个事件，事件内保留多报</span></header>{snetSnapshot.events.slice(0, 10).map((event) => <button key={event.id} className={selectedSnetEvent?.id === event.id ? "active" : ""} onClick={() => chooseSnetEvent(event.id)}><time>{formatTime(event.peakAt)}</time><span><b>震度 {displayRankLabel(event.maxIntensity)}</b><small>{event.reportCount ?? event.reports?.length ?? 1} 报 · {event.stationCount} 站 · {event.frameCount} 帧</small></span><em className={event.active ? "live" : ""}>{event.source === "screenshot" ? "截图补录" : event.active ? "进行中" : "结束"}</em></button>)}</div> : null}
@@ -2496,8 +3954,20 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
                   <p className="seismic-data-label">这里是事件驱动的确定性传播推算，不是测站实测；它与“实测历史”完全分离。</p>
                 </>}
               </>}
+
+              {panelTab === "exposure" && <PagerExposurePanel pager={usgsPager} loading={usgsPagerLoading} error={usgsPagerError} />}
             </div>
-            {selectedStation && isGlobalStation(selectedStation) && !isCwaStation(selectedStation) ? <FdsnWaveformPanel station={selectedStation} /> : <section className="seismic-station-rolling-panel" aria-live="polite">
+            {selectedStation && isGlobalStation(selectedStation) && !isCwaStation(selectedStation) ? <FdsnWaveformPanel
+              station={selectedStation}
+              eventTime={waveformEventTime}
+              verifiedIndex={verifiedWaveformIndex}
+              verifiedCount={verifiedWaveformStations.length}
+              distanceKm={selectedWaveformDistance}
+              autoPlayKey={selectedWaveformAutoPlayKey}
+              autoPlayLabel={selectedWaveformAutoPlayLabel}
+              onPrevious={verifiedWaveformStations.length > 1 ? focusPreviousVerifiedWaveformStation : undefined}
+              onNext={verifiedWaveformStations.length > 1 ? focusNextVerifiedWaveformStation : undefined}
+            /> : <section className="seismic-station-rolling-panel" aria-live="polite">
               <header><div><Activity size={14} /><span><strong>测站滚动</strong><small>{selectedStation ? `${selectedStation.network} ${selectedStation.stationCode}` : "未选择测站"}</small></span></div><b className={stationSelectionReason === "nied-auto" ? "auto" : ""}>{stationSelectionReason === "nied-auto" ? "NIED 自动选站" : rollingSampleMode}</b></header>
               <div className="seismic-station-rolling-content">
                 <div className="seismic-station-rolling-chart">{rollingHistory.length ? <ResponsiveContainer width="100%" height="100%"><LineChart data={rollingHistory}><CartesianGrid stroke="#2b3539" vertical={false} /><XAxis dataKey="timestamp" type="number" domain={["dataMin", "dataMax"]} hide /><YAxis domain={[selectedStation && isOceanStation(selectedStation) && displayedOceanMode === "measured" ? -3 : 0, selectedStation && (isKmaStation(selectedStation) || isCencStation(selectedStation) || isGlobalStation(selectedStation) && !isCwaStation(selectedStation)) ? 12 : 7]} hide /><Tooltip labelFormatter={(value) => formatTime(Number(value))} contentStyle={{ background: "#111719", border: "1px solid #364247", borderRadius: 4 }} /><Line type="stepAfter" dataKey="value" name="强度" stroke="#f59e0b" strokeWidth={2} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer> : <div className="seismic-rolling-empty"><Waves size={20} /><span>{selectedStation && isCencStation(selectedStation) ? "该报告只有单次仪器烈度" : replayEvent ? "推进回放后显示" : "等待所选测站采样"}</span></div>}</div>
@@ -2566,7 +4036,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
               <header className="seismic-lower-heading"><div><strong>全球机构地震报告</strong><span>近 90 天 M4+ · USGS、ShakeAlert、JMA、CENC、CWA、EMSC、GFZ、GeoNet、BMKG 独立保留</span></div><div><span>显示 / 总数</span><strong>{Math.min(240, institutionReports.length)} / {institutionReports.length}</strong></div><b>{officialState === "online" ? `${institutionSourceCount}/${INSTITUTION_SOURCE_TOTAL} 来源在线` : officialState === "stale" ? `${institutionSourceCount}/${INSTITUTION_SOURCE_TOTAL} 来源可用 · 含缓存` : "来源连接中"}</b></header>
               {institutionReports.length ? <div className="seismic-institution-layout">
                 <div className="seismic-institution-table" role="table" aria-label="全球机构地震报告">
-                  <div className="seismic-institution-head" role="row"><span>发震时间</span><span>机构</span><span>震中</span><span>震级</span><span>状态</span><span>原文</span></div>
+                  <div className="seismic-institution-head" role="row"><span>发震时间</span><span>机构</span><span>震中</span><span>震级</span><span>状态</span><span>产品 / 原文</span></div>
                   {institutionReports.slice(0, 240).map((report) => <div key={report.id} className={`seismic-institution-row ${selectedInstitutionReportId === report.id ? "active" : ""}`} role="row">
                     <button onClick={() => chooseInstitutionReport(report)}>
                       <time>{formatTime(report.time)}</time>
@@ -2575,11 +4045,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
                       <b>{formatMagnitudeType(report.magnitudeType)} {report.magnitude.toFixed(1)}</b>
                       <em>{report.status}</em>
                     </button>
-                    <a href={report.url} target="_blank" rel="noreferrer" aria-label={`打开 ${report.place} 机构原文`}><ExternalLink size={13} /></a>
+                    <div className="seismic-institution-row-actions">{isMechanismQueryable(report) && <button title="查看已确认存在的官方机制解" aria-label={`查看 ${report.place} 官方机制解`} onClick={() => setMechanismEvent(report)}><CircleGauge size={13} /></button>}{isJshisPositionSupported(report.latitude, report.longitude) && <button title="查看震中 J-SHIS 官方位置产品" aria-label={`查看 ${report.place} J-SHIS`} onClick={() => chooseJshisReport(report)}><Layers3 size={13} /></button>}{isShakeMapQueryable(report) && <button title="在实时地图叠加官方 USGS ShakeMap" aria-label={`叠加 ${report.place} USGS ShakeMap`} onClick={() => chooseShakeMapReport(report)}><MapIcon size={13} /></button>}{isPagerQueryable(report) && <button title="查看 USGS PAGER 三图、全部城市与人口暴露" aria-label={`查看 ${report.place} USGS PAGER`} onClick={() => choosePagerReport(report)}><BarChart3 size={13} /></button>}{isDyfiQueryable(report) && <button title="查看 USGS Did You Feel It? 图片与图表" aria-label={`查看 ${report.place} USGS DYFI`} onClick={() => chooseDyfiReport(report)}><MessageCircle size={13} /></button>}<a href={report.url} target="_blank" rel="noreferrer" aria-label={`打开 ${report.place} 机构原文`}><ExternalLink size={13} /></a></div>
                   </div>)}
                 </div>
                 {selectedInstitutionReport
-                  ? <InstitutionReportDetail record={selectedInstitutionReport} onFocus={() => chooseInstitutionReport(selectedInstitutionReport)} />
+                  ? <InstitutionReportDetail record={selectedInstitutionReport} onFocus={() => chooseInstitutionReport(selectedInstitutionReport)} onMechanism={setMechanismEvent} onShakeMap={chooseShakeMapReport} onPager={choosePagerReport} onDyfi={chooseDyfiReport} onJshis={chooseJshisReport} />
                   : <div className="seismic-lower-empty seismic-institution-empty"><Database size={26} /><strong>选择一份机构报告</strong><span>可查看来源原值，并在地图中定位震中。</span></div>}
               </div> : <div className="seismic-lower-empty"><Loader2 className="spin" size={26} /><strong>正在获取机构报告</strong><span>其他实时台网与预警流不受目录加载影响。</span></div>}
             </>}
@@ -2596,6 +4066,17 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
           <a href="https://www.cenc.ac.cn/" target="_blank" rel="noreferrer">CENC 官方网站<ExternalLink size={13} /></a>
         </section>
       </main>
+      {mechanismEvent && <FocalMechanismDialog event={mechanismEvent} onClose={() => setMechanismEvent(null)} />}
+      {pagerEvent && <UsgsPagerDialog event={pagerEvent} initialPager={usgsPager} onLoaded={setUsgsPager} onClose={() => setPagerEvent(null)} />}
+      {dyfiEvent && <UsgsDyfiDialog event={dyfiEvent} onClose={() => setDyfiEvent(null)} />}
+      {jshisTarget && <JshisDialog
+        latitude={jshisTarget.latitude}
+        longitude={jshisTarget.longitude}
+        label={jshisTarget.label}
+        onLoaded={handleJshisLoaded}
+        onFaultLoaded={handleJshisFaultLoaded}
+        onClose={() => setJshisTarget(null)}
+      />}
     </>
   );
 }

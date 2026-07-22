@@ -1,4 +1,4 @@
-import { cp, mkdir } from "node:fs/promises";
+import { cp, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { defineConfig, type Plugin, type PreviewServer, type ViteDevServer } from "vite";
 import react from "@vitejs/plugin-react";
@@ -29,6 +29,22 @@ function copyCatalogue() {
       const target = path.resolve("dist/data/ecmwf");
       await mkdir(target, { recursive: true });
       await cp(path.resolve("data/ecmwf"), target, { recursive: true });
+    },
+  };
+}
+
+function cleanBuildOutput(): Plugin {
+  return {
+    name: "clean-build-output-with-retry",
+    apply: "build",
+    enforce: "pre",
+    async buildStart() {
+      await rm(path.resolve("dist"), {
+        recursive: true,
+        force: true,
+        maxRetries: 12,
+        retryDelay: 100,
+      });
     },
   };
 }
@@ -155,8 +171,9 @@ function jmaTsunamiApi(): Plugin {
 
 export default defineConfig({
   base: "./",
-  plugins: [react(), modelChartApi(), earthquakeApi(), jmaTsunamiApi(), copyCatalogue()],
+  plugins: [cleanBuildOutput(), react(), modelChartApi(), earthquakeApi(), jmaTsunamiApi(), copyCatalogue()],
   build: {
+    emptyOutDir: false,
     sourcemap: false,
     minify: "terser",
     terserOptions: {
