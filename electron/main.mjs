@@ -15,6 +15,11 @@ function isSafeExternalUrl(rawUrl) {
 }
 
 async function startLocalService() {
+  try {
+    process.loadEnvFile(path.join(app.getAppPath(), ".env.local"));
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
   const runtimeDirectory = path.join(app.getPath("userData"), "runtime");
   await mkdir(runtimeDirectory, { recursive: true });
 
