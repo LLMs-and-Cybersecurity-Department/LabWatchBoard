@@ -49,7 +49,7 @@ pnpm check
 pnpm start
 ```
 
-`pnpm build` 会把最近一次 ECMWF 目录快照复制到 `dist/data/ecmwf/`，实时目录不可用时产品选择仍可工作。`server.mjs` 提供静态文件、SPA 回退、压缩、安全响应头、上游超时、ECMWF/点位预报同源代理、`/api/model-chart` 模式图表、`/api/earthquakes` 九机构地震报告聚合、`/api/seismic/external-warnings` 授权 Early-est / GlobalQuake 预警接入、`/api/seismic/fdsn/stations` 全球与 CWA CWASN 台站、`/api/seismic/fdsn/waveform` miniSEED 快照和 `/api/seismic/camera/resolve` 官方视频可嵌入性检查，以及 `/healthz` 健康检查。ECMWF 目录、动画帧和点位预报代理使用 128 MB 有界 LRU；瞬时 429/5xx 会自动重试，曾成功读取的同一 URL 在上游故障时以 `X-Proxy-Cache: STALE` 明确回退，健康接口会报告当前缓存条目和字节数。
+`pnpm build` 会把最近一次 ECMWF 目录快照复制到 `dist/data/ecmwf/`，实时目录不可用时产品选择仍可工作。`server.mjs` 提供静态文件、SPA 回退、压缩、安全响应头、上游超时、ECMWF/点位预报同源代理、`/api/model-chart` 模式图表、`/api/earthquakes` 九机构地震报告聚合、`/api/seismic/external-warnings` 授权 Early-est / GlobalQuake 预警接入、`/api/seismic/fdsn/stations` 全球与 CWA CWASN 台站、`/api/seismic/fdsn/waveform` miniSEED 快照、`/api/seismic/cenc-products` CENC 官方专题文字/烈度等值线/仪器烈度测站、`/api/seismic/cenc-resource` CENC 官方图片资源和 `/api/seismic/camera/resolve` 官方视频可嵌入性检查，以及 `/healthz` 健康检查。ECMWF 目录、动画帧和点位预报代理使用 128 MB 有界 LRU；瞬时 429/5xx 会自动重试，曾成功读取的同一 URL 在上游故障时以 `X-Proxy-Cache: STALE` 明确回退，健康接口会报告当前缓存条目和字节数。
 
 macOS、Windows、Linux 与 Android 的安装包构建、签名变量和源码保护边界见 [PACKAGING.md](./PACKAGING.md)。
 
@@ -74,6 +74,8 @@ macOS、Windows、Linux 与 Android 的安装包构建、签名变量和源码�
 | `MODEL_CHART_REQUEST_BUDGET` | `500` | 每分钟最多占用的上游坐标额度 |
 | `EARTHQUAKE_CACHE_TTL_MS` | `45000` | 地震聚合内存缓存有效期 |
 | `EARTHQUAKE_TIMEOUT_MS` | `16000` | 单个地震来源请求超时 |
+| `CWA_API_TOKEN` | 空 | CWA E-A0015/E-A0016 官方地震报告 API 授权码，仅由服务端读取；未配置时回退公开目录 |
+| `NSTI_HTTP_PROXY_URL` | 空 | 国家地震科学数据中心（NSTI）官方强震动/订阅网站请求使用的 HTTP/HTTPS 代理；可填 `http://127.0.0.1:7893` |
 | `EARTHQUAKE_SOURCE_SNAPSHOT_PATH` | `.runtime/earthquake-source-snapshots.json` | 九机构按查询视窗独立保存的最后成功报告快照 |
 | `EARTHQUAKE_SOURCE_SNAPSHOT_MAX_ENTRIES` | `45` | 最多持久化的机构报告来源视窗数 |
 | `FDSN_TIMEOUT_MS` | `18000` | 单个 FDSN 节点请求超时 |
@@ -99,10 +101,33 @@ macOS、Windows、Linux 与 Android 的安装包构建、签名变量和源码�
 | `GLOBALQUAKE_FEED_TOKEN` | 空 | GlobalQuake Feed Bearer Token，仅由服务端读取 |
 | `EXTERNAL_WARNING_TIMEOUT_MS` | `12000` | Early-est / GlobalQuake 单次授权 Feed 请求超时 |
 | `EXTERNAL_WARNING_CACHE_TTL_MS` | `3000` | 授权预警 Feed 内存缓存有效期 |
+| `CENC_HTTP_PROXY_URL` | 空 | 仅 CENC 产品请求使用的 HTTP/HTTPS 代理；本机 Clash 等代理可填 `http://127.0.0.1:7893` |
+| `CENC_EGRESS_PROXY_URL` | 空 | CENC 产品页服务端出口转发地址；配置后 pBoard 以 `?url=` 传递目标 URL，适用于你有权限使用的中国境内 HTTPS 转发服务 |
+| `CENC_PRODUCT_TIMEOUT_MS` | `18000` | CENC 产品请求超时 |
+| `CENC_PRODUCT_CACHE_TTL_MS` | `300000` | CENC 产品页内存缓存有效期 |
 
 对内网开放时至少配置 `DASHBOARD_USER` 和 `DASHBOARD_PASSWORD`，并在反向代理层启用 HTTPS。
 
 Early-est 与 GlobalQuake 当前没有随本项目分发的公开生产 Feed。只有在运营方提供合法授权地址后才可配置上述变量；Token 不会传给浏览器，未配置、过期和错误三种状态会分别展示，也不会用模拟事件冒充实时预警。
+
+CENC 地震专题页通过同源 `/api/seismic/cenc-products` 读取。该接口只允许 `www.cenc.ac.cn` 资源，能解析页面文字、图片、脚本链接和内嵌 GeoJSON，并可在应用内一键把解析出的 GeoJSON 叠加到地图；浏览器不直接访问 CENC。若当前出口收到 403/人机验证，应用会显示“受限”而不把错误页面当成产品。
+
+国家地震科学数据中心（NSTI）强震动参数页由 `/api/seismic/cenc-intensity` 后端读取。配置 `NSTI_HTTP_PROXY_URL=http://127.0.0.1:7893` 后，列表页和坐标导出请求均经本机 7893；界面会显示“NSTI 7893 HTTP 代理”。普通会员的“五级以上/全球七级以上”订阅按照官方用户手册以邮件更新提醒为主，不会自动变成可供第三方服务轮询的实时 API；pBoard 只读取公开强震动页面，不读取邮箱，也不会伪造订阅报文。若需读取授权账户内容，应通过 NSTI 官方账号/数据服务申请并由服务端单独配置授权凭据。
+
+在 macOS 上使用本机 7893 代理时，将下面一行加入 `.env.local`，然后重启 `pnpm start`：
+
+```dotenv
+CENC_HTTP_PROXY_URL=http://127.0.0.1:7893
+```
+
+这只给 CENC 后端请求设置 HTTP 代理，不会修改系统代理、TUN 或其他数据源；7893 必须确实是 HTTP/mixed 代理端口。若端口是 SOCKS5，请先提供 HTTP 转发端口。也可以改用你有权限使用的 HTTPS 转发服务，例如 `CENC_EGRESS_PROXY_URL=https://your-relay.example/cenc`，服务需接受 `?url=<CENC URL>`。pBoard 不会伪造中国 IP、绕过验证码或绕过访问控制。
+
+NSTI 与 CENC 可共用同一个 7893 出口，但配置项分开，便于分别停用或排查：
+
+```dotenv
+NSTI_HTTP_PROXY_URL=http://127.0.0.1:7893
+CENC_HTTP_PROXY_URL=http://127.0.0.1:7893
+```
 
 ## 爬取图表目录
 
