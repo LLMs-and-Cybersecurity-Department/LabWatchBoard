@@ -20,11 +20,13 @@ import {
   resolveJapanCameraRelay,
 } from "./japanCameras";
 import type { LiveEew } from "./seismic";
+import { WNI_CAMERA_MAP_URL, type WniCamera } from "./wniCameras";
 
 type SeismicCameraRelayProps = {
   event: LiveEew | null;
   replayMode: boolean;
   replayTimestamp: number | null;
+  wniCamera: { camera: WniCamera; distanceKm: number } | null;
 };
 
 type CameraProbeState = {
@@ -53,7 +55,7 @@ function relayModeDescription(mode: ReturnType<typeof resolveJapanCameraRelay>["
   return "官方当前画面";
 }
 
-export function SeismicCameraRelay({ event, replayMode, replayTimestamp }: SeismicCameraRelayProps) {
+export function SeismicCameraRelay({ event, replayMode, replayTimestamp, wniCamera }: SeismicCameraRelayProps) {
   const relevant = Boolean(event && !event.cancelled && isJapanCameraEvent(event));
   const ranked = useMemo(
     () => event && relevant ? rankJapanCameras(event) : [],
@@ -226,6 +228,7 @@ export function SeismicCameraRelay({ event, replayMode, replayTimestamp }: Seism
           <span>{selectedIndex + 1} / {ranked.length}</span>
           <button title="下一个附近镜头" aria-label="下一个附近镜头" onClick={() => selectCamera(selectedIndex + 1)}><ChevronRight size={14} /></button>
           <a href={selected.camera.officialPageUrl} target="_blank" rel="noreferrer">机构原页<ExternalLink size={11} /></a>
+          <a href={wniCamera?.camera.detailUrl ?? WNI_CAMERA_MAP_URL} target="_blank" rel="noreferrer" title={wniCamera ? `最近 WNI 镜头：${wniCamera.camera.name}，约 ${wniCamera.distanceKm.toFixed(0)} km` : "打开 WNI 全国摄像头地图"}>WNI附近<ExternalLink size={11} /></a>
           <a href={playableRelay?.watchUrl ?? relay.watchUrl} target="_blank" rel="noreferrer" title="在 YouTube 打开"><Video size={12} /></a>
         </nav>
       </>}
