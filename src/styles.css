@@ -3674,6 +3674,27 @@ button,
   accent-color: #f59e0b;
 }
 
+.seismic-global-auto-locate .seismic-receive-threshold {
+  padding: 6px;
+  border: 1px solid rgba(34, 211, 238, 0.28);
+  border-radius: 4px;
+  background: rgba(8, 145, 178, 0.08);
+}
+
+.seismic-global-auto-locate .seismic-receive-threshold input[type="range"] {
+  accent-color: #22d3ee;
+}
+
+.seismic-global-auto-locate .seismic-receive-threshold output {
+  color: #67e8f9;
+}
+
+.seismic-global-auto-locate label > small {
+  color: #7f918d;
+  font-size: 7px;
+  line-height: 1.45;
+}
+
 .seismic-global-auto-locate > small {
   color: #7f918d;
   font-size: 7px;
@@ -3976,6 +3997,45 @@ button,
   padding: 0 9px;
 }
 
+.seismic-sound-library-preview {
+  margin-top: 2px;
+}
+
+.seismic-sound-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: #aebbb8;
+  font-size: 8px;
+}
+
+.seismic-sound-custom label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.seismic-sound-custom input[type="file"] {
+  min-width: 0;
+  width: 100%;
+  color: #c9d4d2;
+  font-size: 8px;
+}
+
+.seismic-sound-custom button {
+  flex: 0 0 auto;
+  min-height: 25px;
+  padding: 3px 6px;
+  border: 1px solid #344044;
+  border-radius: 4px;
+  background: #111a1c;
+  color: #f6b554;
+  font-size: 8px;
+}
+
 .seismic-sound-controls output {
   min-height: 24px;
   display: flex;
@@ -4056,14 +4116,243 @@ button,
 }
 
 .seismic-topbar {
+  position: relative;
   border-left: 3px solid #ef4444;
+}
+
+.seismic-topbar-actions {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.seismic-settings-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid #536266;
+  border-radius: 5px;
+  background: #151f21;
+  color: #dce7e4;
+  font-size: 10px;
+}
+
+.seismic-settings-button:hover,
+.seismic-settings-button[aria-expanded="true"] {
+  border-color: #f59e0b;
+  color: #fcd34d;
+}
+
+.seismic-settings-popover {
+  position: absolute;
+  z-index: 900;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(430px, calc(100vw - 28px));
+  max-height: min(72vh, 680px);
+  display: grid;
+  gap: 8px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #526266;
+  border-radius: 7px;
+  background: rgba(13, 20, 22, 0.98);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.46);
+}
+
+.seismic-settings-popover > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #2f3c40;
+}
+
+.seismic-settings-popover > header div {
+  display: grid;
+  gap: 2px;
+}
+
+.seismic-settings-popover > header strong {
+  color: #f1f5f4;
+  font-size: 12px;
+}
+
+.seismic-settings-popover > header small,
+.seismic-settings-popover small {
+  color: #8fa09d;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.seismic-settings-popover > header button {
+  width: 24px;
+  height: 24px;
+  border: 1px solid #39474b;
+  border-radius: 4px;
+  background: #111a1c;
+  color: #c9d4d2;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.seismic-settings-popover .toggle-row {
+  margin: 0;
+  padding: 6px 7px;
+  border: 1px solid #29373a;
+  border-radius: 4px;
+  background: rgba(17, 27, 29, 0.72);
+}
+
+.seismic-layer-complexity {
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid #29373a;
+  border-radius: 4px;
+  background: rgba(17, 27, 29, 0.72);
+  color: #c9d4d2;
+  font-size: 9px;
+}
+
+.seismic-layer-complexity > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.seismic-layer-complexity output {
+  color: #f6b554;
+  font-weight: 700;
+}
+
+.seismic-layer-complexity input {
+  width: 100%;
+  accent-color: #f59e0b;
+}
+
+.seismic-settings-source-block {
+  display: grid;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid #29373a;
+  border-radius: 4px;
+}
+
+.seismic-settings-source-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.seismic-settings-source-heading strong {
+  margin-right: auto;
+  color: #dce7e4;
+  font-size: 9px;
+}
+
+.seismic-settings-source-heading button {
+  padding: 2px 5px;
+  border: 1px solid #39474b;
+  border-radius: 3px;
+  background: #111a1c;
+  color: #f6b554;
+  font-size: 8px;
+}
+
+.seismic-settings-source-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 8px;
+}
+
+.seismic-settings-source-grid label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #b8c6c2;
+  font-size: 8px;
+}
+
+.seismic-settings-source-grid input {
+  accent-color: #f59e0b;
 }
 
 .seismic-primary-grid {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 410px);
-  gap: 10px;
+  grid-template-columns: minmax(480px, 1fr) 10px minmax(300px, var(--seismic-side-panel-width, 410px));
+  gap: 0;
+  align-items: stretch;
+}
+
+.seismic-panel-resizer {
+  position: relative;
+  z-index: 570;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  touch-action: none;
+}
+
+.seismic-panel-resizer::before {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  background: #39474b;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.seismic-panel-resizer:hover::before,
+.seismic-panel-resizer:focus-visible::before {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
+}
+
+.seismic-panel-resizer--width {
+  width: 10px;
+  min-width: 10px;
+  cursor: col-resize;
+}
+
+.seismic-panel-resizer--width::before {
+  width: 3px;
+  height: 54px;
+}
+
+.seismic-panel-resizer--height {
+  position: absolute;
+  right: 50%;
+  bottom: 0;
+  width: 112px;
+  height: 14px;
+  transform: translateX(50%);
+  cursor: row-resize;
+}
+
+.seismic-panel-resizer--height::before {
+  width: 54px;
+  height: 3px;
+  background: rgba(226, 232, 240, 0.68);
+  box-shadow: 0 0 0 1px rgba(8, 13, 15, 0.78);
+}
+
+body.seismic-panel-resizing {
+  cursor: grabbing;
+  user-select: none;
 }
 
 .seismic-map-panel,
@@ -4129,8 +4418,10 @@ button,
 .seismic-map-summary .fdsn { background: #f472b6; }
 
 .seismic-waveform-station-pane canvas,
-.seismic-waveform-station-pane svg {
-  animation: fdsn-waveform-layer-pulse 2.4s ease-in-out infinite;
+.seismic-waveform-station-pane svg,
+.seismic-waveform-response-pane canvas,
+.seismic-waveform-response-pane svg {
+  animation: none;
 }
 
 @keyframes fdsn-waveform-layer-pulse {
@@ -4141,7 +4432,9 @@ button,
 
 @media (prefers-reduced-motion: reduce) {
   .seismic-waveform-station-pane canvas,
-  .seismic-waveform-station-pane svg { animation: none; }
+  .seismic-waveform-station-pane svg,
+  .seismic-waveform-response-pane canvas,
+  .seismic-waveform-response-pane svg { animation: none; }
 }
 .seismic-map-summary .waveform { background: #fbcfe8; box-shadow: 0 0 5px rgba(244, 114, 182, 0.9); }
 .seismic-map-summary .cwa { background: #f472b6; }
@@ -4283,8 +4576,8 @@ button,
 
 .seismic-map-shell {
   position: relative;
-  height: 650px;
-  min-height: 540px;
+  height: var(--seismic-map-panel-height, 650px);
+  min-height: 440px;
   overflow: hidden;
   background: #0a1012;
   container-name: seismic-map;
@@ -4299,11 +4592,24 @@ button,
 
 .seismic-jshis-webgl-layer {
   position: absolute;
-  inset: 0;
-  /* This canvas is attached directly to the Leaflet container, not a Leaflet pane. */
-  z-index: 405;
+  top: 0;
+  left: 0;
+  z-index: auto;
   display: block;
   pointer-events: none;
+}
+
+.seismic-map .leaflet-popup-pane {
+  z-index: 2000 !important;
+}
+
+.seismic-map .leaflet-tooltip-pane {
+  z-index: 1900 !important;
+}
+
+.seismic-map .leaflet-popup {
+  z-index: 1;
+  isolation: isolate;
 }
 
 .seismic-intensity-legend {
@@ -5130,7 +5436,7 @@ button,
 }
 
 .seismic-professional-panel {
-  height: 694px;
+  height: calc(var(--seismic-map-panel-height, 650px) + 44px);
   display: grid;
   grid-template-rows: 48px minmax(0, 1fr) 238px;
 }
@@ -5532,6 +5838,7 @@ button,
   margin: 3px 0 8px;
 }
 
+.fdsn-manual-picker input,
 .fdsn-manual-picker select {
   min-width: 0;
   width: 100%;
@@ -5543,6 +5850,8 @@ button,
   color: #fce7f3;
   font-size: 9px;
 }
+
+.fdsn-manual-picker input::placeholder { color: #9a778a; }
 
 .fdsn-manual-picker span {
   color: #bda4b2;
@@ -6872,7 +7181,7 @@ button,
 
 @media (max-width: 1280px) {
   .seismic-primary-grid {
-    grid-template-columns: minmax(0, 1fr) 360px;
+    grid-template-columns: minmax(440px, 1fr) 10px minmax(300px, var(--seismic-side-panel-width, 360px));
   }
 
   .seismic-map-summary span {
@@ -6887,14 +7196,19 @@ button,
 @media (max-width: 1080px) {
   .seismic-primary-grid {
     grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .seismic-panel-resizer--width {
+    display: none;
   }
 
   .seismic-professional-panel {
-    height: 620px;
+    height: max(620px, calc(var(--seismic-map-panel-height, 650px) + 44px));
   }
 
   .seismic-map-shell {
-    height: 560px;
+    height: var(--seismic-map-panel-height, 560px);
   }
 
   .seismic-intensity-legend {
@@ -6919,6 +7233,10 @@ button,
   .seismic-map-shell {
     height: 460px;
     min-height: 460px;
+  }
+
+  .seismic-panel-resizer--height {
+    display: none;
   }
 
   .seismic-camera-relay {
@@ -8029,6 +8347,179 @@ button,
   display: grid;
   place-items: center;
   padding: 0;
+}
+
+.cenc-product-dialog {
+  width: min(900px, calc(100vw - 24px));
+}
+
+.cenc-product-content {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.cenc-product-content h3,
+.cenc-product-content p {
+  margin: 0;
+}
+
+.cenc-product-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #344449;
+  border-radius: 5px;
+  background: #151f21;
+  font-size: 10px;
+}
+
+.cenc-product-state span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.cenc-product-state.online { border-color: #2b8a68; }
+.cenc-product-state.stale { border-color: #b7791f; }
+.cenc-product-state.restricted,
+.cenc-product-state.error { border-color: #a44d4d; }
+
+.cenc-product-summary,
+.cenc-product-content details p {
+  color: #b7c4c1;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.cenc-product-sections {
+  display: grid;
+  gap: 7px;
+}
+
+.cenc-product-sections article {
+  display: grid;
+  gap: 3px;
+  padding: 7px 8px;
+  border-left: 2px solid #d88922;
+  background: rgba(30, 39, 41, 0.72);
+}
+
+.cenc-product-sections strong {
+  color: #f6b554;
+  font-size: 9px;
+}
+
+.cenc-product-sections p {
+  color: #b7c4c1;
+  font-size: 9px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.cenc-product-layers {
+  display: grid;
+  gap: 6px;
+}
+
+.cenc-product-layers > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #f6b554;
+  font-size: 10px;
+}
+
+.cenc-product-layers button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid #344449;
+  border-radius: 4px;
+  background: #111a1c;
+  color: #dce7e4;
+  text-align: left;
+  font-size: 9px;
+}
+
+.cenc-product-layers button:not(:disabled):hover {
+  border-color: #f59e0b;
+  color: #fcd34d;
+}
+
+.cenc-product-layers button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.cenc-product-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.cenc-product-images a {
+  display: grid;
+  gap: 4px;
+  overflow: hidden;
+  border: 1px solid #303d40;
+  border-radius: 5px;
+  background: #0d1416;
+  color: #c9d4d2;
+  font-size: 8px;
+}
+
+.cenc-product-images img {
+  width: 100%;
+  height: 96px;
+  object-fit: cover;
+  background: #202a2d;
+}
+
+.cenc-product-images span {
+  padding: 0 6px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cenc-product-links {
+  display: grid;
+  gap: 4px;
+}
+
+.cenc-product-links a,
+.cenc-product-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #7dd3fc;
+  font-size: 9px;
+}
+
+.cenc-product-content details {
+  border-top: 1px solid #293438;
+  padding-top: 8px;
+}
+
+.cenc-product-content summary {
+  cursor: pointer;
+  color: #c9d4d2;
+  font-size: 9px;
+}
+
+.cenc-product-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 4px;
+  color: var(--muted);
+  font-size: 8px;
 }
 
 .mechanism-event-line {
