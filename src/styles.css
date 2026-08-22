@@ -5076,6 +5076,58 @@ body.seismic-panel-resizing {
   display: none;
 }
 
+.seismic-map .seismic-station-value-icon,
+.seismic-map .seismic-hypocenter-icon {
+  border: 0;
+  background: transparent;
+  image-rendering: auto;
+  filter: none;
+}
+
+.seismic-map .seismic-station-value-icon {
+  pointer-events: none;
+}
+
+.seismic-map .seismic-hypocenter-icon {
+  pointer-events: auto;
+}
+
+.seismic-map .seismic-station-value-icon img,
+.seismic-map .seismic-hypocenter-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: none;
+}
+
+.seismic-map .seismic-station-value-icon.selected {
+  filter: drop-shadow(0 0 2px #ffffff) drop-shadow(0 2px 3px rgba(0, 0, 0, 0.72));
+}
+
+.seismic-map .seismic-hypocenter-icon {
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.72));
+}
+
+.seismic-map .leaflet-tooltip.ocean-station-side-label {
+  min-width: 14px;
+  margin: 0;
+  padding: 2px 4px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 3px;
+  background: rgba(7, 16, 18, 0.86);
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.72);
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+  text-shadow: 0 1px 1px #000000;
+}
+
+.seismic-map .leaflet-tooltip.ocean-station-side-label::before {
+  display: none;
+}
+
 .seismic-map .seismic-estimate-tooltip strong,
 .seismic-map .seismic-estimate-tooltip span {
   display: block;

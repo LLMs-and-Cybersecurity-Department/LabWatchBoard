@@ -39,8 +39,9 @@ import {
   Volume2,
   Waves,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { Circle, CircleMarker, GeoJSON as LeafletGeoJSON, MapContainer, Pane, Popup, Rectangle, ScaleControl, TileLayer, Tooltip as LeafletTooltip, useMap, useMapEvents, ZoomControl } from "react-leaflet";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { icon as createLeafletIcon, type Icon as LeafletIcon } from "leaflet";
+import { Circle, CircleMarker, GeoJSON as LeafletGeoJSON, MapContainer, Marker, Pane, Popup, Rectangle, ScaleControl, TileLayer, Tooltip as LeafletTooltip, useMap, useMapEvents, ZoomControl } from "react-leaflet";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { feature as topojsonFeature } from "topojson-client";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
@@ -389,6 +390,98 @@ const SEISMIC_MAP_LAYERS = {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   },
 } as const;
+
+const INTENSITY_ICON_URLS: Record<number, string> = {
+  0: new URL("../icon/intensity/0.svg", import.meta.url).href,
+  1: new URL("../icon/intensity/1.svg", import.meta.url).href,
+  2: new URL("../icon/intensity/2.svg", import.meta.url).href,
+  3: new URL("../icon/intensity/3.svg", import.meta.url).href,
+  4: new URL("../icon/intensity/4.svg", import.meta.url).href,
+  5: new URL("../icon/intensity/5.svg", import.meta.url).href,
+  6: new URL("../icon/intensity/6.svg", import.meta.url).href,
+  7: new URL("../icon/intensity/7.svg", import.meta.url).href,
+  8: new URL("../icon/intensity/8.svg", import.meta.url).href,
+  9: new URL("../icon/intensity/9.svg", import.meta.url).href,
+  10: new URL("../icon/intensity/10.svg", import.meta.url).href,
+  11: new URL("../icon/intensity/11.svg", import.meta.url).href,
+  12: new URL("../icon/intensity/12.svg", import.meta.url).href,
+};
+
+const SHINDO_ICON_URLS: Record<string, string> = {
+  "0": new URL("../icon/shindo/0.svg", import.meta.url).href,
+  "1": new URL("../icon/shindo/1.svg", import.meta.url).href,
+  "2": new URL("../icon/shindo/2.svg", import.meta.url).href,
+  "3": new URL("../icon/shindo/3.svg", import.meta.url).href,
+  "4": new URL("../icon/shindo/4.svg", import.meta.url).href,
+  "5-": new URL("../icon/shindo/5-.svg", import.meta.url).href,
+  "5+": new URL("../icon/shindo/5+.svg", import.meta.url).href,
+  "6-": new URL("../icon/shindo/6-.svg", import.meta.url).href,
+  "6+": new URL("../icon/shindo/6+.svg", import.meta.url).href,
+  "7": new URL("../icon/shindo/7.svg", import.meta.url).href,
+};
+
+const HYPOCENTER_ICON_URLS = {
+  cancelled: new URL("../icon/hypocenter/cancelCross.svg", import.meta.url).href,
+  eew: new URL("../icon/hypocenter/eewCross.svg", import.meta.url).href,
+  catalogue: new URL("../icon/hypocenter/eqlistCross.svg", import.meta.url).href,
+} as const;
+
+const stationValueIconCache = new Map<string, LeafletIcon>();
+const hypocenterIconCache = new Map<keyof typeof HYPOCENTER_ICON_URLS, LeafletIcon>();
+
+function stationValueMapIcon(scale: "intensity" | "shindo", rank: number, selected = false) {
+  const valueKey = scale === "shindo"
+    ? jmaShindoLabel(rank)
+    : String(Math.max(0, Math.min(12, Math.round(Number(rank) || 0))));
+  const cacheKey = `${scale}:${valueKey}:${selected ? "selected" : "normal"}`;
+  const cached = stationValueIconCache.get(cacheKey);
+  if (cached) return cached;
+  const size = selected ? 30 : 24;
+  const iconUrl = scale === "shindo" ? SHINDO_ICON_URLS[valueKey] : INTENSITY_ICON_URLS[Number(valueKey)];
+  const valueIcon = createLeafletIcon({
+    iconUrl,
+    iconRetinaUrl: iconUrl,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -(size / 2 + 5)],
+    className: `seismic-station-value-icon seismic-station-value-icon--${scale}${selected ? " selected" : ""}`,
+  });
+  stationValueIconCache.set(cacheKey, valueIcon);
+  return valueIcon;
+}
+
+function hypocenterMapIcon(kind: keyof typeof HYPOCENTER_ICON_URLS) {
+  const cached = hypocenterIconCache.get(kind);
+  if (cached) return cached;
+  const eventIcon = createLeafletIcon({
+    iconUrl: HYPOCENTER_ICON_URLS[kind],
+    iconRetinaUrl: HYPOCENTER_ICON_URLS[kind],
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
+    popupAnchor: [0, -23],
+    className: "seismic-hypocenter-icon",
+  });
+  hypocenterIconCache.set(kind, eventIcon);
+  return eventIcon;
+}
+
+const StationValueMarker = memo(function StationValueMarker(props: {
+  latitude: number;
+  longitude: number;
+  rank: number;
+  scale: "intensity" | "shindo";
+  selected?: boolean;
+  label: string;
+}) {
+  return <Marker
+    position={[props.latitude, props.longitude]}
+    icon={stationValueMapIcon(props.scale, props.rank, props.selected)}
+    interactive={false}
+    keyboard={false}
+    bubblingMouseEvents={false}
+    alt={props.label}
+  />;
+});
 
 function formatTime(value: string | number, seconds = true) {
   const date = new Date(value);
@@ -1410,22 +1503,23 @@ const WaveformStationResponseMarkers = memo(function WaveformStationResponseMark
     const color = fdsnWaveformStationColor(rank);
     const strength = Math.max(0, Math.min(1, rank / 8));
     const radius = selected ? 7 : 4.6 + strength * 2;
-    return <CircleMarker
-      key={`response:${station.id}`}
-      center={[station.latitude, station.longitude]}
-      radius={radius}
-      pathOptions={{
-        color: selected || active ? "#ffffff" : "#fbcfe8",
-        fillColor: color,
-        weight: selected ? 2.2 : 1.1 + strength,
-        opacity: 0.9 + strength * 0.1,
-        fillOpacity: 0.74 + strength * 0.22,
-      }}
-      eventHandlers={{ click: () => props.onSelectStation(station) }}
-    >
-      {selected && <Popup><strong>{station.network} {station.stationCode}</strong><br />{station.stationName}<br />FDSN：{station.providers.join(" / ")}<br />本地传播模拟 MMI {rank.toFixed(1)} · {intensityRomanLabel(rank)}<br />待机为粉色，激活后按 MMI 烈度表填色；点击后核验并读取原始 miniSEED<br />海拔 {station.elevationM?.toFixed(0) ?? "--"} m</Popup>}
-      {active && props.labeledStationIds.has(station.id) && <LeafletTooltip permanent direction="center" className="kma-station-intensity-label global">{intensityRomanLabel(rank)}</LeafletTooltip>}
-    </CircleMarker>;
+    return <Fragment key={`response:${station.id}`}>
+      <CircleMarker
+        center={[station.latitude, station.longitude]}
+        radius={radius}
+        pathOptions={{
+          color: selected || active ? "#ffffff" : "#fbcfe8",
+          fillColor: color,
+          weight: selected ? 2.2 : 1.1 + strength,
+          opacity: 0.9 + strength * 0.1,
+          fillOpacity: 0.74 + strength * 0.22,
+        }}
+        eventHandlers={{ click: () => props.onSelectStation(station) }}
+      >
+        {selected && <Popup><strong>{station.network} {station.stationCode}</strong><br />{station.stationName}<br />FDSN：{station.providers.join(" / ")}<br />本地传播模拟 MMI {rank.toFixed(1)} · {intensityRomanLabel(rank)}<br />待机为粉色，激活后按 MMI 烈度表填色；点击后核验并读取原始 miniSEED<br />海拔 {station.elevationM?.toFixed(0) ?? "--"} m</Popup>}
+      </CircleMarker>
+      {active && props.labeledStationIds.has(station.id) && <StationValueMarker latitude={station.latitude} longitude={station.longitude} rank={rank} scale="intensity" selected={selected} label={`${station.network} ${station.stationCode} MMI ${intensityRomanLabel(rank)}`} />}
+    </Fragment>;
   })}</>;
 });
 
@@ -1665,6 +1759,7 @@ const GnssResponseMarkers = memo(function GnssResponseMarkers(props: {
   stations: readonly GnssStation[];
   ranks: Record<string, number>;
   mode: "live" | "replay";
+  maxLabels: number;
 }) {
   const displayed = useMemo(() => sampleStableStationMarkers(
     props.stations.filter((station) => (props.ranks[station.id] ?? 0) >= 0.25),
@@ -1673,21 +1768,22 @@ const GnssResponseMarkers = memo(function GnssResponseMarkers(props: {
   const labeledIds = useMemo(() => new Set(
     [...displayed]
       .sort((a, b) => (props.ranks[b.id] ?? 0) - (props.ranks[a.id] ?? 0))
-      .slice(0, 20)
+      .slice(0, props.maxLabels)
       .map((station) => station.id),
-  ), [displayed, props.ranks]);
+  ), [displayed, props.maxLabels, props.ranks]);
   return <>{displayed.map((station) => {
     const rank = props.ranks[station.id] ?? 0;
     const color = mmiIntensityColor(rank);
-    return <CircleMarker
-      key={`gnss-response:${station.id}`}
-      center={[station.latitude, station.longitude]}
-      radius={Math.max(3.4, Math.min(6.8, 3.2 + rank * 0.34))}
-      pathOptions={{ color: "#ffffff", fillColor: color, weight: 1.2, opacity: 0.9, fillOpacity: 0.9 }}
-    >
-      <Popup><strong>{station.stationName}（{station.stationCode}）</strong><br />中国大陆 GNSS 站点<br />{props.mode === "replay" ? "历史事件回放" : "当前事件传播"}模拟 MMI {rank.toFixed(1)} · {intensityRomanLabel(rank)}<br /><small>确定性地震波传播模拟，不是 GNSS 实测烈度或位移</small></Popup>
-      {labeledIds.has(station.id) && <LeafletTooltip permanent direction="center" className="kma-station-intensity-label global">{intensityRomanLabel(rank)}</LeafletTooltip>}
-    </CircleMarker>;
+    return <Fragment key={`gnss-response:${station.id}`}>
+      <CircleMarker
+        center={[station.latitude, station.longitude]}
+        radius={Math.max(3.4, Math.min(6.8, 3.2 + rank * 0.34))}
+        pathOptions={{ color: "#ffffff", fillColor: color, weight: 1.2, opacity: 0.9, fillOpacity: 0.9 }}
+      >
+        <Popup><strong>{station.stationName}（{station.stationCode}）</strong><br />中国大陆 GNSS 站点<br />{props.mode === "replay" ? "历史事件回放" : "当前事件传播"}模拟 MMI {rank.toFixed(1)} · {intensityRomanLabel(rank)}<br /><small>确定性地震波传播模拟，不是 GNSS 实测烈度或位移</small></Popup>
+      </CircleMarker>
+      {labeledIds.has(station.id) && <StationValueMarker latitude={station.latitude} longitude={station.longitude} rank={rank} scale="intensity" label={`${station.stationCode} MMI ${intensityRomanLabel(rank)}`} />}
+    </Fragment>;
   })}</>;
 });
 
@@ -1817,6 +1913,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   const layerComplexity = Math.max(1, Math.min(6, Math.round(Number(props.layerComplexity) || 4)));
   const baseStationBudget = [0, 24, 56, 120, 220, 360, 600][layerComplexity];
   const responseBudget = [0, 8, 12, 24, 40, 64, 96][layerComplexity];
+  const responseLabelBudget = Math.max(6, Math.floor(responseBudget / 2));
   const [baseLayerStage, setBaseLayerStage] = useState(0);
   useEffect(() => {
     if (baseLayerStage >= 5) return;
@@ -1891,38 +1988,22 @@ const SeismicMap = memo(function SeismicMap(props: {
   );
   const blinkOn = Math.floor(props.blinkNow / 450) % 2 === 0;
   const labeledStationIds = useMemo(() => new Set(
-    [...detectedStations]
-      .filter((station) => (props.detectionRanks[station.id] ?? 0) >= 1)
-      .sort((a, b) => (props.detectionRanks[b.id] ?? 0) - (props.detectionRanks[a.id] ?? 0))
-      .slice(0, 24)
-      .map((station) => station.id),
-  ), [detectedStations, props.detectionRanks]);
-  const labeledOceanStationIds = useMemo(() => new Set(
-    props.oceanStations
-      .filter((station) => props.oceanMode === "measured"
-        ? Object.prototype.hasOwnProperty.call(props.oceanRanks, station.id)
-        : (props.oceanRanks[station.id] ?? 0) >= 1)
-      .sort((a, b) => (props.oceanRanks[b.id] ?? 0) - (props.oceanRanks[a.id] ?? 0))
-      .slice(0, props.oceanMode === "measured" ? 12 : 24)
-      .map((station) => station.id),
-  ), [props.oceanMode, props.oceanRanks, props.oceanStations]);
-  const labeledKmaStationIds = useMemo(() => new Set(
-    props.kmaStations
+    [...displayedNiedResponses]
       .filter((station) => {
-        const rank = props.kmaReplayRanks === null
-          ? Number(props.kmaValues[station.index] ?? 0)
-          : Number(props.kmaReplayRanks[station.id] ?? 0);
-        return rank >= 1;
+        const rank = props.replayRanks === null
+          ? niedLevelRank(niedCharToLevel(props.niedFrame?.intensity[station.index]))
+          : props.replayRanks?.[station.id] ?? 0;
+        return rank >= 0.5;
       })
       .sort((a, b) => {
-        const rank = (station: KmaStation) => props.kmaReplayRanks === null
-          ? Number(props.kmaValues[station.index] ?? 0)
-          : Number(props.kmaReplayRanks[station.id] ?? 0);
+        const rank = (station: SeismicStation) => props.replayRanks === null
+          ? niedLevelRank(niedCharToLevel(props.niedFrame?.intensity[station.index]))
+          : props.replayRanks?.[station.id] ?? 0;
         return rank(b) - rank(a);
       })
-      .slice(0, 24)
+      .slice(0, responseLabelBudget)
       .map((station) => station.id),
-  ), [props.kmaReplayRanks, props.kmaStations, props.kmaValues]);
+  ), [displayedNiedResponses, props.niedFrame, props.replayRanks, responseLabelBudget]);
   const globalResponseStationById = useMemo(
     () => new Map(props.globalResponseStations.map((station) => [station.id, station])),
     [props.globalResponseStations],
@@ -1935,24 +2016,10 @@ const SeismicMap = memo(function SeismicMap(props: {
       && !displayed.some((station) => station.id === props.selectedStation?.id)) displayed.push(props.selectedStation);
     return displayed;
   }, [globalResponseStationById, props.globalArrivedStationIds, props.selectedStation]);
-  const labeledGlobalStationIds = useMemo(() => new Set(
-    [...respondingGlobalStations]
-      .filter((station) => (props.globalRanks[station.id] ?? 0) >= 1)
-      .sort((a, b) => (props.globalRanks[b.id] ?? 0) - (props.globalRanks[a.id] ?? 0))
-      .slice(0, 20)
-      .map((station) => station.id),
-  ), [props.globalRanks, respondingGlobalStations]);
   const displayedGlobalResponses = useMemo(
     () => sampleStableStationMarkers(respondingGlobalStations, Math.max(6, responseBudget)),
     [respondingGlobalStations, responseBudget],
   );
-  const labeledCwaStationIds = useMemo(() => new Set(
-    props.cwaStations
-      .filter((station) => (props.cwaRanks[station.id] ?? 0) >= 1)
-      .sort((a, b) => (props.cwaRanks[b.id] ?? 0) - (props.cwaRanks[a.id] ?? 0))
-      .slice(0, 20)
-      .map((station) => station.id),
-  ), [props.cwaRanks, props.cwaStations]);
   const cwaStationById = useMemo(
     () => new Map(props.cwaStations.map((station) => [station.id, station])),
     [props.cwaStations],
@@ -1989,6 +2056,46 @@ const SeismicMap = memo(function SeismicMap(props: {
       && !displayed.some((station) => station.id === props.selectedStation?.id)) displayed.push(props.selectedStation);
     return displayed;
   }, [props.oceanMode, props.oceanRanks, props.oceanStations, props.selectedStation, responseBudget]);
+  const labeledGlobalStationIds = useMemo(() => new Set(
+    [...displayedGlobalResponses]
+      .filter((station) => (props.globalRanks[station.id] ?? 0) >= 1)
+      .sort((a, b) => (props.globalRanks[b.id] ?? 0) - (props.globalRanks[a.id] ?? 0))
+      .slice(0, responseLabelBudget)
+      .map((station) => station.id),
+  ), [displayedGlobalResponses, props.globalRanks, responseLabelBudget]);
+  const labeledCwaStationIds = useMemo(() => new Set(
+    [...displayedCwaResponses]
+      .filter((station) => (props.cwaRanks[station.id] ?? 0) >= 0.5)
+      .sort((a, b) => (props.cwaRanks[b.id] ?? 0) - (props.cwaRanks[a.id] ?? 0))
+      .slice(0, responseLabelBudget)
+      .map((station) => station.id),
+  ), [displayedCwaResponses, props.cwaRanks, responseLabelBudget]);
+  const labeledKmaStationIds = useMemo(() => new Set(
+    [...displayedKmaResponses]
+      .filter((station) => {
+        const rank = props.kmaReplayRanks === null
+          ? Number(props.kmaValues[station.index] ?? 0)
+          : Number(props.kmaReplayRanks[station.id] ?? 0);
+        return rank >= 1;
+      })
+      .sort((a, b) => {
+        const rank = (station: KmaStation) => props.kmaReplayRanks === null
+          ? Number(props.kmaValues[station.index] ?? 0)
+          : Number(props.kmaReplayRanks[station.id] ?? 0);
+        return rank(b) - rank(a);
+      })
+      .slice(0, responseLabelBudget)
+      .map((station) => station.id),
+  ), [displayedKmaResponses, props.kmaReplayRanks, props.kmaValues, responseLabelBudget]);
+  const labeledOceanStationIds = useMemo(() => new Set(
+    [...displayedOceanResponses]
+      .filter((station) => props.oceanMode === "measured"
+        ? Object.prototype.hasOwnProperty.call(props.oceanRanks, station.id)
+        : (props.oceanRanks[station.id] ?? 0) >= 1)
+      .sort((a, b) => (props.oceanRanks[b.id] ?? 0) - (props.oceanRanks[a.id] ?? 0))
+      .slice(0, responseLabelBudget)
+      .map((station) => station.id),
+  ), [displayedOceanResponses, props.oceanMode, props.oceanRanks, responseLabelBudget]);
   /* The canvas layers below retain the complete response sets. These small,
    * stable SVG subsets exist only for hit targets, popups and a few labels. */
   const liveGlobalSelectionStations = useMemo(() => [
@@ -2128,13 +2235,19 @@ const SeismicMap = memo(function SeismicMap(props: {
           style={(feature) => jmaTsunamiLineStyle(Number(feature?.properties?.level ?? 1))}
         />}
       </Pane>
-      <Pane name="seismic-event-pane" style={{ zIndex: 440 }}>
-        {props.selectedEvent && props.selectedEvent.hypocenterKnown !== false && !props.selectedEvent.cancelled && <CircleMarker center={[props.selectedEvent.latitude, props.selectedEvent.longitude]} radius={10} pathOptions={{ color: "#fff", fillColor: "#ef4444", weight: 2, fillOpacity: 0.95 }}>
+      <Pane name="seismic-event-pane" style={{ zIndex: 490 }}>
+        {props.selectedEvent && props.selectedEvent.hypocenterKnown !== false && <Marker
+          position={[props.selectedEvent.latitude, props.selectedEvent.longitude]}
+          icon={hypocenterMapIcon(props.selectedEvent.cancelled ? "cancelled" : props.selectedEvent.relay === "Catalogue" ? "catalogue" : "eew")}
+          zIndexOffset={1200}
+          riseOnHover
+          alt={`${props.selectedEvent.place} 震中`}
+        >
           <Popup><strong>{props.selectedEvent.source} {props.selectedEvent.title}</strong><br />{props.selectedEvent.place}<br />M {props.selectedEvent.magnitude?.toFixed(1) ?? "--"}</Popup>
-        </CircleMarker>}
-        {props.selectedReport && <CircleMarker center={[props.selectedReport.latitude, props.selectedReport.longitude]} radius={8} pathOptions={{ color: "#ffffff", fillColor: EARTHQUAKE_SOURCE_COLORS[props.selectedReport.source], weight: 2, fillOpacity: 0.94 }}>
+        </Marker>}
+        {props.selectedReport && <Marker position={[props.selectedReport.latitude, props.selectedReport.longitude]} icon={hypocenterMapIcon("catalogue")} zIndexOffset={1100} riseOnHover alt={`${props.selectedReport.place} 机构报告震中`}>
           <Popup><strong>{EARTHQUAKE_SOURCE_LABELS[props.selectedReport.source]} 机构报告</strong><br />{props.selectedReport.place}<br />{formatMagnitudeType(props.selectedReport.magnitudeType)} {props.selectedReport.magnitude.toFixed(1)}<br /><a href={props.selectedReport.url} target="_blank" rel="noreferrer">打开机构原文</a></Popup>
-        </CircleMarker>}
+        </Marker>}
       </Pane>
       <Pane name="seismic-user-location-pane" style={{ zIndex: 455, pointerEvents: "none" }}>
         {props.warningLocation && <CircleMarker
@@ -2202,16 +2315,18 @@ const SeismicMap = memo(function SeismicMap(props: {
       </Pane>
       <Pane name="seismic-station-response-pane" style={{ zIndex: 470 }}>
         {layerComplexity >= 2 && props.showCwa && <StationCanvasLayer paneName="seismic-station-response-pane" points={cwaResponsePoints} />}
-        {layerComplexity >= 4 && props.showGnss && <GnssResponseMarkers stations={props.gnssStations} ranks={props.gnssRanks} mode={props.gnssMode} />}
+        {layerComplexity >= 4 && props.showGnss && <GnssResponseMarkers stations={props.gnssStations} ranks={props.gnssRanks} mode={props.gnssMode} maxLabels={responseLabelBudget} />}
         {layerComplexity >= 2 && props.showCwa && displayedCwaResponses.map((station) => {
           const selected = props.selectedStation?.id === station.id;
           const rank = props.cwaRanks[station.id] ?? 0;
           const active = rank >= 0.25;
           const color = active ? jmaShindoColor(rank) : FDSN_PROVIDER_COLORS.cwa;
-          return <CircleMarker key={`response:${station.id}`} center={[station.latitude, station.longitude]} radius={selected ? 6 : blinkOn ? 5.2 : 4.4} pathOptions={{ color: "#ffffff", fillColor: color, weight: selected ? 2.2 : 1.6, opacity: 0.96, fillOpacity: 0.98 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
-            {selected && <Popup><strong>CWA CWASN {station.stationCode}</strong><br />{station.stationName}<br />本地传播估算震度 {jmaShindoLabel(rank)} · {rank.toFixed(1)}<br /><a href="https://gdms.cwa.gov.tw/map.php" target="_blank" rel="noreferrer">打开 CWA GDMS</a></Popup>}
-            {active && labeledCwaStationIds.has(station.id) && <LeafletTooltip permanent direction="center" className={`nied-station-intensity-label cwa rank-${Math.min(7, Math.floor(rank))}`}>{jmaShindoLabel(rank)}</LeafletTooltip>}
-          </CircleMarker>;
+          return <Fragment key={`response:${station.id}`}>
+            <CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 6 : blinkOn ? 5.2 : 4.4} pathOptions={{ color: "#ffffff", fillColor: color, weight: selected ? 2.2 : 1.6, opacity: 0.96, fillOpacity: 0.98 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
+              {selected && <Popup><strong>CWA CWASN {station.stationCode}</strong><br />{station.stationName}<br />本地传播估算震度 {jmaShindoLabel(rank)} · {rank.toFixed(1)}<br /><a href="https://gdms.cwa.gov.tw/map.php" target="_blank" rel="noreferrer">打开 CWA GDMS</a></Popup>}
+            </CircleMarker>
+            {active && labeledCwaStationIds.has(station.id) && <StationValueMarker latitude={station.latitude} longitude={station.longitude} rank={rank} scale="shindo" selected={selected} label={`CWA ${station.stationCode} 震度 ${jmaShindoLabel(rank)}`} />}
+          </Fragment>;
         })}
         {layerComplexity >= 3 && props.showNied && displayedNiedResponses.map((station) => {
           const level = niedCharToLevel(props.niedFrame?.intensity[station.index]);
@@ -2221,10 +2336,12 @@ const SeismicMap = memo(function SeismicMap(props: {
           const activeRank = detected ? props.detectionRanks[station.id] ?? rank : null;
           const color = niedStationDisplayColor(props.replayRanks === null ? level : 0, activeRank);
           const selected = props.selectedStation?.id === station.id;
-          return <CircleMarker key={`response:${station.id}`} center={[station.latitude, station.longitude]} radius={selected ? 6 : detected ? blinkOn ? 5.2 : 4.4 : rank >= 1 ? 4 : 3.2} pathOptions={{ color: selected || detected ? "#ffffff" : color, fillColor: color, weight: selected ? 2.4 : detected ? blinkOn ? 2.2 : 1.1 : 0.8, opacity: detected ? 1 : 0.94, fillOpacity: detected ? 1 : rank >= 1 ? 0.94 : 0.86 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
-            {selected && <Popup><strong>{station.stationName}</strong><br />{station.network} {station.stationCode}<br />{props.replayRanks === null ? `实时震度 ${niedLevelLabel(level)}` : `回放模拟震度 ${rank.toFixed(1)}`}</Popup>}
-            {detected && labeledStationIds.has(station.id) && <LeafletTooltip permanent direction="center" className={`nied-station-intensity-label rank-${Math.min(7, Math.floor(activeRank ?? 0))}`}>{props.replayRanks === null ? niedLevelLabel(level) : displayRankLabel(activeRank ?? 0)}</LeafletTooltip>}
-          </CircleMarker>;
+          return <Fragment key={`response:${station.id}`}>
+            <CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 6 : detected ? blinkOn ? 5.2 : 4.4 : rank >= 1 ? 4 : 3.2} pathOptions={{ color: selected || detected ? "#ffffff" : color, fillColor: color, weight: selected ? 2.4 : detected ? blinkOn ? 2.2 : 1.1 : 0.8, opacity: detected ? 1 : 0.94, fillOpacity: detected ? 1 : rank >= 1 ? 0.94 : 0.86 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
+              {selected && <Popup><strong>{station.stationName}</strong><br />{station.network} {station.stationCode}<br />{props.replayRanks === null ? `实时震度 ${niedLevelLabel(level)}` : `回放模拟震度 ${rank.toFixed(1)}`}</Popup>}
+            </CircleMarker>
+            {labeledStationIds.has(station.id) && <StationValueMarker latitude={station.latitude} longitude={station.longitude} rank={rank} scale="shindo" selected={selected} label={`${station.network} ${station.stationCode} 震度 ${jmaShindoLabel(rank)}`} />}
+          </Fragment>;
         })}
         {layerComplexity >= 3 && props.showKma && displayedKmaResponses.map((station) => {
           const rank = props.kmaReplayRanks === null
@@ -2233,10 +2350,12 @@ const SeismicMap = memo(function SeismicMap(props: {
           const active = rank >= 0.25;
           const selected = props.selectedStation?.id === station.id;
           const color = mmiIntensityColor(rank);
-          return <CircleMarker key={`response:${station.id}`} center={[station.latitude, station.longitude]} radius={selected ? 6 : active ? blinkOn ? 5.2 : 4.4 : 3.2} pathOptions={{ color: "#ffffff", fillColor: color, weight: selected ? 2 : 1.5, fillOpacity: rank >= 1 ? 0.94 : 0.82 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
-            {selected && <Popup><strong>{station.stationName}</strong><br />KMA-PEWS {props.kmaReplayRanks === null ? "官方实时" : "回放模拟"}测站<br />烈度 {intensityRomanLabel(rank)} · MMI {rank.toFixed(1)}</Popup>}
-            {active && labeledKmaStationIds.has(station.id) && <LeafletTooltip permanent direction="center" className="kma-station-intensity-label" aria-label={`KMA ${station.stationCode} 烈度 ${intensityRomanLabel(rank)}`}>{intensityRomanLabel(rank)}</LeafletTooltip>}
-          </CircleMarker>;
+          return <Fragment key={`response:${station.id}`}>
+            <CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 6 : active ? blinkOn ? 5.2 : 4.4 : 3.2} pathOptions={{ color: "#ffffff", fillColor: color, weight: selected ? 2 : 1.5, fillOpacity: rank >= 1 ? 0.94 : 0.82 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
+              {selected && <Popup><strong>{station.stationName}</strong><br />KMA-PEWS {props.kmaReplayRanks === null ? "官方实时" : "回放模拟"}测站<br />烈度 {intensityRomanLabel(rank)} · MMI {rank.toFixed(1)}</Popup>}
+            </CircleMarker>
+            {active && labeledKmaStationIds.has(station.id) && <StationValueMarker latitude={station.latitude} longitude={station.longitude} rank={rank} scale="intensity" selected={selected} label={`KMA ${station.stationCode} MMI ${intensityRomanLabel(rank)}`} />}
+          </Fragment>;
         })}
         {layerComplexity >= 3 && displayedOceanResponses.filter((station) => (
           props.selectedStation?.id === station.id
@@ -2250,12 +2369,12 @@ const SeismicMap = memo(function SeismicMap(props: {
           const sampleLabel = props.oceanMode === "replay" ? "回放模拟震度" : props.oceanMode === "measured" ? "MSIL 实测色值反算震度" : props.oceanMode === "local" ? "本地预测震度" : "等待数据";
           return <CircleMarker key={`response:${station.id}`} center={[station.latitude, station.longitude]} radius={selected ? 6 : active ? blinkOn ? 5 : 4.3 : 3.2} pathOptions={{ color: "#ffffff", fillColor: color, weight: selected ? 2.2 : 1.5, fillOpacity: active ? 0.96 : 0.82 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
             {selected && <Popup><strong>{station.network} {station.stationCode}</strong><br />海底深度 {station.depthM.toFixed(0)} m<br />{sampleLabel}{measured ? ` ${rank.toFixed(2)} [${displayRankLabel(rank)}]` : active ? ` ${displayRankLabel(rank)}` : ""}<br /><a href={station.waveformUrl} target="_blank" rel="noreferrer">查看官方延迟波形</a></Popup>}
-            {labeledOceanStationIds.has(station.id) && (measured || active) && <LeafletTooltip permanent direction="center" className={`nied-station-intensity-label ocean rank-${Math.max(0, Math.min(7, Math.floor(rank)))}`}>{measured ? `${rank.toFixed(2)} [${displayRankLabel(rank)}]` : displayRankLabel(rank)}</LeafletTooltip>}
+            {labeledOceanStationIds.has(station.id) && (measured || active) && <LeafletTooltip permanent direction="right" offset={[10, 0]} className="ocean-station-side-label">{displayRankLabel(rank)}</LeafletTooltip>}
           </CircleMarker>;
         })}
         {layerComplexity >= 2 && props.showCenc && props.cencReport && <>
-          <CircleMarker center={[props.cencReport.latitude, props.cencReport.longitude]} radius={8} pathOptions={{ color: "#fef3c7", fillColor: "#dc2626", weight: 2, fillOpacity: 0.92 }}><Popup><strong>CENC 仪器烈度报告</strong><br />{props.cencReport.place}<br />M {props.cencReport.magnitude?.toFixed(1) ?? "--"} · {props.cencReport.stationMetrics.length} 站报告 / {props.cencReport.stations.length} 站有坐标</Popup></CircleMarker>
-          {props.cencReport.stations.map((station) => { const selected = props.selectedStation?.id === station.id; const color = cencIntensityColor(station.intensity); return <CircleMarker key={station.id} center={[station.latitude, station.longitude]} radius={selected ? 7 : Math.max(3, Math.min(6, station.intensity / 1.8))} pathOptions={{ color: selected ? "#ffffff" : color, fillColor: color, weight: selected ? 2 : 0.8, fillOpacity: 0.92 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>{selected && <Popup><strong>{station.stationName} ({station.stationCode})</strong><br />仪器烈度 {intensityRomanLabel(station.intensity)} · {station.intensity.toFixed(1)}<br />PGA {station.pgaGal?.toFixed(1) ?? "--"} gal · PGV {station.pgvCms?.toFixed(1) ?? "--"} cm/s</Popup>}<LeafletTooltip permanent direction="center" className="kma-station-intensity-label cenc" aria-label={`CENC ${station.stationCode} 烈度 ${intensityRomanLabel(station.intensity)}`}>{intensityRomanLabel(station.intensity)}</LeafletTooltip></CircleMarker>; })}
+          <Marker position={[props.cencReport.latitude, props.cencReport.longitude]} icon={hypocenterMapIcon("catalogue")} zIndexOffset={1100} riseOnHover alt={`${props.cencReport.place} CENC 仪器烈度报告震中`}><Popup><strong>CENC 仪器烈度报告</strong><br />{props.cencReport.place}<br />M {props.cencReport.magnitude?.toFixed(1) ?? "--"} · {props.cencReport.stationMetrics.length} 站报告 / {props.cencReport.stations.length} 站有坐标</Popup></Marker>
+          {props.cencReport.stations.map((station) => { const selected = props.selectedStation?.id === station.id; const color = cencIntensityColor(station.intensity); return <Fragment key={station.id}><CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 7 : Math.max(3, Math.min(6, station.intensity / 1.8))} pathOptions={{ color: selected ? "#ffffff" : color, fillColor: color, weight: selected ? 2 : 0.8, fillOpacity: 0.92 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>{selected && <Popup><strong>{station.stationName} ({station.stationCode})</strong><br />仪器烈度 {intensityRomanLabel(station.intensity)} · {station.intensity.toFixed(1)}<br />PGA {station.pgaGal?.toFixed(1) ?? "--"} gal · PGV {station.pgvCms?.toFixed(1) ?? "--"} cm/s</Popup>}</CircleMarker><StationValueMarker latitude={station.latitude} longitude={station.longitude} rank={station.intensity} scale="intensity" selected={selected} label={`CENC ${station.stationCode} MMI ${intensityRomanLabel(station.intensity)}`} /></Fragment>; })}
         </>}
       </Pane>
       <Pane name="seismic-station-hit-pane" className="seismic-station-hit-pane" style={{ zIndex: 469 }}>
