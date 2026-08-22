@@ -2480,7 +2480,6 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [settingsOpen, setSettingsOpen] = useState(false);
   const primaryGridRef = useRef<HTMLElement | null>(null);
   const mapShellRef = useRef<HTMLDivElement | null>(null);
-  const monitorOverlayRef = useRef<HTMLDivElement | null>(null);
   const panelResizeCleanupRef = useRef<(() => void) | null>(null);
   const monitorPointerCleanupRef = useRef<(() => void) | null>(null);
   const monitorDropTargetRef = useRef<MonitorDock>("left");
@@ -2798,41 +2797,6 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     window.addEventListener("pointerup", handleEnd, { once: true });
     window.addEventListener("pointercancel", handleEnd, { once: true });
   }, [normalizedMonitorDock, normalizedMonitorScale, normalizedMonitorWidgetDocks, setMonitorWidgetDocks]);
-  const beginMonitorResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.button !== 0) return;
-    const shell = mapShellRef.current;
-    const overlay = monitorOverlayRef.current;
-    if (!shell || !overlay) return;
-    event.preventDefault();
-    event.stopPropagation();
-    monitorPointerCleanupRef.current?.();
-    const shellBounds = shell.getBoundingClientRect();
-    const startX = event.clientX;
-    const widthLimit = (shellBounds.width - 28) / 330;
-    const maximumScale = Math.max(0.65, Math.min(1.6, widthLimit));
-    let nextScale = Math.min(normalizedMonitorScale, maximumScale);
-
-    const cleanup = () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleEnd);
-      window.removeEventListener("pointercancel", handleEnd);
-      document.body.classList.remove("seismic-monitor-resizing");
-      monitorPointerCleanupRef.current = null;
-    };
-    const handleMove = (moveEvent: PointerEvent) => {
-      nextScale = Math.max(0.65, Math.min(maximumScale, normalizedMonitorScale + (moveEvent.clientX - startX) / 330));
-      overlay.style.setProperty("--monitor-scale", String(nextScale));
-    };
-    const handleEnd = () => {
-      cleanup();
-      setMonitorScale(Number(nextScale.toFixed(2)));
-    };
-    monitorPointerCleanupRef.current = cleanup;
-    document.body.classList.add("seismic-monitor-resizing");
-    window.addEventListener("pointermove", handleMove, { passive: true });
-    window.addEventListener("pointerup", handleEnd, { once: true });
-    window.addEventListener("pointercancel", handleEnd, { once: true });
-  }, [normalizedMonitorScale, setMonitorScale]);
   useEffect(() => () => monitorPointerCleanupRef.current?.(), []);
   const adjustSidePanelWidth = useCallback((delta: number) => {
     setSidePanelWidth(clampPanelDimension(normalizedSidePanelWidth + delta, 300, 620));
@@ -5392,6 +5356,8 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               <label className="toggle-row"><input type="checkbox" checked={showWniCameras} onChange={(event) => setShowWniCameras(event.target.checked)} />显示 WNI 摄像头图层 <em>{showWniCameras ? "显示" : "隐藏"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={seismicAlertSoundEnabled} onChange={(event) => setSeismicAlertSoundEnabled(event.target.checked)} />实时预警与回放音效 <em>{seismicAlertSoundEnabled ? "开启" : "关闭"}</em></label>
               <label className="seismic-layer-complexity"><span><strong>图层复杂度</strong><output>{normalizedMapLayerComplexity}/6</output></span><input type="range" min="1" max="6" step="1" value={normalizedMapLayerComplexity} aria-label="地图图层复杂度 1 到 6" onChange={(event) => setMapLayerComplexity(Number(event.target.value))} /><small>1 仅事件与核心响应；6 显示完整测站、标签、产品和背景层。</small></label>
+              <label className="seismic-layer-complexity seismic-monitor-scale-setting"><span><strong>监视组件大小</strong><output>{Math.round(normalizedMonitorScale * 100)}%</output></span><input type="range" min="65" max="160" step="5" value={Math.round(normalizedMonitorScale * 100)} aria-label="监视组件大小百分比" onChange={(event) => setMonitorScale(Number(event.target.value) / 100)} /><small>仅改变地图上监视卡片的等比例尺寸；悬停卡片 1 秒后可拖放。</small></label>
+              <button className="seismic-settings-reset-scale" onClick={() => setMonitorScale(1)}>恢复组件大小为 100%</button>
               <div className="seismic-settings-source-block"><div className="seismic-settings-source-heading"><strong>接收源</strong><button onClick={() => setEnabledEewSources([...LIVE_EEW_SOURCE_ORDER])}>全选</button><button onClick={() => setEnabledEewSources([])}>清空</button></div><div className="seismic-settings-source-grid">{LIVE_EEW_SOURCE_ORDER.map((source) => <label key={source}><input type="checkbox" checked={enabledEewSourceSet.has(source)} onChange={(event) => setEnabledEewSources((current) => event.target.checked ? [...new Set([...current, source])] : current.filter((item) => item !== source))} /><span>{source}</span></label>)}</div><small>关闭的源不会进入实时历史、自动定位或音效；历史记录不会被删除。</small></div>
             </div>}
           </div>
@@ -5550,26 +5516,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 {MONITOR_DOCKS.map((dock) => <span key={dock} className={monitorDropTarget === dock ? "active" : ""} data-dock={dock}><b>{dock === "top" ? "上方" : dock === "right" ? "右侧" : dock === "bottom" ? "下方" : "左侧"}</b></span>)}
               </div>}
               <div
-                ref={monitorOverlayRef}
                 className={`seismic-monitor-layer${monitorDragging ? " is-dragging" : ""}`}
                 style={{ "--monitor-scale": normalizedMonitorScale } as CSSProperties}
               >
-                <div className="seismic-monitor-toolbar">
-                  <button
-                    className="seismic-monitor-scale-handle"
-                    aria-label="等比例缩放所有监视组件"
-                    title="左右拖动等比例缩放；双击恢复 100%"
-                    onPointerDown={beginMonitorResize}
-                    onClick={(event) => {
-                      if (event.detail !== 0) return;
-                      setMonitorScale(normalizedMonitorScale >= 1.6 ? 1 : clampMonitorScale(normalizedMonitorScale + 0.1));
-                    }}
-                    onDoubleClick={() => setMonitorScale(1)}
-                  >
-                    <GripVertical size={14} /><span>独立拖放</span><small>拖每张卡片上沿到地图四侧</small>
-                  </button>
-                  <output aria-label={`监视组件缩放 ${Math.round(normalizedMonitorScale * 100)}%`}>{Math.round(normalizedMonitorScale * 100)}%</output>
-                </div>
                 {MONITOR_DOCKS.map((dock) => <div className="seismic-monitor-rail" data-dock={dock} key={dock}>
                   {visibleMonitorWidgetIds.filter((widgetId) => normalizedMonitorWidgetDocks[widgetId] === dock).map((widgetId) => <article
                     className={`seismic-monitor-widget${MONITOR_WIDE_WIDGETS.has(widgetId) ? " is-wide" : ""}${draggingMonitorWidget === widgetId ? " is-dragging" : ""}`}
@@ -5590,7 +5539,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                           [widgetId]: MONITOR_DOCKS[(currentIndex + 1) % MONITOR_DOCKS.length],
                         }));
                       }}
-                    ><GripVertical size={12} /><span>{MONITOR_WIDGET_LABELS[widgetId]}</span><small>拖动停靠</small></button>
+                    ><GripVertical size={12} /><span>拖放</span></button>
                     {monitorWidgetContent[widgetId]}
                   </article>)}
                 </div>)}
