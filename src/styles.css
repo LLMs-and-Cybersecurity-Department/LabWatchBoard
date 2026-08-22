@@ -7226,6 +7226,138 @@ body.seismic-monitor-resizing .seismic-map-overlay-stack {
   color: #f6b554;
 }
 
+.seismic-institution-filterbar {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid #313c40;
+  border-radius: 5px;
+  background: #0d1315;
+}
+
+.seismic-institution-magnitude-filter {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.seismic-institution-magnitude-filter > span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.seismic-institution-magnitude-filter select {
+  width: 100%;
+  height: 30px;
+  padding: 0 28px 0 8px;
+  border: 1px solid #3d494d;
+  border-radius: 4px;
+  background: #101719;
+  color: #dce5e3;
+  font-size: 9px;
+}
+
+.seismic-institution-source-filter {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(9, minmax(62px, 1fr));
+  gap: 5px;
+}
+
+.seismic-institution-source-filter label {
+  position: relative;
+  min-width: 0;
+  height: 30px;
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  border: 1px solid #344044;
+  border-radius: 4px;
+  background: #101719;
+  color: #8f9d9a;
+  cursor: pointer;
+}
+
+.seismic-institution-source-filter label:hover {
+  border-color: #607075;
+  background: #182124;
+}
+
+.seismic-institution-source-filter label.active {
+  border-color: rgba(245, 158, 11, 0.62);
+  background: #1b211d;
+  color: #edf4f2;
+  box-shadow: inset 0 -2px #f59e0b;
+}
+
+.seismic-institution-source-filter label:has(input:focus-visible) {
+  outline: 2px solid #7dd3fc;
+  outline-offset: 1px;
+}
+
+.seismic-institution-source-filter input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.seismic-institution-source-filter i {
+  width: 6px;
+  height: 14px;
+  border-radius: 2px;
+  opacity: 0.45;
+}
+
+.seismic-institution-source-filter label.active i {
+  opacity: 1;
+}
+
+.seismic-institution-source-filter span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 8px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seismic-institution-source-filter em {
+  color: #778683;
+  font-size: 7px;
+  font-style: normal;
+}
+
+.seismic-institution-source-filter label.active em {
+  color: #d4dfdc;
+}
+
+.seismic-institution-filter-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.seismic-institution-filter-actions button {
+  height: 30px;
+  padding: 0 9px;
+  border-color: #3d494d;
+  background: #101719;
+  color: #c7d2d0;
+  font-size: 8px;
+}
+
+.seismic-institution-filter-actions button:hover {
+  border-color: #f59e0b;
+  color: #f6b554;
+}
+
 .seismic-institution-layout {
   min-width: 0;
   display: grid;
@@ -7575,6 +7707,14 @@ body.seismic-monitor-resizing .seismic-map-overlay-stack {
     height: 16px;
     font-size: 6px;
   }
+
+  .seismic-institution-filterbar {
+    grid-template-columns: 160px minmax(0, 1fr) auto;
+  }
+
+  .seismic-institution-source-filter {
+    grid-template-columns: repeat(5, minmax(62px, 1fr));
+  }
 }
 
 @media (max-width: 820px) {
@@ -7628,6 +7768,18 @@ body.seismic-monitor-resizing .seismic-map-overlay-stack {
   .seismic-lower-panel {
     min-height: 560px;
     grid-template-rows: 42px minmax(0, 1fr);
+  }
+
+  .seismic-institution-filterbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .seismic-institution-magnitude-filter {
+    grid-column: 1 / -1;
+  }
+
+  .seismic-institution-source-filter {
+    grid-template-columns: repeat(3, minmax(72px, 1fr));
   }
 
   .seismic-lower-tabs {
