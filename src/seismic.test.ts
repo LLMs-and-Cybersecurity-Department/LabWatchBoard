@@ -36,6 +36,7 @@ import {
   niedSoundIndex,
   niedStationDisplayColor,
   isLiveEewActive,
+  isReplayPropagationActive,
   shouldDisplayLiveWavefront,
   normalizeFanEewEnvelope,
   normalizeCencIntensityDetail,
@@ -118,6 +119,15 @@ describe("seismic client calculations", () => {
     expect(shouldDisplayLiveWavefront({ ...report, observedIntensity: true }, originTime + 20_000)).toBe(false);
     expect(shouldDisplayLiveWavefront({ ...report, cancelled: true }, originTime + 20_000)).toBe(false);
     expect(shouldDisplayLiveWavefront({ ...report, final: true, relay: "Catalogue" }, originTime + 20_000, false)).toBe(true);
+  });
+
+  it("closes replay propagation when the visible clock reaches 300 seconds", () => {
+    expect(isReplayPropagationActive(0)).toBe(false);
+    expect(isReplayPropagationActive(0.01)).toBe(true);
+    expect(isReplayPropagationActive(299.994)).toBe(true);
+    expect(isReplayPropagationActive(299.996)).toBe(false);
+    expect(isReplayPropagationActive(300)).toBe(false);
+    expect(isReplayPropagationActive(Number.NaN)).toBe(false);
   });
 
   it("uses shindo only for events in Japan and Taiwan", () => {

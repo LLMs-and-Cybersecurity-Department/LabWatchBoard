@@ -692,6 +692,14 @@ export function shouldDisplayLiveWavefront(
   return elapsedMs >= 0 && elapsedMs < 300_000;
 }
 
+export function isReplayPropagationActive(elapsedSeconds: number) {
+  if (!Number.isFinite(elapsedSeconds) || elapsedSeconds <= 0) return false;
+  // The replay clock is rendered to hundredths. Close propagation as soon as
+  // the visible clock rounds to T+300.00 so circles and detection grids cannot
+  // linger for one extra render at values such as 299.996.
+  return Math.round(elapsedSeconds * 100) < 30_000;
+}
+
 export function meetsEewMagnitudeThreshold(
   event: Pick<LiveEew, "magnitude"> & Partial<Pick<LiveEew, "observedIntensity">>,
   minimumMagnitude: number,

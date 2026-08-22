@@ -98,6 +98,7 @@ import {
   replayNiedSoundIndex,
   selectAutoLocatedGlobalEvent,
   selectAutoLocatedGlobalEvents,
+  isReplayPropagationActive,
   shouldDisplayLiveWavefront,
   JMA_SHINDO_LEGEND,
   MMI_LEGEND,
@@ -1871,6 +1872,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   gnssMode: "live" | "replay";
   cwaRanks: Record<string, number>;
   cwaArrivedStationIds: string[];
+  cwaDetectionStationIds: string[];
   kmaArrivedStationIds: string[];
   oceanMode: OceanResponseMode;
   localRegions: JmaRegionCollection;
@@ -1923,6 +1925,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   const sRadius = props.waveEvent && props.showWaves ? waveRadiusKm(props.waveEvent.originTime, 3.5, props.waveNow) : 0;
   const detectionStationSet = useMemo(() => new Set(props.detectionStationIds), [props.detectionStationIds]);
   const cwaArrivedStationSet = useMemo(() => new Set(props.cwaArrivedStationIds), [props.cwaArrivedStationIds]);
+  const cwaDetectedStationSet = useMemo(() => new Set(props.cwaDetectionStationIds), [props.cwaDetectionStationIds]);
   const detectedStations = useMemo(
     () => props.niedStations.filter((station) => detectionStationSet.has(station.id)),
     [detectionStationSet, props.niedStations],
@@ -1969,8 +1972,8 @@ const SeismicMap = memo(function SeismicMap(props: {
     kmaGridAnchorRef.current?.anchor,
   );
   const cwaDetectedStations = useMemo(
-    () => props.cwaStations.filter((station) => cwaArrivedStationSet.has(station.id)),
-    [cwaArrivedStationSet, props.cwaStations],
+    () => props.cwaStations.filter((station) => cwaDetectedStationSet.has(station.id)),
+    [cwaDetectedStationSet, props.cwaStations],
   );
   const cwaGridAnchorRef = useRef<{ sessionKey: string; anchor: NiedGridAnchor } | null>(null);
   if (!cwaDetectedStations.length) cwaGridAnchorRef.current = null;
@@ -1981,7 +1984,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   }
   const cwaDetectionCells = buildNiedDetectionGridCells(
     props.cwaStations,
-    props.cwaArrivedStationIds,
+    props.cwaDetectionStationIds,
     props.cwaRanks,
     cwaGridAnchorRef.current?.anchor,
   );
@@ -4710,8 +4713,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   }, [displayedJmaTsunami, tsunamiRegions]);
   const waveOrigin = wavefrontEvent ? Date.parse(wavefrontEvent.originTime) : 0;
   const waveNow = replayEvent ? waveOrigin + replaySeismicSeconds * 1000 : clock;
+  const replayPropagationActive = Boolean(replayEvent && isReplayPropagationActive(replaySeconds));
   const showWaves = replayEvent
-    ? replaySeconds > 0 && replaySeismicSeconds < 300
+    ? replayPropagationActive
     : Boolean(liveWavefrontEvent);
   const userWarningLocation = Number.isFinite(userStation.lat) && Number.isFinite(userStation.lon)
     ? { latitude: userStation.lat, longitude: userStation.lon }
@@ -4745,7 +4749,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const rawMapDetectionStationIds = globalAutoPresentation
     ? EMPTY_STATION_IDS
     : replayEvent
-      ? replaySimulation?.activeStationIds ?? EMPTY_STATION_IDS
+      ? replayPropagationActive
+        ? replaySimulation?.activeStationIds ?? EMPTY_STATION_IDS
+        : EMPTY_STATION_IDS
       : niedDetection.detected
         ? niedDetection.activeStationIds
         : EMPTY_STATION_IDS;
@@ -5395,6 +5401,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 gnssMode={replayEvent ? "replay" : "live"}
                 cwaRanks={cwaSimulation?.ranks ?? EMPTY_RANKS}
                 cwaArrivedStationIds={cwaSimulation?.arrivedStationIds ?? EMPTY_STATION_IDS}
+                cwaDetectionStationIds={replayPropagationActive
+                  ? cwaSimulation?.activeStationIds ?? EMPTY_STATION_IDS
+                  : EMPTY_STATION_IDS}
                 kmaArrivedStationIds={kmaReplaySimulation?.arrivedStationIds ?? EMPTY_STATION_IDS}
                 oceanMode={displayedOceanMode}
                 localRegions={affectedLayers.local}
@@ -5421,7 +5430,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 detectionStationIds={mapDetectionStationIds}
                 detectionRanks={mapDetectionRanks}
                 kmaDetectionStationIds={replayEvent
-                  ? kmaReplaySimulation?.activeStationIds ?? EMPTY_STATION_IDS
+                  ? replayPropagationActive
+                    ? kmaReplaySimulation?.activeStationIds ?? EMPTY_STATION_IDS
+                    : EMPTY_STATION_IDS
                   : kmaDetection.activeStationIds}
                 kmaDetectionRanks={replayEvent
                   ? kmaReplaySimulation?.ranks ?? EMPTY_RANKS
