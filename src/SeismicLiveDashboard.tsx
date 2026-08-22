@@ -40,7 +40,7 @@ import {
   Waves,
 } from "lucide-react";
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { icon as createLeafletIcon, type Icon as LeafletIcon } from "leaflet";
+import { icon as createLeafletIcon, type Circle as LeafletCircleLayer, type Icon as LeafletIcon } from "leaflet";
 import { Circle, CircleMarker, GeoJSON as LeafletGeoJSON, MapContainer, Marker, Pane, Popup, Rectangle, ScaleControl, TileLayer, Tooltip as LeafletTooltip, useMap, useMapEvents, ZoomControl } from "react-leaflet";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { feature as topojsonFeature } from "topojson-client";
@@ -1760,17 +1760,18 @@ const GnssResponseMarkers = memo(function GnssResponseMarkers(props: {
   ranks: Record<string, number>;
   mode: "live" | "replay";
   maxLabels: number;
+  sessionKey: string;
 }) {
-  const displayed = useMemo(() => sampleStableStationMarkers(
-    props.stations.filter((station) => (props.ranks[station.id] ?? 0) >= 0.25),
-    48,
-  ), [props.ranks, props.stations]);
+  const responding = useMemo(
+    () => props.stations.filter((station) => (props.ranks[station.id] ?? 0) >= 0.25),
+    [props.ranks, props.stations],
+  );
+  const displayed = useStableStationSubset(responding, 48, `${props.sessionKey}:gnss`);
   const labeledIds = useMemo(() => new Set(
     [...displayed]
-      .sort((a, b) => (props.ranks[b.id] ?? 0) - (props.ranks[a.id] ?? 0))
       .slice(0, props.maxLabels)
       .map((station) => station.id),
-  ), [displayed, props.maxLabels, props.ranks]);
+  ), [displayed, props.maxLabels]);
   return <>{displayed.map((station) => {
     const rank = props.ranks[station.id] ?? 0;
     const color = mmiIntensityColor(rank);
@@ -1828,6 +1829,56 @@ function sampleStableStationMarkers<T>(stations: readonly T[], maxMarkers: numbe
   // every arrived station.
   return stations.slice(0, maxMarkers);
 }
+
+function useStableStationSubset<T extends { id: string }>(stations: readonly T[], maxMarkers: number, sessionKey: string) {
+  const stableIdsRef = useRef<{ sessionKey: string; ids: string[] }>({ sessionKey, ids: [] });
+  if (stableIdsRef.current.sessionKey !== sessionKey) stableIdsRef.current = { sessionKey, ids: [] };
+
+  const stationById = new Map(stations.map((station) => [station.id, station]));
+  const retainedIds = stableIdsRef.current.ids.filter((id) => stationById.has(id)).slice(0, maxMarkers);
+  const retainedSet = new Set(retainedIds);
+  for (const station of stations) {
+    if (retainedIds.length >= maxMarkers) break;
+    if (retainedSet.has(station.id)) continue;
+    retainedIds.push(station.id);
+    retainedSet.add(station.id);
+  }
+  stableIdsRef.current.ids = retainedIds;
+  return retainedIds.map((id) => stationById.get(id)).filter((station): station is T => Boolean(station));
+}
+
+const SmoothWavefrontCircles = memo(function SmoothWavefrontCircles(props: {
+  event: LiveEew;
+  waveNow: number;
+  playbackRate: number;
+}) {
+  const pCircleRef = useRef<LeafletCircleLayer | null>(null);
+  const sCircleRef = useRef<LeafletCircleLayer | null>(null);
+  const anchorRef = useRef({ waveNow: props.waveNow, frameTime: performance.now(), playbackRate: props.playbackRate });
+  useEffect(() => {
+    anchorRef.current = { waveNow: props.waveNow, frameTime: performance.now(), playbackRate: props.playbackRate };
+  }, [props.playbackRate, props.waveNow]);
+  useEffect(() => {
+    let frame = 0;
+    let lastPaint = 0;
+    const paint = (frameTime: number) => {
+      if (frameTime - lastPaint >= 32) {
+        lastPaint = frameTime;
+        const anchor = anchorRef.current;
+        const interpolatedNow = anchor.waveNow + (frameTime - anchor.frameTime) * anchor.playbackRate;
+        pCircleRef.current?.setRadius(waveRadiusKm(props.event.originTime, 6, interpolatedNow) * 1000);
+        sCircleRef.current?.setRadius(waveRadiusKm(props.event.originTime, 3.5, interpolatedNow) * 1000);
+      }
+      frame = window.requestAnimationFrame(paint);
+    };
+    frame = window.requestAnimationFrame(paint);
+    return () => window.cancelAnimationFrame(frame);
+  }, [props.event.originTime]);
+  return <>
+    <Circle ref={pCircleRef} center={[props.event.latitude, props.event.longitude]} radius={waveRadiusKm(props.event.originTime, 6, props.waveNow) * 1000} interactive={false} pathOptions={{ color: "#38bdf8", weight: 2, opacity: 0.8, fillOpacity: 0.03 }} />
+    <Circle ref={sCircleRef} center={[props.event.latitude, props.event.longitude]} radius={waveRadiusKm(props.event.originTime, 3.5, props.waveNow) * 1000} interactive={false} pathOptions={{ color: "#f97316", weight: 3, opacity: 0.88, fillOpacity: 0.04 }} />
+  </>;
+});
 
 const SeismicMap = memo(function SeismicMap(props: {
   theme: SeismicMapTheme;
@@ -1905,6 +1956,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   detectionSessionKey: string;
   blinkNow: number;
   waveNow: number;
+  wavePlaybackRate: number;
   showWaves: boolean;
   focusTarget: MapFocusTarget | null;
   onSelectStation: (station: SelectableStation) => void;
@@ -1921,8 +1973,6 @@ const SeismicMap = memo(function SeismicMap(props: {
     const timer = window.setTimeout(() => setBaseLayerStage((stage) => stage + 1), 350);
     return () => window.clearTimeout(timer);
   }, [baseLayerStage]);
-  const pRadius = props.waveEvent && props.showWaves ? waveRadiusKm(props.waveEvent.originTime, 6, props.waveNow) : 0;
-  const sRadius = props.waveEvent && props.showWaves ? waveRadiusKm(props.waveEvent.originTime, 3.5, props.waveNow) : 0;
   const detectionStationSet = useMemo(() => new Set(props.detectionStationIds), [props.detectionStationIds]);
   const cwaArrivedStationSet = useMemo(() => new Set(props.cwaArrivedStationIds), [props.cwaArrivedStationIds]);
   const cwaDetectedStationSet = useMemo(() => new Set(props.cwaDetectionStationIds), [props.cwaDetectionStationIds]);
@@ -1935,12 +1985,17 @@ const SeismicMap = memo(function SeismicMap(props: {
     const replayRank = props.replayRanks?.[station.id] ?? 0;
     return liveRank > 0 || replayRank >= 0.25 || detectionStationSet.has(station.id) || props.selectedStation?.id === station.id;
   }), [detectionStationSet, props.niedFrame, props.niedStations, props.replayRanks, props.selectedStation]);
+  const stableNiedResponses = useStableStationSubset(
+    respondingNiedStations,
+    Math.max(6, responseBudget),
+    `${props.detectionSessionKey}:nied`,
+  );
   const displayedNiedResponses = useMemo(() => {
-    const displayed = sampleStableStationMarkers(respondingNiedStations, Math.max(6, responseBudget));
+    const displayed = [...stableNiedResponses];
     if (props.selectedStation && isNiedStation(props.selectedStation)
       && !displayed.some((station) => station.id === props.selectedStation?.id)) displayed.push(props.selectedStation);
     return displayed;
-  }, [props.selectedStation, respondingNiedStations, responseBudget]);
+  }, [props.selectedStation, stableNiedResponses]);
   const gridAnchorRef = useRef<{ sessionKey: string; anchor: NiedGridAnchor } | null>(null);
   if (!detectedStations.length) gridAnchorRef.current = null;
   else if (gridAnchorRef.current?.sessionKey !== props.detectionSessionKey) {
@@ -1997,12 +2052,6 @@ const SeismicMap = memo(function SeismicMap(props: {
           : props.replayRanks?.[station.id] ?? 0;
         return rank >= 0.5;
       })
-      .sort((a, b) => {
-        const rank = (station: SeismicStation) => props.replayRanks === null
-          ? niedLevelRank(niedCharToLevel(props.niedFrame?.intensity[station.index]))
-          : props.replayRanks?.[station.id] ?? 0;
-        return rank(b) - rank(a);
-      })
       .slice(0, responseLabelBudget)
       .map((station) => station.id),
   ), [displayedNiedResponses, props.niedFrame, props.replayRanks, responseLabelBudget]);
@@ -2018,57 +2067,76 @@ const SeismicMap = memo(function SeismicMap(props: {
       && !displayed.some((station) => station.id === props.selectedStation?.id)) displayed.push(props.selectedStation);
     return displayed;
   }, [globalResponseStationById, props.globalArrivedStationIds, props.selectedStation]);
-  const displayedGlobalResponses = useMemo(
-    () => sampleStableStationMarkers(respondingGlobalStations, Math.max(6, responseBudget)),
-    [respondingGlobalStations, responseBudget],
+  const displayedGlobalResponses = useStableStationSubset(
+    respondingGlobalStations,
+    Math.max(6, responseBudget),
+    `${props.detectionSessionKey}:global`,
   );
   const cwaStationById = useMemo(
     () => new Map(props.cwaStations.map((station) => [station.id, station])),
     [props.cwaStations],
   );
-  const displayedCwaResponses = useMemo(() => {
-    const arrived = props.cwaArrivedStationIds
+  const respondingCwaStations = useMemo(
+    () => props.cwaArrivedStationIds
       .map((id) => cwaStationById.get(id))
-      .filter((station): station is GlobalSeismicStation => Boolean(station));
-    const displayed = sampleStableStationMarkers(arrived, Math.max(6, responseBudget));
+      .filter((station): station is GlobalSeismicStation => Boolean(station)),
+    [cwaStationById, props.cwaArrivedStationIds],
+  );
+  const stableCwaResponses = useStableStationSubset(
+    respondingCwaStations,
+    Math.max(6, responseBudget),
+    `${props.detectionSessionKey}:cwa`,
+  );
+  const displayedCwaResponses = useMemo(() => {
+    const displayed = [...stableCwaResponses];
     if (props.selectedStation && isCwaStation(props.selectedStation)
       && !displayed.some((station) => station.id === props.selectedStation?.id)) displayed.push(props.selectedStation);
     return displayed;
-  }, [cwaStationById, props.cwaArrivedStationIds, props.selectedStation, responseBudget]);
-  const displayedKmaResponses = useMemo(() => {
+  }, [props.selectedStation, stableCwaResponses]);
+  const respondingKmaStations = useMemo(() => {
     const stationById = new Map(props.kmaStations.map((station) => [station.id, station]));
-    const responding = props.kmaReplayRanks === null
+    return props.kmaReplayRanks === null
       ? props.kmaStations.filter((station) => Math.max(0, Number(props.kmaValues[station.index] ?? 0)) >= 0.25)
       : props.kmaArrivedStationIds
         .map((id) => stationById.get(id))
         .filter((station): station is KmaStation => Boolean(station));
-    const displayed = sampleStableStationMarkers(responding, Math.max(6, responseBudget));
+  }, [props.kmaArrivedStationIds, props.kmaReplayRanks, props.kmaStations, props.kmaValues]);
+  const stableKmaResponses = useStableStationSubset(
+    respondingKmaStations,
+    Math.max(6, responseBudget),
+    `${props.detectionSessionKey}:kma`,
+  );
+  const displayedKmaResponses = useMemo(() => {
+    const displayed = [...stableKmaResponses];
     if (props.selectedStation && isKmaStation(props.selectedStation)
       && !displayed.some((station) => station.id === props.selectedStation?.id)) displayed.push(props.selectedStation);
     return displayed;
-  }, [props.kmaArrivedStationIds, props.kmaReplayRanks, props.kmaStations, props.kmaValues, props.selectedStation, responseBudget]);
-  const displayedOceanResponses = useMemo(() => {
-    const responding = props.oceanStations.filter((station) => {
+  }, [props.selectedStation, stableKmaResponses]);
+  const respondingOceanStations = useMemo(() => props.oceanStations.filter((station) => {
       const rank = props.oceanRanks[station.id] ?? 0;
       const measured = props.oceanMode === "measured" && Object.prototype.hasOwnProperty.call(props.oceanRanks, station.id);
       return measured || rank >= 0.25 || props.selectedStation?.id === station.id;
-    });
-    const displayed = sampleStableStationMarkers(responding, Math.max(6, responseBudget));
+  }), [props.oceanMode, props.oceanRanks, props.oceanStations, props.selectedStation]);
+  const stableOceanResponses = useStableStationSubset(
+    respondingOceanStations,
+    Math.max(6, responseBudget),
+    `${props.detectionSessionKey}:ocean`,
+  );
+  const displayedOceanResponses = useMemo(() => {
+    const displayed = [...stableOceanResponses];
     if (props.selectedStation && isOceanStation(props.selectedStation)
       && !displayed.some((station) => station.id === props.selectedStation?.id)) displayed.push(props.selectedStation);
     return displayed;
-  }, [props.oceanMode, props.oceanRanks, props.oceanStations, props.selectedStation, responseBudget]);
+  }, [props.selectedStation, stableOceanResponses]);
   const labeledGlobalStationIds = useMemo(() => new Set(
     [...displayedGlobalResponses]
       .filter((station) => (props.globalRanks[station.id] ?? 0) >= 1)
-      .sort((a, b) => (props.globalRanks[b.id] ?? 0) - (props.globalRanks[a.id] ?? 0))
       .slice(0, responseLabelBudget)
       .map((station) => station.id),
   ), [displayedGlobalResponses, props.globalRanks, responseLabelBudget]);
   const labeledCwaStationIds = useMemo(() => new Set(
     [...displayedCwaResponses]
       .filter((station) => (props.cwaRanks[station.id] ?? 0) >= 0.5)
-      .sort((a, b) => (props.cwaRanks[b.id] ?? 0) - (props.cwaRanks[a.id] ?? 0))
       .slice(0, responseLabelBudget)
       .map((station) => station.id),
   ), [displayedCwaResponses, props.cwaRanks, responseLabelBudget]);
@@ -2080,12 +2148,6 @@ const SeismicMap = memo(function SeismicMap(props: {
           : Number(props.kmaReplayRanks[station.id] ?? 0);
         return rank >= 1;
       })
-      .sort((a, b) => {
-        const rank = (station: KmaStation) => props.kmaReplayRanks === null
-          ? Number(props.kmaValues[station.index] ?? 0)
-          : Number(props.kmaReplayRanks[station.id] ?? 0);
-        return rank(b) - rank(a);
-      })
       .slice(0, responseLabelBudget)
       .map((station) => station.id),
   ), [displayedKmaResponses, props.kmaReplayRanks, props.kmaValues, responseLabelBudget]);
@@ -2094,7 +2156,6 @@ const SeismicMap = memo(function SeismicMap(props: {
       .filter((station) => props.oceanMode === "measured"
         ? Object.prototype.hasOwnProperty.call(props.oceanRanks, station.id)
         : (props.oceanRanks[station.id] ?? 0) >= 1)
-      .sort((a, b) => (props.oceanRanks[b.id] ?? 0) - (props.oceanRanks[a.id] ?? 0))
       .slice(0, responseLabelBudget)
       .map((station) => station.id),
   ), [displayedOceanResponses, props.oceanMode, props.oceanRanks, responseLabelBudget]);
@@ -2219,10 +2280,8 @@ const SeismicMap = memo(function SeismicMap(props: {
       />
       <ShakeMapContourLayer visible={props.showShakeMap} shakeMap={props.shakeMap} contours={props.shakeMapContours} />
       <Pane name="seismic-wave-pane" style={{ zIndex: 390, pointerEvents: "none" }}>
-        {props.waveEvent && props.waveEvent.hypocenterKnown !== false && !props.waveEvent.cancelled && <>
-          {pRadius > 0 && <Circle center={[props.waveEvent.latitude, props.waveEvent.longitude]} radius={pRadius * 1000} interactive={false} pathOptions={{ color: "#38bdf8", weight: 2, opacity: 0.8, fillOpacity: 0.03 }} />}
-          {sRadius > 0 && <Circle center={[props.waveEvent.latitude, props.waveEvent.longitude]} radius={sRadius * 1000} interactive={false} pathOptions={{ color: "#f97316", weight: 3, opacity: 0.88, fillOpacity: 0.04 }} />}
-        </>}
+        {props.showWaves && props.waveEvent && props.waveEvent.hypocenterKnown !== false && !props.waveEvent.cancelled
+          && <SmoothWavefrontCircles event={props.waveEvent} waveNow={props.waveNow} playbackRate={props.wavePlaybackRate} />}
       </Pane>
       <Pane name="seismic-grid-pane" style={{ zIndex: 410, pointerEvents: "none" }}>
         {layerComplexity >= 3 && detectionCells.map((cell) => <Rectangle key={`${props.detectionSessionKey}:${cell.id}`} bounds={cell.bounds} interactive={false} pathOptions={{ color: NIED_GRID_COLORS[cell.color], weight: blinkOn ? 2.8 : 1.6, opacity: blinkOn ? 1 : 0.28, dashArray: props.detectionMode === "replay" ? "7 5" : undefined, fill: false }} />)}
@@ -2317,14 +2376,14 @@ const SeismicMap = memo(function SeismicMap(props: {
       </Pane>
       <Pane name="seismic-station-response-pane" style={{ zIndex: 470 }}>
         {layerComplexity >= 2 && props.showCwa && <StationCanvasLayer paneName="seismic-station-response-pane" points={cwaResponsePoints} />}
-        {layerComplexity >= 4 && props.showGnss && <GnssResponseMarkers stations={props.gnssStations} ranks={props.gnssRanks} mode={props.gnssMode} maxLabels={responseLabelBudget} />}
+        {layerComplexity >= 4 && props.showGnss && <GnssResponseMarkers stations={props.gnssStations} ranks={props.gnssRanks} mode={props.gnssMode} maxLabels={responseLabelBudget} sessionKey={props.detectionSessionKey} />}
         {layerComplexity >= 2 && props.showCwa && displayedCwaResponses.map((station) => {
           const selected = props.selectedStation?.id === station.id;
           const rank = props.cwaRanks[station.id] ?? 0;
           const active = rank >= 0.25;
           const color = active ? jmaShindoColor(rank) : FDSN_PROVIDER_COLORS.cwa;
           return <Fragment key={`response:${station.id}`}>
-            <CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 6 : blinkOn ? 5.2 : 4.4} pathOptions={{ color: "#ffffff", fillColor: color, weight: selected ? 2.2 : 1.6, opacity: 0.96, fillOpacity: 0.98 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
+            <CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 6 : 4.4} pathOptions={{ color: "#ffffff", fillColor: color, weight: selected ? 2.2 : 1.6, opacity: 0.96, fillOpacity: 0.98 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
               {selected && <Popup><strong>CWA CWASN {station.stationCode}</strong><br />{station.stationName}<br />本地传播估算震度 {jmaShindoLabel(rank)} · {rank.toFixed(1)}<br /><a href="https://gdms.cwa.gov.tw/map.php" target="_blank" rel="noreferrer">打开 CWA GDMS</a></Popup>}
             </CircleMarker>
             {active && labeledCwaStationIds.has(station.id) && <StationValueMarker latitude={station.latitude} longitude={station.longitude} rank={rank} scale="shindo" selected={selected} label={`CWA ${station.stationCode} 震度 ${jmaShindoLabel(rank)}`} />}
@@ -2339,7 +2398,7 @@ const SeismicMap = memo(function SeismicMap(props: {
           const color = niedStationDisplayColor(props.replayRanks === null ? level : 0, activeRank);
           const selected = props.selectedStation?.id === station.id;
           return <Fragment key={`response:${station.id}`}>
-            <CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 6 : detected ? blinkOn ? 5.2 : 4.4 : rank >= 1 ? 4 : 3.2} pathOptions={{ color: selected || detected ? "#ffffff" : color, fillColor: color, weight: selected ? 2.4 : detected ? blinkOn ? 2.2 : 1.1 : 0.8, opacity: detected ? 1 : 0.94, fillOpacity: detected ? 1 : rank >= 1 ? 0.94 : 0.86 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
+            <CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 6 : detected ? 4.4 : rank >= 1 ? 4 : 3.2} pathOptions={{ color: selected || detected ? "#ffffff" : color, fillColor: color, weight: selected ? 2.4 : detected ? 1.6 : 0.8, opacity: detected ? 1 : 0.94, fillOpacity: detected ? 1 : rank >= 1 ? 0.94 : 0.86 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
               {selected && <Popup><strong>{station.stationName}</strong><br />{station.network} {station.stationCode}<br />{props.replayRanks === null ? `实时震度 ${niedLevelLabel(level)}` : `回放模拟震度 ${rank.toFixed(1)}`}</Popup>}
             </CircleMarker>
             {labeledStationIds.has(station.id) && <StationValueMarker latitude={station.latitude} longitude={station.longitude} rank={rank} scale="shindo" selected={selected} label={`${station.network} ${station.stationCode} 震度 ${jmaShindoLabel(rank)}`} />}
@@ -2353,7 +2412,7 @@ const SeismicMap = memo(function SeismicMap(props: {
           const selected = props.selectedStation?.id === station.id;
           const color = mmiIntensityColor(rank);
           return <Fragment key={`response:${station.id}`}>
-            <CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 6 : active ? blinkOn ? 5.2 : 4.4 : 3.2} pathOptions={{ color: "#ffffff", fillColor: color, weight: selected ? 2 : 1.5, fillOpacity: rank >= 1 ? 0.94 : 0.82 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
+            <CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 6 : active ? 4.4 : 3.2} pathOptions={{ color: "#ffffff", fillColor: color, weight: selected ? 2 : 1.5, fillOpacity: rank >= 1 ? 0.94 : 0.82 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
               {selected && <Popup><strong>{station.stationName}</strong><br />KMA-PEWS {props.kmaReplayRanks === null ? "官方实时" : "回放模拟"}测站<br />烈度 {intensityRomanLabel(rank)} · MMI {rank.toFixed(1)}</Popup>}
             </CircleMarker>
             {active && labeledKmaStationIds.has(station.id) && <StationValueMarker latitude={station.latitude} longitude={station.longitude} rank={rank} scale="intensity" selected={selected} label={`KMA ${station.stationCode} MMI ${intensityRomanLabel(rank)}`} />}
@@ -2369,7 +2428,7 @@ const SeismicMap = memo(function SeismicMap(props: {
           const active = rank >= (measured ? 0.5 : 0.25);
           const color = measured ? intensityColor(Math.max(0, rank)) : active ? intensityColor(rank) : oceanStationBaseColor(station.network);
           const sampleLabel = props.oceanMode === "replay" ? "回放模拟震度" : props.oceanMode === "measured" ? "MSIL 实测色值反算震度" : props.oceanMode === "local" ? "本地预测震度" : "等待数据";
-          return <CircleMarker key={`response:${station.id}`} center={[station.latitude, station.longitude]} radius={selected ? 6 : active ? blinkOn ? 5 : 4.3 : 3.2} pathOptions={{ color: "#ffffff", fillColor: color, weight: selected ? 2.2 : 1.5, fillOpacity: active ? 0.96 : 0.82 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
+          return <CircleMarker key={`response:${station.id}`} center={[station.latitude, station.longitude]} radius={selected ? 6 : active ? 4.3 : 3.2} pathOptions={{ color: "#ffffff", fillColor: color, weight: selected ? 2.2 : 1.5, fillOpacity: active ? 0.96 : 0.82 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
             {selected && <Popup><strong>{station.network} {station.stationCode}</strong><br />海底深度 {station.depthM.toFixed(0)} m<br />{sampleLabel}{measured ? ` ${rank.toFixed(2)} [${displayRankLabel(rank)}]` : active ? ` ${displayRankLabel(rank)}` : ""}<br /><a href={station.waveformUrl} target="_blank" rel="noreferrer">查看官方延迟波形</a></Popup>}
             {labeledOceanStationIds.has(station.id) && (measured || active) && <LeafletTooltip permanent direction="right" offset={[10, 0]} className="ocean-station-side-label">{displayRankLabel(rank)}</LeafletTooltip>}
           </CircleMarker>;
@@ -5438,9 +5497,14 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                   ? kmaReplaySimulation?.ranks ?? EMPTY_RANKS
                   : liveKmaDetectionRanks}
                 detectionMode={replayEvent ? "replay" : "live"}
-                detectionSessionKey={replayEvent ? `replay:${replayEvent.id}` : "live"}
+                detectionSessionKey={replayEvent
+                  ? `replay:${replayEvent.source}:${replayEvent.id}`
+                  : wavefrontEvent
+                    ? `live:${wavefrontEvent.source}:${wavefrontEvent.id}`
+                    : "live:idle"}
                 blinkNow={mapDetectionStationIds.length ? clock : 0}
                 waveNow={waveNow}
+                wavePlaybackRate={replayEvent ? replayPlaying ? normalizedReplaySpeed : 0 : 1}
                 showWaves={showWaves}
                 warningLocation={sWaveWarningVisible ? userStation : null}
                 focusTarget={mapFocus}
