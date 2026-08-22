@@ -4076,6 +4076,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const selectedStation = allSelectableStations.find((station) => station.id === selectedStationId)
     ?? (selectedGlobalStation?.id === selectedStationId ? selectedGlobalStation : null);
   const replayEvent = selectedEvent && (replayPlaying || replaySeconds > 0) ? selectedEvent : null;
+  const replayPropagationActive = Boolean(replayEvent && isReplayPropagationActive(replaySeconds));
   const replaySeismicSeconds = Math.min(replaySeconds, 300);
   const regionalLiveWaveEvent = latestRegionalState.waveEvent
     && shouldDisplayLiveWavefront(latestRegionalState.waveEvent, clock)
@@ -4183,6 +4184,14 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const cwaSimulation = useMemo(() => cwaResponseProfile
     ? simulatePreparedReplayStationResponse(cwaResponseProfile, oceanResponseElapsed)
     : null, [cwaResponseProfile, oceanResponseElapsed]);
+  const waveResponsePresentationActive = showShakeDetectionGrid && (replayEvent
+    ? replayPropagationActive
+    : Boolean(liveWavefrontEvent));
+  const visibleReplaySimulation = waveResponsePresentationActive ? replaySimulation : null;
+  const visibleKmaReplaySimulation = waveResponsePresentationActive ? kmaReplaySimulation : null;
+  const visibleOceanSimulation = waveResponsePresentationActive ? oceanSimulation : null;
+  const visibleGlobalSimulation = waveResponsePresentationActive ? globalSimulation : null;
+  const visibleCwaSimulation = waveResponsePresentationActive ? cwaSimulation : null;
   const gnssResponseProfile = useMemo(() => showGnssStations && oceanResponseEvent
     ? prepareReplayStationResponse(oceanResponseEvent, GNSS_STATIONS, "intensity")
     : null, [oceanResponseEvent, showGnssStations]);
@@ -4205,10 +4214,10 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     (snetMeasuredFrame?.stations ?? []).map((station) => [station.stationId, station.intensity]),
   ), [snetMeasuredFrame]);
   const displayedOceanRanks = replayEvent
-    ? oceanSimulation?.ranks ?? {}
+    ? visibleOceanSimulation?.ranks ?? {}
     : snetViewMode === "measured" && snetMeasuredFrame
       ? snetMeasuredRanks
-      : oceanSimulation?.ranks ?? {};
+      : visibleOceanSimulation?.ranks ?? {};
   const displayedOceanMode: OceanResponseMode = replayEvent
     ? "replay"
     : snetViewMode === "measured" && snetMeasuredFrame
@@ -4444,13 +4453,17 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
 
   const selectedRank = useMemo(() => {
     if (!selectedStation) return null;
-    if (isCwaStation(selectedStation)) return cwaSimulation?.ranks[selectedStation.id] ?? 0;
-    if (isGlobalStation(selectedStation)) return globalSimulation?.ranks[selectedStation.id] ?? 0;
-    if (isNiedStation(selectedStation)) return replaySimulation?.ranks[selectedStation.id] ?? niedLevelRank(niedCharToLevel(niedFrame?.intensity[selectedStation.index]));
-    if (isKmaStation(selectedStation)) return kmaReplaySimulation?.ranks[selectedStation.id] ?? Math.max(0, Number(kmaValues[selectedStation.index] ?? 0));
+    if (isCwaStation(selectedStation)) return visibleCwaSimulation?.ranks[selectedStation.id] ?? 0;
+    if (isGlobalStation(selectedStation)) return visibleGlobalSimulation?.ranks[selectedStation.id] ?? 0;
+    if (isNiedStation(selectedStation)) return showShakeDetectionGrid
+      ? visibleReplaySimulation?.ranks[selectedStation.id] ?? niedLevelRank(niedCharToLevel(niedFrame?.intensity[selectedStation.index]))
+      : 0;
+    if (isKmaStation(selectedStation)) return showShakeDetectionGrid
+      ? visibleKmaReplaySimulation?.ranks[selectedStation.id] ?? Math.max(0, Number(kmaValues[selectedStation.index] ?? 0))
+      : 0;
     if (isCencStation(selectedStation)) return selectedStation.intensity;
     return displayedOceanRanks[selectedStation.id] ?? 0;
-  }, [cwaSimulation, displayedOceanRanks, globalSimulation, kmaReplaySimulation, kmaValues, niedFrame, replaySimulation, selectedStation]);
+  }, [displayedOceanRanks, kmaValues, niedFrame, selectedStation, showShakeDetectionGrid, visibleCwaSimulation, visibleGlobalSimulation, visibleKmaReplaySimulation, visibleReplaySimulation]);
 
   useEffect(() => { setHistory([]); }, [selectedStationId]);
 
@@ -4778,7 +4791,6 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   }, [displayedJmaTsunami, tsunamiRegions]);
   const waveOrigin = wavefrontEvent ? Date.parse(wavefrontEvent.originTime) : 0;
   const waveNow = replayEvent ? waveOrigin + replaySeismicSeconds * 1000 : clock;
-  const replayPropagationActive = Boolean(replayEvent && isReplayPropagationActive(replaySeconds));
   const showWaves = replayEvent
     ? replayPropagationActive
     : Boolean(liveWavefrontEvent);
@@ -4837,7 +4849,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       : `预计烈度 ${intensityRomanLabel(calculateLocalIntensity(wavefrontEvent, userWarningLocation))}`
     : "预计烈度 --";
   const globalAutoPresentation = Boolean(!replayEvent && autoGlobalEvent && rawMapEvent === autoGlobalEvent);
-  const rawMapDetectionStationIds = globalAutoPresentation
+  const rawMapDetectionStationIds = !showShakeDetectionGrid
+    ? EMPTY_STATION_IDS
+    : globalAutoPresentation
     ? EMPTY_STATION_IDS
     : replayEvent
       ? replayPropagationActive
@@ -4852,13 +4866,21 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const mapDetectionMaxRank = Math.max(0, ...mapDetectionStationIds.map((id) => mapDetectionRanks[id] ?? 0));
   const mapDetectionSeverity = niedGridColor(mapDetectionMaxRank);
   const replayDetected = Boolean(replayEvent && mapDetectionStationIds.length >= 4);
-  const mapDetectionSelectionActive = replayEvent ? replayDetected : niedDetection.detected;
-  const activeNiedCount = replayEvent ? replaySimulation?.activeStationIds.length ?? 0 : niedDetection.activeStationIds.length;
-  const activeKmaCount = replayEvent ? kmaReplaySimulation?.activeStationIds.length ?? 0 : kmaDetection.activeStationIds.length;
+  const mapDetectionSelectionActive = showShakeDetectionGrid && (replayEvent ? replayDetected : niedDetection.detected);
+  const activeNiedCount = !showShakeDetectionGrid
+    ? 0
+    : replayEvent
+      ? visibleReplaySimulation?.activeStationIds.length ?? 0
+      : niedDetection.activeStationIds.length;
+  const activeKmaCount = !showShakeDetectionGrid
+    ? 0
+    : replayEvent
+      ? visibleKmaReplaySimulation?.activeStationIds.length ?? 0
+      : kmaDetection.activeStationIds.length;
   const activeOceanCount = Object.values(displayedOceanRanks).filter((rank) => rank >= (displayedOceanMode === "measured" ? 0.5 : 0.25)).length;
   const measuredOceanCount = displayedOceanMode === "measured" ? Object.keys(displayedOceanRanks).length : 0;
-  const activeGlobalCount = globalSimulation?.arrivedStationIds.length ?? 0;
-  const activeCwaCount = cwaSimulation?.arrivedStationIds.length ?? 0;
+  const activeGlobalCount = visibleGlobalSimulation?.arrivedStationIds.length ?? 0;
+  const activeCwaCount = visibleCwaSimulation?.arrivedStationIds.length ?? 0;
   const jmaRealtimeWarning = activeEews.find((event) => event.source === "JMA" && event.relay !== "Catalogue" && event.warning && !event.cancelled) ?? null;
   const jmaRealtimeIntensity = activeEews.find((event) => event.source === "JMA" && event.observedIntensity && !event.cancelled) ?? null;
   const cwaRealtimeWarning = activeEews.find((event) => event.source === "CWA" && event.relay !== "Catalogue" && event.warning && !event.cancelled) ?? null;
@@ -4888,15 +4910,15 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     [oceanCatalogue],
   );
   const snetSimulationRows = useMemo(() => snetStations
-    .map((station) => ({ station, rank: oceanSimulation?.ranks[station.id] ?? 0 }))
+    .map((station) => ({ station, rank: visibleOceanSimulation?.ranks[station.id] ?? 0 }))
     .sort((a, b) => b.rank - a.rank)
-    .slice(0, 5), [oceanSimulation, snetStations]);
+    .slice(0, 5), [snetStations, visibleOceanSimulation]);
   const snetMeasuredRows = useMemo(() => (snetMeasuredFrame?.stations ?? []).slice(0, 5).flatMap((sample) => {
     const station = snetStations.find((candidate) => candidate.id === sample.stationId);
     return station ? [{ station, rank: sample.intensity }] : [];
   }), [snetMeasuredFrame, snetStations]);
-  const snetSimulationActiveCount = snetStations.filter((station) => (oceanSimulation?.ranks[station.id] ?? 0) >= 0.25).length;
-  const snetSimulationMaxRank = Math.max(0, ...snetStations.map((station) => oceanSimulation?.ranks[station.id] ?? 0));
+  const snetSimulationActiveCount = snetStations.filter((station) => (visibleOceanSimulation?.ranks[station.id] ?? 0) >= 0.25).length;
+  const snetSimulationMaxRank = Math.max(0, ...snetStations.map((station) => visibleOceanSimulation?.ranks[station.id] ?? 0));
   const niedWaveformCandidates = useMemo(() => {
     if (!mapDetectionSelectionActive || !mapDetectionStationIds.length || !catalogue?.stations.length) return [];
     const activeIds = new Set(mapDetectionStationIds);
@@ -5103,23 +5125,23 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
         <time>{formatTime(overlayEvent.announcedAt)}</time>
       </button> : <div className="seismic-warning-waiting"><Radio size={16} />正在监视区域 EEW 与全球机构报告</div>}
     </section>,
-    nied: <button className={`seismic-detection-card ${replayEvent ? replayDetected ? `detected replay ${mapDetectionSeverity}` : "replay" : niedDetection.detected ? `detected ${mapDetectionSeverity}` : ""}`} onClick={() => replayEvent ? focusReplayDetection() : focusStrongestDetection("NIED")} disabled={replayEvent ? !mapDetectionStationIds.length : !niedDetection.activeStationIds.length}>
-      <span><i />{replayEvent ? "NIED 回放模拟" : "NIED 实时"}</span><strong>{replayEvent ? `震度 ${jmaShindoLabel(replaySimulation?.maxRank ?? 0)}` : niedDetection.currentMaxLabel}</strong><small>{replayEvent ? replayDetected ? `${mapDetectionStationIds.length} 站 · 已形成检知框` : `${mapDetectionStationIds.length} 站响应` : niedDetection.detected ? `${niedDetection.activeStationIds.length} 站 · ${niedDetection.clusterCount} 簇` : "摇晃检知待机"}</small><time>{replayEvent ? `T+${replaySeconds.toFixed(2)} s` : niedFrame ? formatTime(niedFrame.dataTime) : "等待帧"}</time>
+    nied: <button className={`seismic-detection-card ${showShakeDetectionGrid ? replayEvent ? replayDetected ? `detected replay ${mapDetectionSeverity}` : "replay" : niedDetection.detected ? `detected ${mapDetectionSeverity}` : "" : ""}`} onClick={() => replayEvent ? focusReplayDetection() : focusStrongestDetection("NIED")} disabled={!activeNiedCount}>
+      <span><i />{replayEvent ? "NIED 回放模拟" : "NIED 实时"}</span><strong>{!showShakeDetectionGrid ? "已隐藏" : replayEvent ? `震度 ${jmaShindoLabel(visibleReplaySimulation?.maxRank ?? 0)}` : niedDetection.currentMaxLabel}</strong><small>{!showShakeDetectionGrid ? "检知框与传播响应已关闭" : replayEvent ? replayDetected ? `${mapDetectionStationIds.length} 站 · 已形成检知框` : `${mapDetectionStationIds.length} 站响应` : niedDetection.detected ? `${niedDetection.activeStationIds.length} 站 · ${niedDetection.clusterCount} 簇` : "摇晃检知待机"}</small><time>{replayEvent ? `T+${replaySeconds.toFixed(2)} s` : niedFrame ? formatTime(niedFrame.dataTime) : "等待帧"}</time>
     </button>,
     kma: <button className={`seismic-detection-card ${activeKmaCount ? "detected" : ""}`} onClick={() => focusStrongestDetection("KMA-PEWS")} disabled={!activeKmaCount}>
-      <span><i />KMA-PEWS</span><strong>{replayEvent ? `烈度 ${intensityRomanLabel(kmaReplaySimulation?.maxRank ?? 0)}` : kmaDetection.currentMaxLabel}</strong><small>{replayEvent ? `${activeKmaCount} 站 · 回放模拟` : kmaDetection.detected ? `${kmaDetection.activeStationIds.length} 站 · ${kmaDetection.clusterCount} 簇` : "实时摇晃检知待机"}</small><time>{replayEvent ? `T+${replaySeconds.toFixed(2)} s` : kmaDetection.updatedAt ? formatTime(kmaDetection.updatedAt) : "建立 60 秒基线"}</time>
+      <span><i />KMA-PEWS</span><strong>{!showShakeDetectionGrid ? "已隐藏" : replayEvent ? `烈度 ${intensityRomanLabel(visibleKmaReplaySimulation?.maxRank ?? 0)}` : kmaDetection.currentMaxLabel}</strong><small>{!showShakeDetectionGrid ? "检知框与传播响应已关闭" : replayEvent ? `${activeKmaCount} 站 · 回放模拟` : kmaDetection.detected ? `${kmaDetection.activeStationIds.length} 站 · ${kmaDetection.clusterCount} 簇` : "实时摇晃检知待机"}</small><time>{replayEvent ? `T+${replaySeconds.toFixed(2)} s` : kmaDetection.updatedAt ? formatTime(kmaDetection.updatedAt) : "建立 60 秒基线"}</time>
     </button>,
     jma: <button className={`seismic-detection-card ${jmaRealtimeWarning ? "detected red" : jmaRealtimeIntensity ? "detected yellow" : ""}`} onClick={() => (jmaRealtimeWarning ?? jmaRealtimeIntensity) && chooseEvent(jmaRealtimeWarning ?? jmaRealtimeIntensity!)} disabled={!jmaRealtimeWarning && !jmaRealtimeIntensity}>
       <span><i />JMA 震度速报</span><strong>{jmaRealtimeWarning ? `预警震度 ${jmaRealtimeWarning.maxIntensity}` : jmaRealtimeIntensity ? `实测震度 ${jmaRealtimeIntensity.maxIntensity}` : "无速报"}</strong><small>{jmaRealtimeWarning ? `${jmaRealtimeWarning.affectedAreas?.length ?? 0} 区 · 第 ${jmaRealtimeWarning.serial} 报` : jmaRealtimeIntensity ? `${jmaRealtimeIntensity.affectedAreas?.length ?? 0} 区 · 官方受灾区域已上色` : jmaIntensityState === "online" ? "震度速报通道在线" : "震度速报通道连接中"}</small><time>{(jmaRealtimeWarning ?? jmaRealtimeIntensity) ? formatTime((jmaRealtimeWarning ?? jmaRealtimeIntensity)!.announcedAt) : "等待 JMA 官方报文"}</time>
     </button>,
     cwa: <button className={`seismic-detection-card ${cwaRealtimeWarning || activeCwaCount ? "detected yellow" : ""}`} onClick={() => cwaRealtimeWarning ? chooseEvent(cwaRealtimeWarning) : focusStrongestCwaResponse()} disabled={!cwaRealtimeWarning && !activeCwaCount}>
-      <span><i />CWA / CWASN</span><strong>{cwaRealtimeWarning ? `震度 ${cwaRealtimeWarning.maxIntensity}` : cwaSimulation ? `震度 ${jmaShindoLabel(cwaSimulation.maxRank)}` : "待机"}</strong><small>{cwaRealtimeWarning ? `${cwaRealtimeWarning.affectedAreas?.length ?? 0} 区 · 官方预警中继` : activeCwaCount ? `${activeCwaCount} 站传播响应 · 检知框为本地模拟` : latestCwaOfficialReport ? `最近官方报告 M ${latestCwaOfficialReport.magnitude.toFixed(1)}` : "官方报告通道待机"}</small><time>{cwaRealtimeWarning ? formatTime(cwaRealtimeWarning.announcedAt) : oceanResponseEvent ? `T+${oceanResponseElapsed.toFixed(2)} s` : latestCwaOfficialReport ? formatTime(latestCwaOfficialReport.time) : "等待数据"}</time>
+      <span><i />CWA / CWASN</span><strong>{cwaRealtimeWarning ? `震度 ${cwaRealtimeWarning.maxIntensity}` : visibleCwaSimulation ? `震度 ${jmaShindoLabel(visibleCwaSimulation.maxRank)}` : "待机"}</strong><small>{cwaRealtimeWarning ? `${cwaRealtimeWarning.affectedAreas?.length ?? 0} 区 · 官方预警中继` : activeCwaCount ? `${activeCwaCount} 站传播响应 · 检知框为本地模拟` : latestCwaOfficialReport ? `最近官方报告 M ${latestCwaOfficialReport.magnitude.toFixed(1)}` : "官方报告通道待机"}</small><time>{cwaRealtimeWarning ? formatTime(cwaRealtimeWarning.announcedAt) : waveResponsePresentationActive && oceanResponseEvent ? `T+${oceanResponseElapsed.toFixed(2)} s` : latestCwaOfficialReport ? formatTime(latestCwaOfficialReport.time) : "等待数据"}</time>
     </button>,
     global: <button className={`seismic-detection-card ${activeGlobalCount ? "detected" : ""}`} onClick={focusStrongestGlobalResponse} disabled={!activeGlobalCount}>
-      <span><i />全球 FDSN 响应</span><strong>{globalSimulation ? `MMI ${globalSimulation.maxRank.toFixed(1)}` : "待机"}</strong><small>{activeGlobalCount ? `${activeGlobalCount} 站已被 P 波扫过并保持显示` : "等待有效事件"}</small><time>{oceanResponseEvent ? `T+${oceanResponseElapsed.toFixed(2)} s` : "等待数据"}</time>
+      <span><i />全球 FDSN 响应</span><strong>{visibleGlobalSimulation ? `MMI ${visibleGlobalSimulation.maxRank.toFixed(1)}` : "待机"}</strong><small>{activeGlobalCount ? `${activeGlobalCount} 站已被 P 波扫过并保持显示` : showShakeDetectionGrid ? "等待有效事件" : "传播响应已关闭"}</small><time>{waveResponsePresentationActive && oceanResponseEvent ? `T+${oceanResponseElapsed.toFixed(2)} s` : "等待数据"}</time>
     </button>,
     ocean: <button className={`seismic-detection-card ocean ${oceanResponseActive ? "detected" : ""}`} onClick={focusStrongestOceanResponse} disabled={displayedOceanMode === "measured" ? !snetMeasuredRows.length : !activeOceanCount}>
-      <span><i />S-net / DONET / N-net</span><strong>{displayedOceanMode === "measured" && snetMeasuredFrame ? `震度 ${displayRankLabel(snetMeasuredFrame.maxIntensity)} · ${snetMeasuredFrame.maxIntensity.toFixed(2)}` : oceanSimulation ? `震度 ${oceanSimulation.maxRank.toFixed(1)}` : "待机"}</strong><small>{displayedOceanMode === "measured" && snetMeasuredFrame ? selectedSnetEvent ? oceanHistorySelected ? `${measuredOceanCount} 站观测 · 历史已结束` : `${measuredOceanCount} 站观测 · MSIL 实测反算` : `${measuredOceanCount} 站观测 · 最新帧（微小值也显示）` : activeOceanCount ? `${activeOceanCount} 站 · ${oceanMode === "replay" ? "回放模拟" : "EEW 本地预测"}` : "等待有效地震事件"}</small><time>{displayedOceanMode === "measured" && snetMeasuredFrame ? formatTime(snetMeasuredFrame.timestamp) : oceanResponseEvent ? `T+${oceanResponseElapsed.toFixed(2)} s` : "等待数据"}</time>
+      <span><i />S-net / DONET / N-net</span><strong>{displayedOceanMode === "measured" && snetMeasuredFrame ? `震度 ${displayRankLabel(snetMeasuredFrame.maxIntensity)} · ${snetMeasuredFrame.maxIntensity.toFixed(2)}` : visibleOceanSimulation ? `震度 ${visibleOceanSimulation.maxRank.toFixed(1)}` : "待机"}</strong><small>{displayedOceanMode === "measured" && snetMeasuredFrame ? selectedSnetEvent ? oceanHistorySelected ? `${measuredOceanCount} 站观测 · 历史已结束` : `${measuredOceanCount} 站观测 · MSIL 实测反算` : `${measuredOceanCount} 站观测 · 最新帧（微小值也显示）` : activeOceanCount ? `${activeOceanCount} 站 · ${oceanMode === "replay" ? "回放模拟" : "EEW 本地预测"}` : showShakeDetectionGrid ? "等待有效地震事件" : "传播响应已关闭"}</small><time>{displayedOceanMode === "measured" && snetMeasuredFrame ? formatTime(snetMeasuredFrame.timestamp) : waveResponsePresentationActive && oceanResponseEvent ? `T+${oceanResponseElapsed.toFixed(2)} s` : "等待数据"}</time>
     </button>,
   };
   const visibleMonitorWidgetIds = MONITOR_WIDGET_IDS.filter((widgetId) => monitorWidgetContent[widgetId] !== null);
@@ -5406,7 +5428,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               <header><div><strong>实时监控设置</strong><small>低档复杂度优先保证回放帧率</small></div><button aria-label="关闭实时地震设置" onClick={() => setSettingsOpen(false)}>×</button></header>
               <label className="toggle-row"><input type="checkbox" checked={autoSelectWaveformStation} onChange={(event) => setAutoSelectWaveformStation(event.target.checked)} />自动寻找最近可用波形测站 <em>{autoSelectWaveformStation ? "开启" : "关闭"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={autoOpenWniMonitor} onChange={(event) => setAutoOpenWniMonitor(event.target.checked)} />自动打开 WNI / 实时监控 <em>{autoOpenWniMonitor ? "开启" : "关闭"}</em></label>
-              <label className="toggle-row"><input type="checkbox" checked={showShakeDetectionGrid} onChange={(event) => setShowShakeDetectionGrid(event.target.checked)} />摇晃检知框 <em>{showShakeDetectionGrid ? "显示" : "隐藏"}</em></label>
+              <label className="toggle-row"><input type="checkbox" checked={showShakeDetectionGrid} onChange={(event) => setShowShakeDetectionGrid(event.target.checked)} />摇晃检知框与传播响应 <em>{showShakeDetectionGrid ? "显示" : "隐藏"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={autoHypocenterEstimation} onChange={(event) => setAutoHypocenterEstimation(event.target.checked)} />自动震源推算 <em>{autoHypocenterEstimation ? "开启" : "关闭"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={keepLatestWarningVisible} onChange={(event) => setKeepLatestWarningVisible(event.target.checked)} />一直显示最新预警 <em>{keepLatestWarningVisible ? "保持" : "按时结束"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={showWniCameras} onChange={(event) => setShowWniCameras(event.target.checked)} />显示 WNI 摄像头图层 <em>{showWniCameras ? "显示" : "隐藏"}</em></label>
@@ -5466,7 +5488,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 cencReport={showCenc ? cencReport : null}
                 niedFrame={mapDetectionStationIds.length ? niedFrame : null}
                 kmaValues={kmaDetection.activeStationIds.length ? kmaValues : EMPTY_NUMBERS}
-                kmaReplayRanks={replayEvent ? kmaReplaySimulation?.ranks ?? EMPTY_RANKS : null}
+                kmaReplayRanks={replayEvent ? visibleKmaReplaySimulation?.ranks ?? EMPTY_RANKS : null}
                 showNied={showNied}
                 showKma={showKma}
                 showOcean={showOcean}
@@ -5483,19 +5505,19 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 selectedReport={selectedInstitutionReport}
                 estimate={estimate}
                 estimateMode={replayEvent ? "replay" : "live"}
-                replayRanks={replayEvent ? replaySimulation?.ranks ?? EMPTY_RANKS : null}
+                replayRanks={replayEvent ? visibleReplaySimulation?.ranks ?? EMPTY_RANKS : null}
                 replayMode={Boolean(replayEvent)}
                 oceanRanks={displayedOceanRanks}
-                globalRanks={globalSimulation?.ranks ?? EMPTY_RANKS}
-                globalArrivedStationIds={globalSimulation?.arrivedStationIds ?? EMPTY_STATION_IDS}
+                globalRanks={visibleGlobalSimulation?.ranks ?? EMPTY_RANKS}
+                globalArrivedStationIds={visibleGlobalSimulation?.arrivedStationIds ?? EMPTY_STATION_IDS}
                 gnssRanks={gnssSimulation?.ranks ?? EMPTY_RANKS}
                 gnssMode={replayEvent ? "replay" : "live"}
-                cwaRanks={cwaSimulation?.ranks ?? EMPTY_RANKS}
-                cwaArrivedStationIds={cwaSimulation?.arrivedStationIds ?? EMPTY_STATION_IDS}
-                cwaDetectionStationIds={replayPropagationActive
-                  ? cwaSimulation?.activeStationIds ?? EMPTY_STATION_IDS
+                cwaRanks={visibleCwaSimulation?.ranks ?? EMPTY_RANKS}
+                cwaArrivedStationIds={visibleCwaSimulation?.arrivedStationIds ?? EMPTY_STATION_IDS}
+                cwaDetectionStationIds={waveResponsePresentationActive
+                  ? visibleCwaSimulation?.activeStationIds ?? EMPTY_STATION_IDS
                   : EMPTY_STATION_IDS}
-                kmaArrivedStationIds={kmaReplaySimulation?.arrivedStationIds ?? EMPTY_STATION_IDS}
+                kmaArrivedStationIds={visibleKmaReplaySimulation?.arrivedStationIds ?? EMPTY_STATION_IDS}
                 oceanMode={displayedOceanMode}
                 localRegions={affectedLayers.local}
                 officialRegions={affectedLayers.official}
@@ -5522,11 +5544,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 detectionRanks={mapDetectionRanks}
                 kmaDetectionStationIds={replayEvent
                   ? replayPropagationActive
-                    ? kmaReplaySimulation?.activeStationIds ?? EMPTY_STATION_IDS
+                    ? visibleKmaReplaySimulation?.activeStationIds ?? EMPTY_STATION_IDS
                     : EMPTY_STATION_IDS
                   : kmaDetection.activeStationIds}
                 kmaDetectionRanks={replayEvent
-                  ? kmaReplaySimulation?.ranks ?? EMPTY_RANKS
+                  ? visibleKmaReplaySimulation?.ranks ?? EMPTY_RANKS
                   : liveKmaDetectionRanks}
                 detectionMode={replayEvent ? "replay" : "live"}
                 detectionSessionKey={replayEvent
@@ -5717,7 +5739,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 </> : <>
                   <div className="seismic-snet-summary"><div><span>推算时间</span><strong>{oceanResponseEvent ? formatTime(Date.parse(oceanResponseEvent.originTime) + oceanResponseElapsed * 1000) : "--"}</strong></div><div><span>最大震度</span><strong>{snetSimulationActiveCount ? displayRankLabel(snetSimulationMaxRank) : "-"}</strong></div></div>
                   {oceanResponseEvent ? <div className="seismic-snet-ranking">{snetSimulationRows.map(({ station, rank }) => <button key={station.id} onClick={() => focusStation(station)}><span><i style={{ background: rank >= 0.25 ? intensityColor(rank) : "#1447e6" }} /><strong>{station.stationCode}</strong></span><em>{rank >= 0.25 ? displayRankLabel(rank) : "-"}</em></button>)}</div> : <div className="seismic-snet-waiting"><Radio size={18} /><span>收到有效 EEW 后生成明确标注的本地确定性响应。</span></div>}
-                  <JapanMiniMap regions={jmaRegions} stations={snetStations} ranks={oceanSimulation?.ranks} selectedStationId={selectedStationId} onSelectStation={(station) => focusStation(station)} />
+                  <JapanMiniMap regions={jmaRegions} stations={snetStations} ranks={visibleOceanSimulation?.ranks} selectedStationId={selectedStationId} onSelectStation={(station) => focusStation(station)} />
                   <p className="seismic-data-label">这里是事件驱动的确定性传播推算，不是测站实测；它与“实测历史”完全分离。</p>
                 </>}
               </>}
@@ -5768,7 +5790,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 </div>
                 <div>
                   <div className="seismic-wave-legend"><div><i className="p" /><span>P 波</span><strong>{selectedEvent ? waveRadiusKm(selectedEvent.originTime, 6, selectedOrigin + replaySeismicSeconds * 1000).toFixed(0) : 0} km</strong></div><div><i className="s" /><span>S 波</span><strong>{selectedEvent ? waveRadiusKm(selectedEvent.originTime, 3.5, selectedOrigin + replaySeismicSeconds * 1000).toFixed(0) : 0} km</strong></div></div>
-                  <dl className="earthquake-detail-list"><div><dt>JMA 海啸回放</dt><dd>{replayTsunamiSnapshot ? `${replayTsunamiSnapshot.cancelled ? "预报解除" : replayTsunamiSnapshot.title} · ${formatTime(replayTsunamiSnapshot.issuedAt ?? selectedOrigin)}` : replayTsunamiEpisode ? `等待首报 · 共 ${replayTsunamiEpisode.reports.length} 份` : jmaTsunamiHistory ? "当前事件无匹配报文" : "历史报文加载中"}</dd></div><div><dt>NIED 陆地响应</dt><dd>{replaySimulation ? `${replaySimulation.activeStationIds.length} 站 / 最大震度 ${jmaShindoLabel(replaySimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>KMA-PEWS 响应</dt><dd>{kmaReplaySimulation ? `${kmaReplaySimulation.activeStationIds.length} 站 / 最大烈度 ${intensityRomanLabel(kmaReplaySimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>海底台网响应</dt><dd>{oceanSimulation ? `${oceanSimulation.activeStationIds.length} 站 / 最大震度 ${jmaShindoLabel(oceanSimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>全球 FDSN 响应</dt><dd>{globalSimulation ? `${globalSimulation.arrivedStationIds.length} 站已到达 / 最大 MMI ${globalSimulation.maxRank.toFixed(1)}` : "等待播放"}</dd></div><div><dt>CWA CWASN 响应</dt><dd>{cwaSimulation ? `${cwaSimulation.arrivedStationIds.length} 站已到达 / 最大震度 ${jmaShindoLabel(cwaSimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>回放音效</dt><dd>NIED {niedSoundEnabled ? "启用" : "关闭"} / 海啸 {jmaTsunamiSoundEnabled ? "启用" : "关闭"}</dd></div><div><dt>P / S 速度</dt><dd>6.0 / 3.5 km/s（仅前 300 秒）</dd></div><div><dt>用途</dt><dd>传播时序与官方海啸报文复盘，不代表当前预警</dd></div></dl>
+                  <dl className="earthquake-detail-list"><div><dt>JMA 海啸回放</dt><dd>{replayTsunamiSnapshot ? `${replayTsunamiSnapshot.cancelled ? "预报解除" : replayTsunamiSnapshot.title} · ${formatTime(replayTsunamiSnapshot.issuedAt ?? selectedOrigin)}` : replayTsunamiEpisode ? `等待首报 · 共 ${replayTsunamiEpisode.reports.length} 份` : jmaTsunamiHistory ? "当前事件无匹配报文" : "历史报文加载中"}</dd></div><div><dt>NIED 陆地响应</dt><dd>{visibleReplaySimulation ? `${visibleReplaySimulation.activeStationIds.length} 站 / 最大震度 ${jmaShindoLabel(visibleReplaySimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>KMA-PEWS 响应</dt><dd>{visibleKmaReplaySimulation ? `${visibleKmaReplaySimulation.activeStationIds.length} 站 / 最大烈度 ${intensityRomanLabel(visibleKmaReplaySimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>海底台网响应</dt><dd>{visibleOceanSimulation ? `${visibleOceanSimulation.activeStationIds.length} 站 / 最大震度 ${jmaShindoLabel(visibleOceanSimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>全球 FDSN 响应</dt><dd>{visibleGlobalSimulation ? `${visibleGlobalSimulation.arrivedStationIds.length} 站已到达 / 最大 MMI ${visibleGlobalSimulation.maxRank.toFixed(1)}` : "等待播放"}</dd></div><div><dt>CWA CWASN 响应</dt><dd>{visibleCwaSimulation ? `${visibleCwaSimulation.arrivedStationIds.length} 站已到达 / 最大震度 ${jmaShindoLabel(visibleCwaSimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>回放音效</dt><dd>NIED {niedSoundEnabled ? "启用" : "关闭"} / 海啸 {jmaTsunamiSoundEnabled ? "启用" : "关闭"}</dd></div><div><dt>P / S 速度</dt><dd>6.0 / 3.5 km/s（仅前 300 秒）</dd></div><div><dt>用途</dt><dd>传播时序与官方海啸报文复盘，不代表当前预警</dd></div></dl>
                   {replayEstimate ? <div className="seismic-replay-inference"><span><CircleGauge size={15} />回放本地震源反演</span><strong>{replayEstimate.latitude.toFixed(3)}, {replayEstimate.longitude.toFixed(3)}</strong><small>深度 {replayEstimate.depthKm.toFixed(1)} km · {replayEstimate.stationCount} 站 · 残差 {replayEstimate.residualMs} ms · 距官方 {replayEstimate.referenceDistanceKm?.toFixed(2) ?? "--"} km</small></div> : <div className="seismic-replay-inference waiting"><span><CircleGauge size={15} />{autoHypocenterEstimation ? "等待至少 4 个模拟 P 波触发站" : "自动震源推算已关闭"}</span><small>{autoHypocenterEstimation ? "测站按理论到时逐一响应，满足条件后自动生成震源。" : "可在右上角设置中重新开启。"}</small></div>}
                 </div>
               </div>
