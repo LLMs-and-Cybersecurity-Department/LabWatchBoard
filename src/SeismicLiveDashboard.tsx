@@ -32,6 +32,7 @@ import {
   Search,
   Settings,
   Siren,
+  GripVertical,
   SkipBack,
   Sun,
   Video,
@@ -111,6 +112,7 @@ import {
   updateNiedShakeDetection,
   usesShindoScaleForLocation,
   waveRadiusKm,
+  seismicWaveArrivalSeconds,
   type CencIntensityReport,
   type CencIntensityStation,
   type CencIntensitySummary,
@@ -176,6 +178,7 @@ import {
   type SeismicSoundAssetId,
 } from "./seismicAudio";
 import { usePersistentState } from "./usePersistentState";
+import type { Station } from "./types";
 import { FdsnWaveformPanel } from "./FdsnWaveformPanel";
 import { FocalMechanismDialog } from "./FocalMechanismDialog";
 import { UsgsDyfiDialog } from "./UsgsDyfiDialog";
@@ -224,6 +227,7 @@ import {
 type SeismicLiveDashboardProps = {
   onToggleSidebar: () => void;
   onOpenGlobal: () => void;
+  userStation: Station;
 };
 
 type PanelTab = "station" | "intensity" | "snet" | "exposure";
@@ -232,6 +236,7 @@ type WarningOverlayTab = "latest" | "selected";
 type SeismicMapTheme = "dark" | "light";
 type SeismicMapInteractionMode = "drag" | "select";
 type MovieCameraMode = "locked" | "auto";
+type MonitorDock = "top" | "right" | "bottom" | "left";
 type ReplaySpeed = 1 | 10 | 60 | 300;
 type SourceState = "connecting" | "unconfigured" | "online" | "stale" | "error";
 type SnetViewMode = "measured" | "simulation";
@@ -291,6 +296,34 @@ type InstitutionMagnitudeBand = typeof INSTITUTION_MAGNITUDE_BANDS[number]["id"]
 
 function clampPanelDimension(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, Number.isFinite(value) ? value : minimum));
+}
+
+const MONITOR_DOCKS: MonitorDock[] = ["top", "right", "bottom", "left"];
+
+function normalizeMonitorDock(value: unknown): MonitorDock {
+  return MONITOR_DOCKS.includes(value as MonitorDock) ? value as MonitorDock : "left";
+}
+
+function clampMonitorScale(value: number) {
+  return Math.max(0.65, Math.min(1.6, Number.isFinite(value) ? value : 1));
+}
+
+function nearestMonitorDock(clientX: number, clientY: number, bounds: DOMRect): MonitorDock {
+  const x = Math.max(0, Math.min(bounds.width, clientX - bounds.left));
+  const y = Math.max(0, Math.min(bounds.height, clientY - bounds.top));
+  let dock: MonitorDock = "top";
+  let distance = y;
+  if (bounds.width - x < distance) { dock = "right"; distance = bounds.width - x; }
+  if (bounds.height - y < distance) { dock = "bottom"; distance = bounds.height - y; }
+  if (x < distance) dock = "left";
+  return dock;
+}
+
+function formatSArrivalCountdown(remainingSeconds: number) {
+  const tenths = Math.max(0, Math.round(remainingSeconds * 10));
+  const minutes = Math.floor(tenths / 600);
+  const seconds = Math.floor(tenths % 600 / 10);
+  return `${minutes}:${String(seconds).padStart(2, "0")}.${tenths % 10}`;
 }
 
 const NIED_GRID_COLORS = {
@@ -1739,6 +1772,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   showWniCameras: boolean;
   wniCameras: WniCamera[];
   highlightedWniCameraId: string | null;
+  warningLocation: Station | null;
   detectionStationIds: string[];
   detectionRanks: Record<string, number>;
   kmaDetectionStationIds: string[];
@@ -2075,6 +2109,18 @@ const SeismicMap = memo(function SeismicMap(props: {
           <Popup><strong>{EARTHQUAKE_SOURCE_LABELS[props.selectedReport.source]} 机构报告</strong><br />{props.selectedReport.place}<br />{formatMagnitudeType(props.selectedReport.magnitudeType)} {props.selectedReport.magnitude.toFixed(1)}<br /><a href={props.selectedReport.url} target="_blank" rel="noreferrer">打开机构原文</a></Popup>
         </CircleMarker>}
       </Pane>
+      <Pane name="seismic-user-location-pane" style={{ zIndex: 455, pointerEvents: "none" }}>
+        {props.warningLocation && <CircleMarker
+          center={[props.warningLocation.lat, props.warningLocation.lon]}
+          radius={7}
+          interactive={false}
+          pathOptions={{ color: "#ffffff", fillColor: "#ef4444", weight: 2.4, opacity: 1, fillOpacity: 0.94 }}
+        >
+          <LeafletTooltip permanent direction="top" offset={[0, -8]} className="seismic-user-location-label">
+            定位点 · {props.warningLocation.name}
+          </LeafletTooltip>
+        </CircleMarker>}
+      </Pane>
       <Pane name="seismic-wni-camera-pane" style={{ zIndex: props.interactionMode === "select" ? 480 : 445 }}>
         {props.showWniCameras && props.wniCameras.map((camera) => {
           const highlighted = camera.id === props.highlightedWniCameraId;
@@ -2204,7 +2250,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   );
 });
 
-export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicLiveDashboardProps) {
+export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStation }: SeismicLiveDashboardProps) {
   const [panelTab, setPanelTab] = usePersistentState<PanelTab>("seismic-panel-tab", "station");
   const [bottomTab, setBottomTab] = usePersistentState<BottomTab>("seismic-bottom-tab", "warnings");
   const [warningOverlayTab, setWarningOverlayTab] = useState<WarningOverlayTab>("latest");
@@ -2213,12 +2259,20 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   const [sidePanelWidth, setSidePanelWidth] = usePersistentState("seismic-side-panel-width", 410);
   const [mapPanelHeight, setMapPanelHeight] = usePersistentState("seismic-map-panel-height", 650);
   const [mapLayerComplexity, setMapLayerComplexity] = usePersistentState("seismic-map-layer-complexity", 4);
+  const [monitorDock, setMonitorDock] = usePersistentState<MonitorDock>("seismic-monitor-dock", "left");
+  const [monitorScale, setMonitorScale] = usePersistentState("seismic-monitor-scale", 1);
+  const [monitorDragging, setMonitorDragging] = useState(false);
+  const [monitorDropTarget, setMonitorDropTarget] = useState<MonitorDock>("left");
   const [autoSelectWaveformStation, setAutoSelectWaveformStation] = usePersistentState("seismic-auto-select-waveform-station", true);
   const [autoOpenWniMonitor, setAutoOpenWniMonitor] = usePersistentState("seismic-auto-open-wni-monitor", true);
   const [enabledEewSources, setEnabledEewSources] = usePersistentState<LiveEewSource[]>("seismic-enabled-eew-sources", [...LIVE_EEW_SOURCE_ORDER]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const primaryGridRef = useRef<HTMLElement | null>(null);
+  const mapShellRef = useRef<HTMLDivElement | null>(null);
+  const monitorOverlayRef = useRef<HTMLDivElement | null>(null);
   const panelResizeCleanupRef = useRef<(() => void) | null>(null);
+  const monitorPointerCleanupRef = useRef<(() => void) | null>(null);
+  const monitorDropTargetRef = useRef<MonitorDock>("left");
   const [showNied, setShowNied] = usePersistentState("seismic-show-nied", true);
   const [showKma, setShowKma] = usePersistentState("seismic-show-kma", true);
   const [showOcean, setShowOcean] = usePersistentState("seismic-show-ocean", true);
@@ -2427,6 +2481,8 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
   const normalizedSidePanelWidth = clampPanelDimension(Number(sidePanelWidth), 300, 620);
   const normalizedMapPanelHeight = clampPanelDimension(Number(mapPanelHeight), 440, 980);
   const normalizedMapLayerComplexity = Math.max(1, Math.min(6, Math.round(Number(mapLayerComplexity) || 4)));
+  const normalizedMonitorDock = normalizeMonitorDock(monitorDock);
+  const normalizedMonitorScale = clampMonitorScale(Number(monitorScale));
   const enabledEewSourceSet = useMemo(
     () => new Set(LIVE_EEW_SOURCE_ORDER.filter((source) => enabledEewSources.includes(source))),
     [enabledEewSources],
@@ -2477,6 +2533,95 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
     window.addEventListener("pointerup", handleEnd, { once: true });
     window.addEventListener("pointercancel", handleEnd, { once: true });
   }, [normalizedMapPanelHeight, normalizedSidePanelWidth, setMapPanelHeight, setSidePanelWidth]);
+  const beginMonitorDrag = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    const shell = mapShellRef.current;
+    const overlay = monitorOverlayRef.current;
+    if (!shell || !overlay) return;
+    event.preventDefault();
+    event.stopPropagation();
+    monitorPointerCleanupRef.current?.();
+    const bounds = shell.getBoundingClientRect();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    monitorDropTargetRef.current = normalizedMonitorDock;
+    setMonitorDropTarget(normalizedMonitorDock);
+    setMonitorDragging(true);
+
+    const cleanup = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleEnd);
+      document.body.classList.remove("seismic-monitor-moving");
+      overlay.style.setProperty("--monitor-drag-x", "0px");
+      overlay.style.setProperty("--monitor-drag-y", "0px");
+      monitorPointerCleanupRef.current = null;
+    };
+    const handleMove = (moveEvent: PointerEvent) => {
+      overlay.style.setProperty("--monitor-drag-x", `${Math.round(moveEvent.clientX - startX)}px`);
+      overlay.style.setProperty("--monitor-drag-y", `${Math.round(moveEvent.clientY - startY)}px`);
+      const target = nearestMonitorDock(moveEvent.clientX, moveEvent.clientY, bounds);
+      if (target === monitorDropTargetRef.current) return;
+      monitorDropTargetRef.current = target;
+      setMonitorDropTarget(target);
+    };
+    const handleEnd = () => {
+      const target = monitorDropTargetRef.current;
+      cleanup();
+      setMonitorDragging(false);
+      setMonitorDock(target);
+    };
+    monitorPointerCleanupRef.current = cleanup;
+    document.body.classList.add("seismic-monitor-moving");
+    window.addEventListener("pointermove", handleMove, { passive: true });
+    window.addEventListener("pointerup", handleEnd, { once: true });
+    window.addEventListener("pointercancel", handleEnd, { once: true });
+  }, [normalizedMonitorDock, setMonitorDock]);
+  const beginMonitorResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    const shell = mapShellRef.current;
+    const overlay = monitorOverlayRef.current;
+    if (!shell || !overlay) return;
+    event.preventDefault();
+    event.stopPropagation();
+    monitorPointerCleanupRef.current?.();
+    const shellBounds = shell.getBoundingClientRect();
+    const overlayBounds = overlay.getBoundingClientRect();
+    const naturalHeight = Math.max(220, overlayBounds.height / normalizedMonitorScale);
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const horizontalDirection = normalizedMonitorDock === "right" ? -1 : 1;
+    const verticalDirection = normalizedMonitorDock === "bottom" ? -1 : 1;
+    const widthLimit = (shellBounds.width - 28) / 330;
+    const heightLimit = (shellBounds.height - 86) / naturalHeight;
+    const maximumScale = Math.max(0.65, Math.min(1.6, widthLimit, heightLimit));
+    let nextScale = Math.min(normalizedMonitorScale, maximumScale);
+
+    const cleanup = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleEnd);
+      document.body.classList.remove("seismic-monitor-resizing");
+      monitorPointerCleanupRef.current = null;
+    };
+    const handleMove = (moveEvent: PointerEvent) => {
+      const horizontalDelta = (moveEvent.clientX - startX) * horizontalDirection / 330;
+      const verticalDelta = (moveEvent.clientY - startY) * verticalDirection / naturalHeight;
+      const scaleDelta = Math.abs(horizontalDelta) >= Math.abs(verticalDelta) ? horizontalDelta : verticalDelta;
+      nextScale = Math.max(0.65, Math.min(maximumScale, normalizedMonitorScale + scaleDelta));
+      overlay.style.setProperty("--monitor-scale", String(nextScale));
+    };
+    const handleEnd = () => {
+      cleanup();
+      setMonitorScale(Number(nextScale.toFixed(2)));
+    };
+    monitorPointerCleanupRef.current = cleanup;
+    document.body.classList.add("seismic-monitor-resizing");
+    window.addEventListener("pointermove", handleMove, { passive: true });
+    window.addEventListener("pointerup", handleEnd, { once: true });
+    window.addEventListener("pointercancel", handleEnd, { once: true });
+  }, [normalizedMonitorDock, normalizedMonitorScale, setMonitorScale]);
+  useEffect(() => () => monitorPointerCleanupRef.current?.(), []);
   const adjustSidePanelWidth = useCallback((delta: number) => {
     setSidePanelWidth(clampPanelDimension(normalizedSidePanelWidth + delta, 300, 620));
   }, [normalizedSidePanelWidth, setSidePanelWidth]);
@@ -4349,6 +4494,34 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
       && rawMapEvent.hypocenterKnown !== false
       && !rawMapEvent.cancelled
       && (rawMapEvent === latestEvent || rawMapEvent === autoGlobalEvent));
+  const userWarningLocation = Number.isFinite(userStation.lat) && Number.isFinite(userStation.lon)
+    ? { latitude: userStation.lat, longitude: userStation.lon }
+    : null;
+  const sWaveArrivalSeconds = mapEvent && userWarningLocation
+    ? seismicWaveArrivalSeconds(mapEvent, userWarningLocation, 3.5)
+    : Number.POSITIVE_INFINITY;
+  const sWaveElapsedSeconds = replayEvent
+    ? replaySeconds
+    : mapOrigin
+      ? Math.max(0, (clock - mapOrigin) / 1000)
+      : 0;
+  const sWaveRemainingSeconds = sWaveArrivalSeconds - sWaveElapsedSeconds;
+  const sWaveArrived = sWaveRemainingSeconds <= 0;
+  const sWaveWarningVisible = Boolean(
+    showWaves
+      && mapEvent
+      && userWarningLocation
+      && Number.isFinite(sWaveArrivalSeconds)
+      && sWaveRemainingSeconds > -12,
+  );
+  const userSurfaceDistanceKm = mapEvent && userWarningLocation
+    ? haversineKm(mapEvent, userWarningLocation)
+    : 0;
+  const userExpectedIntensity = mapEvent && userWarningLocation
+    ? usesShindoScaleForLocation(userWarningLocation)
+      ? `预计震度 ${jmaShindoLabel(jmaShindoRank(calculateJmaShindo(mapEvent, userWarningLocation)))}`
+      : `预计烈度 ${intensityRomanLabel(calculateLocalIntensity(mapEvent, userWarningLocation))}`
+    : "预计烈度 --";
   const globalAutoPresentation = Boolean(!replayEvent && autoGlobalEvent && rawMapEvent === autoGlobalEvent);
   const rawMapDetectionStationIds = globalAutoPresentation
     ? EMPTY_STATION_IDS
@@ -4915,7 +5088,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
                 <button className="seismic-map-theme-button" title={mapTheme === "dark" ? "切换为浅色地图" : "切换为深色地图"} aria-label={mapTheme === "dark" ? "切换为浅色地图" : "切换为深色地图"} onClick={() => setMapTheme((value) => value === "dark" ? "light" : "dark")}>{mapTheme === "dark" ? <Sun size={15} /> : <Moon size={15} />}</button>
               </div>
             </header>
-            <div className="seismic-map-shell">
+            <div ref={mapShellRef} className={`seismic-map-shell${sWaveWarningVisible ? " has-s-wave-warning" : ""}`}>
               {!catalogue && <div className="earthquake-map-loading"><Loader2 size={24} /><span>正在加载东亚测站目录</span></div>}
               <SeismicMap
                 theme={mapTheme}
@@ -4995,10 +5168,24 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
                 blinkNow={mapDetectionStationIds.length ? clock : 0}
                 waveNow={waveNow}
                 showWaves={showWaves}
+                warningLocation={sWaveWarningVisible ? userStation : null}
                 focusTarget={mapFocus}
                 onSelectStation={focusStation}
                 onViewportChange={updateMapViewport}
               />
+              {sWaveWarningVisible && <section className={`seismic-s-wave-banner ${sWaveArrived ? "arrived" : "counting"}`} role="status" aria-live="assertive">
+                <div className="seismic-s-wave-stripes" aria-hidden="true" />
+                <div className="seismic-s-wave-title">
+                  <Siren size={18} />
+                  <span><strong>S-WAVE WARNING</strong><small>S 波到达警报 · {userStation.name}</small></span>
+                </div>
+                <output aria-label={sWaveArrived ? "S 波已到达定位点" : `S 波预计 ${formatSArrivalCountdown(sWaveRemainingSeconds)} 后到达定位点`}>
+                  {sWaveArrived ? "已到达" : formatSArrivalCountdown(sWaveRemainingSeconds)}
+                </output>
+                <div className="seismic-s-wave-meta"><strong>{userExpectedIntensity}</strong><small>震中距 {userSurfaceDistanceKm.toFixed(0)} km</small></div>
+                <div className="seismic-s-wave-stripes" aria-hidden="true" />
+                <div className="seismic-s-wave-marquee"><span>{sWaveArrived ? "S 波已抵达定位点，请注意强烈摇晃并远离坠落物。" : `S 波正向定位点传播，预计 ${formatSArrivalCountdown(sWaveRemainingSeconds)} 后到达。`} 理论速度 3.5 km/s · {replayEvent ? `回放 T+${replaySeconds.toFixed(1)} s` : "实时传播定位"} · {mapEvent?.place}</span></div>
+              </section>}
               <SeismicIntensityLegend />
               {showWniCameras && <a className={`seismic-wni-camera-map-status ${wniCameraState}`} href={WNI_CAMERA_MAP_URL} target="_blank" rel="noreferrer" title="打开 WNI 官方全国摄像头地图">
                 <Video size={15} />
@@ -5011,7 +5198,35 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
                 replayTimestamp={replayEvent ? Date.parse(replayEvent.originTime) : null}
                 wniCamera={closestWniCamera}
               />
-              <div className="seismic-map-overlay-stack">
+              {monitorDragging && <div className="seismic-monitor-drop-zones" aria-hidden="true">
+                {MONITOR_DOCKS.map((dock) => <span key={dock} className={monitorDropTarget === dock ? "active" : ""} data-dock={dock}><b>{dock === "top" ? "上方" : dock === "right" ? "右侧" : dock === "bottom" ? "下方" : "左侧"}</b></span>)}
+              </div>}
+              <div
+                ref={monitorOverlayRef}
+                className={`seismic-map-overlay-stack${monitorDragging ? " is-dragging" : ""}`}
+                data-dock={normalizedMonitorDock}
+                style={{
+                  "--monitor-scale": normalizedMonitorScale,
+                  "--monitor-drag-x": "0px",
+                  "--monitor-drag-y": "0px",
+                } as CSSProperties}
+              >
+                <div className="seismic-monitor-toolbar">
+                  <button
+                    className="seismic-monitor-drag-handle"
+                    aria-label="拖动监视组件到地图边缘停靠"
+                    title="拖至地图上、右、下、左侧停靠"
+                    onPointerDown={beginMonitorDrag}
+                    onClick={(event) => {
+                      if (event.detail !== 0) return;
+                      const currentIndex = MONITOR_DOCKS.indexOf(normalizedMonitorDock);
+                      setMonitorDock(MONITOR_DOCKS[(currentIndex + 1) % MONITOR_DOCKS.length]);
+                    }}
+                  >
+                    <GripVertical size={14} /><span>监视组件</span><small>拖至边缘停靠</small>
+                  </button>
+                  <output aria-label={`监视组件缩放 ${Math.round(normalizedMonitorScale * 100)}%`}>{Math.round(normalizedMonitorScale * 100)}%</output>
+                </div>
                 {showJmaTsunami && displayedJmaTsunami?.active && <section className={`jma-tsunami-alert ${displayedJmaTsunami.state}`} aria-live="assertive">
                   <header><AlertTriangle size={16} /><strong>JMA · {displayedJmaTsunami.title}</strong><em>{replayEvent ? "REPLAY" : "LIVE"}</em></header>
                   <div className="jma-tsunami-alert-legend">
@@ -5053,6 +5268,17 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal }: SeismicL
                     <span><i />S-net / DONET / N-net</span><strong>{displayedOceanMode === "measured" && snetMeasuredFrame ? `震度 ${displayRankLabel(snetMeasuredFrame.maxIntensity)} · ${snetMeasuredFrame.maxIntensity.toFixed(2)}` : oceanSimulation ? `震度 ${oceanSimulation.maxRank.toFixed(1)}` : "待机"}</strong><small>{displayedOceanMode === "measured" && snetMeasuredFrame ? selectedSnetEvent ? oceanHistorySelected ? `${measuredOceanCount} 站观测 · 历史已结束` : `${measuredOceanCount} 站观测 · MSIL 实测反算` : `${measuredOceanCount} 站观测 · 最新帧（微小值也显示）` : activeOceanCount ? `${activeOceanCount} 站 · ${oceanMode === "replay" ? "回放模拟" : "EEW 本地预测"}` : "等待有效地震事件"}</small><time>{displayedOceanMode === "measured" && snetMeasuredFrame ? formatTime(snetMeasuredFrame.timestamp) : oceanResponseEvent ? `T+${oceanResponseElapsed.toFixed(2)} s` : "等待数据"}</time>
                   </button>
                 </div>
+                <button
+                  className="seismic-monitor-resize-handle"
+                  aria-label="等比例缩放监视组件"
+                  title="拖动等比例缩放；双击恢复 100%"
+                  onPointerDown={beginMonitorResize}
+                  onClick={(event) => {
+                    if (event.detail !== 0) return;
+                    setMonitorScale(normalizedMonitorScale >= 1.6 ? 1 : clampMonitorScale(normalizedMonitorScale + 0.1));
+                  }}
+                  onDoubleClick={() => setMonitorScale(1)}
+                ><span /></button>
               </div>
               <div
                 className="seismic-panel-resizer seismic-panel-resizer--height"

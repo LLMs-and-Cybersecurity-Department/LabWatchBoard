@@ -73,6 +73,7 @@ import { SeismicLiveDashboard } from "./SeismicLiveDashboard";
 import { UsgsDyfiDialog } from "./UsgsDyfiDialog";
 import { UsgsPagerDialog } from "./UsgsPagerDialog";
 import { usePersistentState } from "./usePersistentState";
+import type { Station } from "./types";
 import {
   isJshisPositionSupported,
   type JshisFaultShape,
@@ -109,6 +110,7 @@ const BASE_LAYERS = {
 
 type EarthquakeDashboardProps = {
   onToggleSidebar: () => void;
+  userStation: Station;
 };
 
 type EarthquakeSection = "live" | "global";
@@ -801,9 +803,9 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
   );
 }
 
-export function EarthquakeDashboard({ onToggleSidebar }: EarthquakeDashboardProps) {
+export function EarthquakeDashboard({ onToggleSidebar, userStation }: EarthquakeDashboardProps) {
   const [section, setSection] = usePersistentState<EarthquakeSection>("earthquake-section", "live");
   return section === "live"
-    ? <SeismicLiveDashboard onToggleSidebar={onToggleSidebar} onOpenGlobal={() => setSection("global")} />
-    : <GlobalEarthquakeDashboard onToggleSidebar={onToggleSidebar} onOpenLive={() => setSection("live")} />;
+    ? <SeismicLiveDashboard onToggleSidebar={onToggleSidebar} onOpenGlobal={() => setSection("global")} userStation={userStation} />
+    : <GlobalEarthquakeDashboard onToggleSidebar={onToggleSidebar} onOpenLive={() => setSection("live")} userStation={userStation} />;
 }

@@ -1558,7 +1558,7 @@ export default function App() {
       >
         {earthquakeMounted && (
           <Suspense fallback={<div className="dashboard-route-loading"><Loader2 size={24} /><span>正在加载地震分析组件</span></div>}>
-            <EarthquakeDashboard onToggleSidebar={toggleSidebar} />
+            <EarthquakeDashboard onToggleSidebar={toggleSidebar} userStation={station} />
           </Suspense>
         )}
       </div>
