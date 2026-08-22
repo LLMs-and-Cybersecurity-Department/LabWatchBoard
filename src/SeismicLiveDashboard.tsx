@@ -306,7 +306,6 @@ function clampPanelDimension(value: number, minimum: number, maximum: number) {
 
 const MONITOR_DOCKS: MonitorDock[] = ["top", "right", "bottom", "left"];
 const MONITOR_WIDGET_IDS: MonitorWidgetId[] = ["tsunami", "warning", "nied", "kma", "jma", "cwa", "global", "ocean"];
-const MONITOR_WIDE_WIDGETS = new Set<MonitorWidgetId>(["tsunami", "warning", "ocean"]);
 const MONITOR_WIDGET_LABELS: Record<MonitorWidgetId, string> = {
   tsunami: "海啸警报",
   warning: "最新预警",
@@ -2487,7 +2486,7 @@ const SeismicMap = memo(function SeismicMap(props: {
       </Pane>
       <SeismicMapFocus target={props.focusTarget} />
       <SeismicMapViewport onChange={props.onViewportChange} />
-      <ZoomControl position="topright" />
+      <ZoomControl position="bottomleft" />
       <ScaleControl position="bottomleft" imperial={false} />
     </MapContainer>
   );
@@ -5600,7 +5599,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               >
                 {MONITOR_DOCKS.map((dock) => <div className="seismic-monitor-rail" data-dock={dock} key={dock}>
                   {visibleMonitorWidgetIds.filter((widgetId) => normalizedMonitorWidgetDocks[widgetId] === dock).map((widgetId) => <article
-                    className={`seismic-monitor-widget${MONITOR_WIDE_WIDGETS.has(widgetId) ? " is-wide" : ""}${draggingMonitorWidget === widgetId ? " is-dragging" : ""}`}
+                    className={`seismic-monitor-widget${draggingMonitorWidget === widgetId ? " is-dragging" : ""}`}
                     data-widget={widgetId}
                     key={widgetId}
                     style={{ "--monitor-drag-x": "0px", "--monitor-drag-y": "0px" } as CSSProperties}

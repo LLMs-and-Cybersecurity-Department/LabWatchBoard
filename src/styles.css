@@ -4960,7 +4960,15 @@ body.seismic-panel-resizing {
   color: #bae6fd;
 }
 
-.seismic-map-shell:has(.seismic-camera-relay:not(.is-collapsed)) .seismic-monitor-rail[data-dock="left"],
+.seismic-map-shell:has(.seismic-camera-relay:not(.is-collapsed)) .seismic-monitor-rail[data-dock="left"] {
+  max-height: calc(100% - 382px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+  scrollbar-color: #5a696b transparent;
+  scrollbar-width: thin;
+}
+
 .seismic-map-shell:has(.seismic-camera-relay:not(.is-collapsed)) .seismic-monitor-rail[data-dock="right"] {
   max-height: calc(100% - 310px);
   overflow-y: auto;
@@ -5193,10 +5201,19 @@ body.seismic-panel-resizing {
 .seismic-monitor-rail {
   position: absolute;
   width: min(330px, calc(100% - 72px));
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: calc(100% - 92px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 7px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 1px 2px 1px 1px;
   pointer-events: none;
+  overscroll-behavior: contain;
+  scrollbar-color: #5a696b transparent;
+  scrollbar-width: thin;
   transition: inset 180ms ease, transform 180ms ease;
 }
 
@@ -5207,6 +5224,7 @@ body.seismic-panel-resizing {
 .seismic-monitor-rail[data-dock="left"] {
   top: 10px;
   left: 10px;
+  max-height: calc(100% - 166px);
   transform: scale(var(--monitor-scale));
   transform-origin: top left;
 }
@@ -5234,15 +5252,11 @@ body.seismic-panel-resizing {
 
 .seismic-map-shell.has-s-wave-warning .seismic-monitor-rail:not([data-dock="bottom"]) {
   top: 74px;
+  max-height: calc(100% - 156px);
 }
 
-.seismic-map-shell.has-s-wave-warning .leaflet-top.leaflet-right {
-  top: 62px;
-}
-
-.seismic-map-shell:has(.seismic-monitor-rail[data-dock="right"] .seismic-monitor-widget) .leaflet-top.leaflet-right {
-  right: auto;
-  left: 10px;
+.seismic-map-shell.has-s-wave-warning .seismic-monitor-rail[data-dock="left"] {
+  max-height: calc(100% - 230px);
 }
 
 body.seismic-monitor-moving,
@@ -5255,14 +5269,20 @@ body.seismic-monitor-moving * {
   --monitor-drag-x: 0px;
   --monitor-drag-y: 0px;
   position: relative;
+  width: 100%;
   min-width: 0;
+  flex: 0 0 auto;
   display: block;
+  box-sizing: border-box;
   transform: translate3d(var(--monitor-drag-x), var(--monitor-drag-y), 0);
   pointer-events: auto;
 }
 
-.seismic-monitor-widget.is-wide {
-  grid-column: 1 / -1;
+.seismic-monitor-widget > .jma-tsunami-alert,
+.seismic-monitor-widget > .seismic-map-warning-overlay,
+.seismic-monitor-widget > .seismic-detection-card {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .seismic-monitor-widget.is-dragging {
