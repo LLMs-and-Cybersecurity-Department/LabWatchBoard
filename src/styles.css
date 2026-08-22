@@ -8615,6 +8615,41 @@ body.seismic-monitor-moving * {
   background: #475569;
 }
 
+.earthquake-map-layer-chip {
+  position: absolute;
+  z-index: 551;
+  top: 10px;
+  right: 48px;
+  min-height: 29px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid #f472b6;
+  border-radius: 5px;
+  background: rgba(31, 14, 25, 0.9);
+  color: #fce7f3;
+  font-size: 9px;
+  backdrop-filter: blur(6px);
+}
+
+.earthquake-map .leaflet-tooltip.cwa-intensity-map-label {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #071012;
+  box-shadow: none;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 18px;
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.9);
+}
+
+.earthquake-map .leaflet-tooltip.cwa-intensity-map-label::before {
+  display: none;
+}
+
 .leaflet-control-attribution,
 .leaflet-control-scale-line {
   font-size: 8px !important;
@@ -9032,6 +9067,205 @@ body.seismic-monitor-moving * {
 .cenc-product-dialog {
   width: min(900px, calc(100vw - 24px));
 }
+
+.cwa-product-dialog {
+  width: min(980px, calc(100vw - 24px));
+}
+
+.cwa-product-content {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.cwa-product-summary {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border-left: 3px solid #f472b6;
+  background: #171217;
+}
+
+.cwa-product-summary > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cwa-product-summary strong { color: #fbcfe8; font-size: 11px; }
+.cwa-product-summary span { color: #f9a8d4; font-size: 9px; }
+.cwa-product-summary p { margin: 0; color: #dce7e4; font-size: 10px; line-height: 1.5; }
+.cwa-product-summary small { color: var(--muted); font-size: 8px; }
+
+.cwa-product-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.cwa-product-metrics article {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid #3a4144;
+  border-radius: 5px;
+  background: #11191b;
+}
+
+.cwa-product-metrics span { color: var(--muted); font-size: 8px; }
+.cwa-product-metrics strong { color: #f9a8d4; font-size: 14px; }
+
+.cwa-product-layer-actions {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.75fr) repeat(2, minmax(170px, 1fr));
+  gap: 7px;
+  align-items: center;
+}
+
+.cwa-product-layer-actions > strong,
+.cwa-product-layer-actions button {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cwa-product-layer-actions > strong { color: #f9a8d4; font-size: 9px; }
+.cwa-product-layer-actions button { justify-content: center; font-size: 9px; }
+.cwa-product-layer-actions button:not(:disabled) { border-color: #9d4777; color: #fbcfe8; }
+
+.cwa-affected-areas {
+  display: grid;
+  gap: 7px;
+}
+
+.cwa-affected-areas > strong { color: #dce7e4; font-size: 10px; }
+.cwa-affected-areas > div { display: flex; flex-wrap: wrap; gap: 5px; }
+.cwa-affected-areas span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid #3a464a;
+  border-radius: 999px;
+  background: #131b1d;
+  color: #cdd8d5;
+  font-size: 8px;
+}
+.cwa-affected-areas span b { color: #fcd34d; }
+
+.cwa-product-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.cwa-product-images a {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  overflow: hidden;
+  border: 1px solid #3a4144;
+  border-radius: 5px;
+  background: #0d1416;
+  color: #dce7e4;
+  font-size: 9px;
+  text-decoration: none;
+}
+
+.cwa-product-images img { width: 100%; height: 180px; object-fit: contain; background: #f3f4f6; }
+.cwa-product-images span { display: flex; align-items: center; gap: 4px; padding: 0 7px 7px; }
+
+.cwa-wave-archive {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid #97521d;
+  border-radius: 5px;
+  background: #21170e;
+  color: #fde68a;
+  text-decoration: none;
+}
+
+.cwa-wave-archive span { display: grid; gap: 2px; }
+.cwa-wave-archive strong { font-size: 9px; }
+.cwa-wave-archive small { color: #c6a978; font-size: 7px; }
+
+.cwa-station-table {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #334044;
+  border-radius: 5px;
+  scrollbar-width: thin;
+}
+
+.cwa-station-table > header,
+.cwa-station-table-head,
+.cwa-station-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 1.3fr) 54px minmax(72px, 0.7fr) minmax(72px, 0.7fr) 72px 42px;
+  align-items: center;
+  gap: 7px;
+}
+
+.cwa-station-table > header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  min-height: 35px;
+  padding: 0 9px;
+  border-bottom: 1px solid #3a464a;
+  background: #151f21;
+}
+
+.cwa-station-table > header strong { font-size: 9px; }
+.cwa-station-table > header span { justify-self: end; color: var(--muted); font-size: 8px; }
+
+.cwa-station-table-head {
+  position: sticky;
+  z-index: 2;
+  top: 35px;
+  min-height: 25px;
+  padding: 0 9px;
+  border-bottom: 1px solid #303b3e;
+  background: #101719;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.cwa-station-row {
+  min-height: 39px;
+  padding: 4px 9px;
+  border-bottom: 1px solid #293438;
+  content-visibility: auto;
+  contain-intrinsic-size: 39px;
+  color: #c9d4d2;
+  font-size: 8px;
+}
+
+.cwa-station-row:last-child { border-bottom: 0; }
+.cwa-station-row > span:first-child { min-width: 0; display: grid; gap: 2px; }
+.cwa-station-row strong,
+.cwa-station-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cwa-station-row small { color: var(--muted); font-size: 7px; }
+.cwa-station-row > b { color: #fcd34d; }
+.cwa-station-row a { width: 25px; height: 25px; display: grid; place-items: center; border: 1px solid #3a464a; border-radius: 4px; color: #7dd3fc; }
+
+.cwa-product-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.cwa-product-footer a { display: inline-flex; align-items: center; gap: 4px; color: #7dd3fc; }
 
 .cenc-product-content {
   display: grid;

@@ -37,7 +37,7 @@ import { CameraRelayError, resolveYoutubeCamera } from "./server/camera.mjs";
 import { AnimationFrameProxyError, resolveAnimationFrameSource } from "./server/animationFrame.mjs";
 import { fetchProxyResource, ProxyResponseCache } from "./server/upstreamProxy.mjs";
 import { CencProductError, getCencProductSnapshot, getCencResource } from "./server/cencProducts.mjs";
-import { CwaOfficialError, getCwaOfficialSnapshot } from "./server/cwaOfficial.mjs";
+import { CwaOfficialError, getCwaOfficialSnapshot, getCwaProductSnapshot } from "./server/cwaOfficial.mjs";
 
 const ROOT = process.env.APP_ROOT
   ? path.resolve(process.env.APP_ROOT)
@@ -338,6 +338,31 @@ const server = createServer(async (request, response) => {
         const status = error instanceof CwaOfficialError ? error.statusCode : 500;
         sendJson(response, status, {
           error: "CWA 官方地震报告读取失败",
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return;
+    }
+    if (requestUrl.pathname === "/api/cwa-products") {
+      if (!new Set(["GET", "HEAD"]).has(request.method ?? "GET")) {
+        sendJson(response, 405, { error: "CWA 官方地震产品接口仅支持 GET/HEAD" });
+        return;
+      }
+      try {
+        const result = await getCwaProductSnapshot(requestUrl.searchParams);
+        const body = JSON.stringify(result);
+        setSecurityHeaders(response);
+        response.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "no-store",
+          "Content-Length": String(Buffer.byteLength(body)),
+          "X-CWA-Product-Cache": String(result.cache),
+        });
+        response.end(request.method === "HEAD" ? undefined : body);
+      } catch (error) {
+        const status = error instanceof CwaOfficialError ? error.statusCode : 500;
+        sendJson(response, status, {
+          error: "CWA 官方地震产品读取失败",
           detail: error instanceof Error ? error.message : String(error),
         });
       }
