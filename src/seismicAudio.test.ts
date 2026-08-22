@@ -8,6 +8,7 @@ import {
   isRegionalEewSoundSource,
   replaySecondSoundAsset,
   replaySoundMilestone,
+  sWaveCountdownMilestone,
   SEISMIC_SOUND_LIBRARY,
   tsunamiSoundAssetForTransition,
 } from "./seismicAudio";
@@ -66,8 +67,18 @@ describe("seismic sound cue mapping", () => {
     expect(replaySoundMilestone(8, 32, 60)).toBe(30);
     expect(replaySecondSoundAsset(11)).toBeNull();
     expect(replaySecondSoundAsset(20)).toBe("general-20s");
+    expect(replaySecondSoundAsset(0)).toBe("general-0s");
     for (const asset of ["general-countdown", "general-ews", "general-intense", "srev-prompt", "srev-hypocenter"] as const) {
       expect(SEISMIC_SOUND_LIBRARY[asset].url).toMatch(/^\/sound\//);
     }
+  });
+
+  it("announces remaining S-wave arrival milestones instead of elapsed replay time", () => {
+    expect(sWaveCountdownMilestone(61, 59.5)).toBe(60);
+    expect(sWaveCountdownMilestone(10.5, 9.5)).toBe(10);
+    expect(sWaveCountdownMilestone(60, 30)).toBe(30);
+    expect(sWaveCountdownMilestone(5, 5.5)).toBeNull();
+    expect(sWaveCountdownMilestone(65, 64)).toBeNull();
+    expect(sWaveCountdownMilestone(1, -0.1)).toBe(0);
   });
 });

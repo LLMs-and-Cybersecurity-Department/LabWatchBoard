@@ -1,25 +1,25 @@
 export type SeismicShindoSoundCue = "shindo0" | "shindo1" | "shindo2" | "shindo3" | "shindo4" | "shindo5" | "shindo6";
 
 export const SEISMIC_SOUND_LIBRARY = {
-  "general-countdown": { url: "/sound/general/countdown.wav", label: "回放开始倒计时", family: "general" },
+  "general-countdown": { url: "/sound/general/countdown.wav", label: "S 波 60 秒倒计时开始", family: "general" },
   "general-ews": { url: "/sound/general/ews.mp3", label: "实时预警入口", family: "general" },
   "general-intense": { url: "/sound/general/intense.wav", label: "强震提示", family: "general" },
-  "general-0s": { url: "/sound/general/0s.mp3", label: "回放 T+0 秒", family: "replay" },
-  "general-1s": { url: "/sound/general/1s.mp3", label: "回放 T+1 秒", family: "replay" },
-  "general-2s": { url: "/sound/general/2s.mp3", label: "回放 T+2 秒", family: "replay" },
-  "general-3s": { url: "/sound/general/3s.mp3", label: "回放 T+3 秒", family: "replay" },
-  "general-4s": { url: "/sound/general/4s.mp3", label: "回放 T+4 秒", family: "replay" },
-  "general-5s": { url: "/sound/general/5s.mp3", label: "回放 T+5 秒", family: "replay" },
-  "general-6s": { url: "/sound/general/6s.mp3", label: "回放 T+6 秒", family: "replay" },
-  "general-7s": { url: "/sound/general/7s.mp3", label: "回放 T+7 秒", family: "replay" },
-  "general-8s": { url: "/sound/general/8s.mp3", label: "回放 T+8 秒", family: "replay" },
-  "general-9s": { url: "/sound/general/9s.mp3", label: "回放 T+9 秒", family: "replay" },
-  "general-10s": { url: "/sound/general/10s.mp3", label: "回放 T+10 秒", family: "replay" },
-  "general-20s": { url: "/sound/general/20s.mp3", label: "回放 T+20 秒", family: "replay" },
-  "general-30s": { url: "/sound/general/30s.mp3", label: "回放 T+30 秒", family: "replay" },
-  "general-40s": { url: "/sound/general/40s.mp3", label: "回放 T+40 秒", family: "replay" },
-  "general-50s": { url: "/sound/general/50s.mp3", label: "回放 T+50 秒", family: "replay" },
-  "general-60s": { url: "/sound/general/60s.mp3", label: "回放 T+60 秒", family: "replay" },
+  "general-0s": { url: "/sound/general/0s.mp3", label: "S 波倒计时 0 秒", family: "replay" },
+  "general-1s": { url: "/sound/general/1s.mp3", label: "S 波倒计时 1 秒", family: "replay" },
+  "general-2s": { url: "/sound/general/2s.mp3", label: "S 波倒计时 2 秒", family: "replay" },
+  "general-3s": { url: "/sound/general/3s.mp3", label: "S 波倒计时 3 秒", family: "replay" },
+  "general-4s": { url: "/sound/general/4s.mp3", label: "S 波倒计时 4 秒", family: "replay" },
+  "general-5s": { url: "/sound/general/5s.mp3", label: "S 波倒计时 5 秒", family: "replay" },
+  "general-6s": { url: "/sound/general/6s.mp3", label: "S 波倒计时 6 秒", family: "replay" },
+  "general-7s": { url: "/sound/general/7s.mp3", label: "S 波倒计时 7 秒", family: "replay" },
+  "general-8s": { url: "/sound/general/8s.mp3", label: "S 波倒计时 8 秒", family: "replay" },
+  "general-9s": { url: "/sound/general/9s.mp3", label: "S 波倒计时 9 秒", family: "replay" },
+  "general-10s": { url: "/sound/general/10s.mp3", label: "S 波倒计时 10 秒", family: "replay" },
+  "general-20s": { url: "/sound/general/20s.mp3", label: "S 波倒计时 20 秒", family: "replay" },
+  "general-30s": { url: "/sound/general/30s.mp3", label: "S 波倒计时 30 秒", family: "replay" },
+  "general-40s": { url: "/sound/general/40s.mp3", label: "S 波倒计时 40 秒", family: "replay" },
+  "general-50s": { url: "/sound/general/50s.mp3", label: "S 波倒计时 50 秒", family: "replay" },
+  "general-60s": { url: "/sound/general/60s.mp3", label: "S 波倒计时 60 秒", family: "replay" },
   "srev-cancel": { url: "/sound/srev/cancel.mp3", label: "预警解除", family: "eew" },
   "srev-caution": { url: "/sound/srev/caution.mp3", label: "接收提示（不自动定位）", family: "eew" },
   "srev-detail": { url: "/sound/srev/detail.mp3", label: "预警详情", family: "eew" },
@@ -213,8 +213,19 @@ export function replaySoundMilestone(previousSeconds: number, currentSeconds: nu
 }
 
 export function replaySecondSoundAsset(seconds: number): SeismicSoundAssetId | null {
-  const rounded = Math.max(1, Math.min(60, Math.round(seconds)));
-  const supported = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50, 60]);
+  const rounded = Math.max(0, Math.min(60, Math.round(seconds)));
+  const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50, 60]);
   if (!supported.has(rounded)) return null;
   return `general-${rounded}s` as SeismicSoundAssetId;
+}
+
+const S_WAVE_COUNTDOWN_MILESTONES = [60, 50, 40, 30, 20, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0] as const;
+
+export function sWaveCountdownMilestone(previousRemainingSeconds: number, currentRemainingSeconds: number) {
+  if (!Number.isFinite(previousRemainingSeconds) || !Number.isFinite(currentRemainingSeconds)) return null;
+  if (currentRemainingSeconds >= previousRemainingSeconds || previousRemainingSeconds <= 0 || currentRemainingSeconds > 60) return null;
+  const crossed = S_WAVE_COUNTDOWN_MILESTONES.filter(
+    (milestone) => milestone < previousRemainingSeconds && milestone >= currentRemainingSeconds,
+  );
+  return crossed.length ? crossed[crossed.length - 1] : null;
 }

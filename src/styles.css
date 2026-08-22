@@ -6954,12 +6954,40 @@ body.seismic-monitor-resizing .seismic-monitor-rail {
 .seismic-replay-clock strong { color: var(--muted); font-size: 9px; }
 .seismic-replay-slider { width: 100%; margin: 15px 0; accent-color: #f59e0b; }
 
+.seismic-replay-step {
+  display: grid;
+  grid-template-columns: auto minmax(90px, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+  margin: -6px 0 12px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.seismic-replay-step input { width: 100%; accent-color: #f59e0b; }
+.seismic-replay-step strong { color: #f6b554; text-align: right; font-variant-numeric: tabular-nums; }
+
 .seismic-replay-controls {
   display: grid;
-  grid-template-columns: repeat(5, 38px);
+  grid-template-columns: 38px 38px 38px auto 38px 38px;
+  align-items: center;
   justify-content: center;
   gap: 7px;
 }
+
+.seismic-replay-speed {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid #354145;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.seismic-replay-speed select { min-width: 54px; }
 
 .seismic-replay-controls button {
   width: 38px;

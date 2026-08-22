@@ -176,8 +176,8 @@ import {
   isRegionalEewSoundSource,
   NIED_SOUND_ASSETS,
   replaySecondSoundAsset,
-  replaySoundMilestone,
   SEISMIC_SOUND_LIBRARY,
+  sWaveCountdownMilestone,
   tsunamiSoundAssetForTransition,
   type SeismicSoundAssetId,
 } from "./seismicAudio";
@@ -2647,6 +2647,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [replaySeconds, setReplaySeconds] = useState(0);
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replaySpeed, setReplaySpeed] = usePersistentState<ReplaySpeed>("seismic-replay-speed", 60);
+  const [replayStepMinutes, setReplayStepMinutes] = usePersistentState("seismic-replay-step-minutes", 1);
   const [clock, setClock] = useState(Date.now());
   const [mapFocus, setMapFocus] = useState<MapFocusTarget | null>(null);
   const mapFocusSequence = useRef(0);
@@ -2664,7 +2665,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const liveEewSoundReports = useRef(new Map<string, LiveEew>());
   const liveEewSoundCues = useRef(new Set<string>());
   const customSoundUrlsRef = useRef(new Map<SeismicSoundAssetId, string>());
-  const replaySoundClock = useRef<{ sessionKey: string; seconds: number } | null>(null);
+  const sWaveCountdownSoundClock = useRef<{ sessionKey: string; remainingSeconds: number } | null>(null);
   const replayResponseSoundState = useRef<{ sessionKey: string; arrived: boolean } | null>(null);
   const intenseSoundSession = useRef<string | null>(null);
   const replayClockRef = useRef<number | null>(null);
@@ -2687,6 +2688,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const normalizedReplaySpeed: ReplaySpeed = replaySpeed === 1 || replaySpeed === 10 || replaySpeed === 60 || replaySpeed === 300
     ? replaySpeed
     : 60;
+  const normalizedReplayStepMinutes = Math.max(1, Math.min(60, Math.round(Number(replayStepMinutes) || 1)));
   const autoMagnitudeThreshold = Math.max(1, Math.min(9, Number(autoLocateMagnitude) || 5));
   const receiveMagnitudeThreshold = Math.max(1, Math.min(9, Number(receiveMagnitude) || 1));
   const normalizedSidePanelWidth = clampPanelDimension(Number(sidePanelWidth), 300, 620);
@@ -3877,9 +3879,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   );
   const replayDurationSeconds = useMemo(
     () => selectedEvent
-      ? jmaTsunamiReplayDurationSeconds(selectedEvent.originTime, replayTsunamiEpisode)
+      ? Math.max(
+        jmaTsunamiReplayDurationSeconds(selectedEvent.originTime, replayTsunamiEpisode),
+        normalizedReplayStepMinutes * 60,
+      )
       : 300,
-    [replayTsunamiEpisode, selectedEvent],
+    [normalizedReplayStepMinutes, replayTsunamiEpisode, selectedEvent],
   );
   useEffect(() => {
     replayDurationRef.current = replayDurationSeconds;
@@ -4281,22 +4286,6 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     }
     if (shouldPlay) void playJmaTsunamiCue(replayTsunamiSnapshot, previous?.snapshot ?? null);
   }, [jmaTsunamiSoundEnabled, playJmaTsunamiCue, replayEvent, replayNiedSoundSessionKey, replayPlaying, replayTsunamiEpisode, replayTsunamiSnapshot]);
-
-  useEffect(() => {
-    if (!replayEvent || !replayPlaying || !seismicAlertSoundEnabled) {
-      if (!replayEvent) replaySoundClock.current = null;
-      return;
-    }
-    const sessionKey = replayNiedSoundSessionKey;
-    const previousSeconds = replaySoundClock.current?.sessionKey === sessionKey
-      ? replaySoundClock.current.seconds
-      : replaySeconds;
-    const milestone = replaySoundMilestone(previousSeconds, replaySeconds, normalizedReplaySpeed);
-    replaySoundClock.current = { sessionKey, seconds: replaySeconds };
-    if (milestone === null) return;
-    const assetId = replaySecondSoundAsset(milestone);
-    if (assetId) void playSoundAsset(assetId);
-  }, [normalizedReplaySpeed, playSoundAsset, replayEvent, replayNiedSoundSessionKey, replayPlaying, replaySeconds, seismicAlertSoundEnabled]);
 
   const replayWaveResponseArrived = Boolean(
     replayEvent
@@ -4796,6 +4785,32 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       && Number.isFinite(sWaveArrivalSeconds)
       && sWaveRemainingSeconds > -12,
   );
+  useEffect(() => {
+    const sessionKey = wavefrontEvent
+      ? `${replayEvent ? "replay" : "live"}:${wavefrontEvent.source}:${wavefrontEvent.id}`
+      : "idle";
+    const clockAdvancing = Boolean(wavefrontEvent && showWaves && (!replayEvent || replayPlaying));
+    const previous = sWaveCountdownSoundClock.current;
+    if (!clockAdvancing || !seismicAlertSoundEnabled || !Number.isFinite(sWaveRemainingSeconds)) {
+      sWaveCountdownSoundClock.current = wavefrontEvent
+        ? { sessionKey, remainingSeconds: sWaveRemainingSeconds }
+        : null;
+      return;
+    }
+    sWaveCountdownSoundClock.current = { sessionKey, remainingSeconds: sWaveRemainingSeconds };
+    if (!previous || previous.sessionKey !== sessionKey) {
+      if (sWaveRemainingSeconds > 0 && sWaveRemainingSeconds <= 60) void playSoundAsset("general-countdown");
+      return;
+    }
+    const milestone = sWaveCountdownMilestone(previous.remainingSeconds, sWaveRemainingSeconds);
+    if (milestone === null) return;
+    if (milestone === 60) {
+      void playSoundAsset("general-countdown");
+      return;
+    }
+    const assetId = replaySecondSoundAsset(milestone);
+    if (assetId) void playSoundAsset(assetId);
+  }, [playSoundAsset, replayEvent, replayPlaying, seismicAlertSoundEnabled, showWaves, sWaveRemainingSeconds, wavefrontEvent]);
   const userSurfaceDistanceKm = wavefrontEvent && userWarningLocation
     ? haversineKm(wavefrontEvent, userWarningLocation)
     : 0;
@@ -5004,17 +5019,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const toggleReplay = () => {
     if (!selectedEvent) return;
     if (!replayPlaying) {
-      replaySoundClock.current = {
-        sessionKey: `replay:${eewReportKey(selectedEvent)}`,
-        seconds: replaySeconds,
-      };
       replayResponseSoundState.current = {
         sessionKey: `replay:${eewReportKey(selectedEvent)}`,
         arrived: Boolean(replaySimulation?.arrivedStationIds.length),
       };
       if (seismicAlertSoundEnabled) {
         void primeReplayAudio()
-          .then(() => playSoundAsset("general-countdown"))
           .then(() => playSoundAsset("srev-prompt"));
       } else {
         void primeReplayAudio();
@@ -5351,7 +5361,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
             <div className="seismic-sound-custom"><label>替换所选音效<input type="file" accept="audio/*" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (!file) return; const previous = customSoundUrlsRef.current.get(soundPreviewAsset); if (previous) URL.revokeObjectURL(previous); customSoundUrlsRef.current.set(soundPreviewAsset, URL.createObjectURL(file)); niedAudioBuffersRef.current.delete(soundPreviewAsset); setCustomSoundVersion((version) => version + 1); event.currentTarget.value = ""; }} /></label>{customSoundUrlsRef.current.has(soundPreviewAsset) && <button title="恢复内置音效" onClick={() => { const previous = customSoundUrlsRef.current.get(soundPreviewAsset); if (previous) URL.revokeObjectURL(previous); customSoundUrlsRef.current.delete(soundPreviewAsset); niedAudioBuffersRef.current.delete(soundPreviewAsset); setCustomSoundVersion((version) => version + 1); }}>恢复内置</button>}</div>
             <output className={niedSoundStatus.includes("阻止") ? "error" : ""}>{niedSoundEnabled ? niedSoundStatus : "音效已关闭"}</output>
             <output className={seismicSoundStatus.includes("阻止") || seismicSoundStatus.includes("超时") ? "error" : ""}>{seismicAlertSoundEnabled ? seismicSoundStatus : "实时预警 / 回放报文音效已关闭"}</output>
-            <p className="seismic-fault-note">JMA 震度速报使用 detail（同一物理事件只播一次）；JMA/KMA/CWA/CENC 区域源的 issue/update/final/cancel 按报文状态去重播放；hypocenter 是自动定位；prompt/countdown 与 1–60s 是回放节点；detail 也用于首个 P/S 响应；intense 是强震；shindo 与 tsunami 按震度、海啸等级升级播放。全球目录与授权全球源不触发区域 EEW 音效。</p>
+            <p className="seismic-fault-note">JMA 震度速报使用 detail（同一物理事件只播一次）；JMA/KMA/CWA/CENC 区域源的 issue/update/final/cancel 按报文状态去重播放；hypocenter 是自动定位；prompt 仅在回放启动时播放；countdown 与 0–60s 按定位点的 S 波剩余到时播放，回放和实时事件共用同一距离时钟；detail 也用于首个 P/S 响应；intense 是强震；shindo 与 tsunami 按震度、海啸等级升级播放。全球目录与授权全球源不触发区域 EEW 音效。</p>
           </section>
           <section className="control-section seismic-legal-note">
             <div className="section-title"><span><AlertTriangle /></span><strong>数据级别</strong></div>
@@ -5747,7 +5757,8 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 <div>
                   <div className="seismic-replay-clock"><span>T+{replaySeconds.toFixed(replaySeconds < 300 ? 2 : 0)} s / {Math.round(replayDurationSeconds / 60)} min</span><strong>{selectedEvent ? formatTime(selectedOrigin + replaySeconds * 1000) : "--"}</strong></div>
                   <input className="seismic-replay-slider" type="range" min="0" max={replayDurationSeconds} step="0.25" value={replaySeconds} disabled={!selectedEvent} onChange={(event) => setReplaySeconds(Number(event.target.value))} />
-                  <div className="seismic-replay-controls"><button title="回到起点" onClick={clearReplayPresentation}><SkipBack size={16} /></button><button className="primary" title={replayPlaying ? "暂停" : "播放"} disabled={!selectedEvent} onClick={toggleReplay}>{replayPlaying ? <Pause size={18} /> : <Play size={18} />}</button><button title={`前进 ${Math.max(10, normalizedReplaySpeed)} 秒`} onClick={() => setReplaySeconds((value) => Math.min(replayDurationSeconds, value + Math.max(10, normalizedReplaySpeed)))}><FastForward size={16} /></button><label className="seismic-replay-speed"><span>倍速</span><select aria-label="历史回放速度" value={normalizedReplaySpeed} onChange={(event) => setReplaySpeed(Number(event.target.value) as ReplaySpeed)}><option value={1}>1x</option><option value={10}>10x</option><option value={60}>60x</option><option value={300}>300x</option></select></label><button title="查看右侧测站滚动" disabled={!selectedEvent} onClick={() => { setPanelTab("station"); focusReplayDetection(); }}><Activity size={16} /></button><button title="重置" onClick={clearReplayPresentation}><RotateCcw size={16} /></button></div>
+                  <label className="seismic-replay-step"><span>T 步进</span><input aria-label="回放 T 步进分钟" type="range" min="1" max="60" step="1" value={normalizedReplayStepMinutes} onChange={(event) => setReplayStepMinutes(Number(event.target.value))} /><strong>{normalizedReplayStepMinutes} min</strong></label>
+                  <div className="seismic-replay-controls"><button title="回到起点" onClick={clearReplayPresentation}><SkipBack size={16} /></button><button className="primary" title={replayPlaying ? "暂停" : "播放"} disabled={!selectedEvent} onClick={toggleReplay}>{replayPlaying ? <Pause size={18} /> : <Play size={18} />}</button><button title={`前进 ${normalizedReplayStepMinutes} 分钟`} onClick={() => setReplaySeconds((value) => Math.min(replayDurationSeconds, value + normalizedReplayStepMinutes * 60))}><FastForward size={16} /></button><label className="seismic-replay-speed"><span>倍速</span><select aria-label="历史回放速度" value={normalizedReplaySpeed} onChange={(event) => setReplaySpeed(Number(event.target.value) as ReplaySpeed)}><option value={1}>1x</option><option value={10}>10x</option><option value={60}>60x</option><option value={300}>300x</option></select></label><button title="查看右侧测站滚动" disabled={!selectedEvent} onClick={() => { setPanelTab("station"); focusReplayDetection(); }}><Activity size={16} /></button><button title="重置" onClick={clearReplayPresentation}><RotateCcw size={16} /></button></div>
                 </div>
                 <div>
                   <div className="seismic-wave-legend"><div><i className="p" /><span>P 波</span><strong>{selectedEvent ? waveRadiusKm(selectedEvent.originTime, 6, selectedOrigin + replaySeismicSeconds * 1000).toFixed(0) : 0} km</strong></div><div><i className="s" /><span>S 波</span><strong>{selectedEvent ? waveRadiusKm(selectedEvent.originTime, 3.5, selectedOrigin + replaySeismicSeconds * 1000).toFixed(0) : 0} km</strong></div></div>
