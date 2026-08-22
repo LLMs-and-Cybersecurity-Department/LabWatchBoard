@@ -318,6 +318,25 @@ const MONITOR_WIDGET_LABELS: Record<MonitorWidgetId, string> = {
 };
 const PERSISTENT_REGIONAL_EEW_SOURCES = new Set<LiveEewSource>(["JMA", "KMA", "CENC", "CWA"]);
 
+type CwaOfficialSnapshot = {
+  stale: boolean;
+  events: EarthquakeEvent[];
+};
+
+async function fetchCwaOfficialSnapshot(options: { minMagnitude: number; signal?: AbortSignal }) {
+  const query = new URLSearchParams({ range: "24h", min_magnitude: String(options.minMagnitude) });
+  const response = await fetch(`/api/cwa-earthquakes?${query}`, {
+    signal: options.signal,
+    headers: { Accept: "application/json" },
+  });
+  const payload = await response.json().catch(() => null) as CwaOfficialSnapshot | { error?: string; detail?: string } | null;
+  if (!response.ok || !payload || !("events" in payload) || !Array.isArray(payload.events)) {
+    const errorPayload = payload && !("events" in payload) ? payload : null;
+    throw new Error(errorPayload?.detail || errorPayload?.error || `CWA 官方报告接口返回 ${response.status}`);
+  }
+  return payload;
+}
+
 function normalizeMonitorDock(value: unknown): MonitorDock {
   return MONITOR_DOCKS.includes(value as MonitorDock) ? value as MonitorDock : "left";
 }
@@ -3131,6 +3150,48 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
 
   useEffect(() => {
     let active = true;
+    let timer = 0;
+    let controller: AbortController | null = null;
+    let reportSignature = "";
+    const poll = async () => {
+      controller?.abort();
+      controller = new AbortController();
+      const started = Date.now();
+      let retryDelay = 3_000;
+      try {
+        const snapshot = await fetchCwaOfficialSnapshot({
+          minMagnitude: receiveMagnitudeThreshold,
+          signal: controller.signal,
+        });
+        if (!active) return;
+        const nextSignature = snapshot.events
+          .map((event) => `${event.id}:${event.updatedAt ?? event.time}:${event.affectedAreas?.length ?? 0}`)
+          .join("|");
+        if (nextSignature !== reportSignature) {
+          reportSignature = nextSignature;
+          setInstitutionReports((current) => mergeEarthquakeEventHistory(current, snapshot.events));
+        }
+        setCwaOfficialState(snapshot.stale ? "stale" : "online");
+        setCwaOfficialLatency(Date.now() - started);
+      } catch (error) {
+        if (!active || (error instanceof DOMException && error.name === "AbortError")) return;
+        setCwaOfficialState("error");
+        setCwaOfficialLatency(null);
+        retryDelay = 30_000;
+      } finally {
+        if (active) timer = window.setTimeout(poll, retryDelay);
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      controller?.abort();
+    };
+  }, [receiveMagnitudeThreshold]);
+
+  useEffect(() => {
+    let active = true;
     let retryTimer = 0;
     const load = async () => {
       const results = await loadCatalogues();
@@ -3471,17 +3532,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
         if (!active) return;
         setInstitutionReports((current) => mergeEarthquakeEventHistory(current, snapshot.events));
         const availability = summarizeEarthquakeSourceAvailability(snapshot.sources);
-        const cwa = snapshot.sources.find((source) => source.id === "cwa");
         setInstitutionSourceCount(availability.availableCount);
         setOfficialLatency(Date.now() - started);
         setOfficialState(availability.state);
-        setCwaOfficialState(cwa?.status === "ok" ? "online" : cwa?.status === "stale" ? "stale" : "error");
-        setCwaOfficialLatency(cwa?.latencyMs ?? null);
       } catch (error) {
         if (!active || (error instanceof DOMException && error.name === "AbortError")) return;
         setOfficialState("error");
-        setCwaOfficialState("error");
-        setCwaOfficialLatency(null);
       } finally {
         if (active) timer = window.setTimeout(poll, globalRefreshSeconds * 1000);
       }
@@ -5173,7 +5229,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               <SourceIndicator label="JMA 海啸预报 code 552" state={jmaTsunamiState} latency={jmaTsunamiLatency} />
               <SourceIndicator label={`CENC 烈度多源后端${cencOfficialEgressMode === "http-proxy" ? " · NSTI 7893" : cencOfficialEgressMode === "config-error" ? " · 代理配置错误" : ""}`} state={cencState} latency={cencLatency} />
               <SourceIndicator label="MSIL S-net 实测历史" state={snetState} latency={snetSnapshot?.latencyMs ?? null} />
-              <SourceIndicator label="CWA 官方地震报告 API" state={cwaOfficialState} latency={cwaOfficialLatency} />
+              <SourceIndicator label="CWA 进阶会员官方报告 · 3 秒缓存" state={cwaOfficialState} latency={cwaOfficialLatency} />
               <SourceIndicator label={`全球机构报告 ${institutionSourceCount}/${INSTITUTION_SOURCE_TOTAL}`} state={officialState} latency={officialLatency} />
               <SourceIndicator
                 label={`全球 FDSN 目录 ${globalStationSnapshot?.returnedCount ?? 0}`}
