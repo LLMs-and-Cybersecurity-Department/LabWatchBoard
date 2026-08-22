@@ -2293,7 +2293,13 @@ const SeismicMap = memo(function SeismicMap(props: {
           key={props.tsunamiRegions.features.map((feature) => `${feature.properties.code}:${feature.properties.level}`).join("|")}
           data={props.tsunamiRegions}
           interactive={false}
-          style={(feature) => jmaTsunamiLineStyle(Number(feature?.properties?.level ?? 1))}
+          style={(feature) => {
+            const level = Number(feature?.properties?.level ?? 1);
+            return {
+              ...jmaTsunamiLineStyle(level),
+              className: level >= 2 ? "seismic-tsunami-coastline-flash" : undefined,
+            };
+          }}
         />}
       </Pane>
       <Pane name="seismic-event-pane" style={{ zIndex: 490 }}>

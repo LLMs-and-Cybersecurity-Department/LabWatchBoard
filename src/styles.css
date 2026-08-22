@@ -5544,6 +5544,16 @@ body.seismic-monitor-moving * {
   50% { opacity: 0.38; transform: scaleX(0.92); }
 }
 
+.seismic-map path.seismic-tsunami-coastline-flash {
+  animation: seismic-tsunami-coastline-flash 2s steps(1, end) infinite;
+  will-change: opacity, filter;
+}
+
+@keyframes seismic-tsunami-coastline-flash {
+  0%, 49% { opacity: 1; filter: drop-shadow(0 0 5px currentColor); }
+  50%, 100% { opacity: 0.22; filter: none; }
+}
+
 .jma-tsunami-alert {
   overflow: hidden;
   border: 1px solid rgba(255, 0, 255, 0.8);
@@ -8096,7 +8106,8 @@ body.seismic-monitor-moving * {
   .seismic-s-wave-banner output::after,
   .seismic-s-wave-stripes,
   .seismic-s-wave-title,
-  .seismic-s-wave-marquee span {
+  .seismic-s-wave-marquee span,
+  .seismic-map path.seismic-tsunami-coastline-flash {
     animation: none !important;
     transition: none !important;
   }
