@@ -1955,6 +1955,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   detectionMode: "live" | "replay";
   detectionSessionKey: string;
   blinkNow: number;
+  showDetectionGrid: boolean;
   waveNow: number;
   wavePlaybackRate: number;
   showWaves: boolean;
@@ -2242,6 +2243,25 @@ const SeismicMap = memo(function SeismicMap(props: {
   const localRegionKey = props.localRegions.features
     .map((feature) => `${feature.properties.code ?? feature.properties.name}:${feature.properties.rank}:${feature.properties.arrived ? 1 : 0}:${Math.floor(feature.properties.currentRank ?? 0)}`)
     .join("|");
+  const officialRegionMarkers = useMemo<Array<{
+    id: string;
+    center: { latitude: number; longitude: number };
+    rank: number;
+    scale: "intensity" | "shindo";
+    label: string;
+  }>>(() => props.officialRegions.features.flatMap((feature) => {
+    const center = geometryCenter(feature);
+    const rank = Math.max(0, Number(feature.properties.rank ?? 0));
+    if (!center || rank < 1) return [];
+    const scale: "intensity" | "shindo" = feature.properties.scale === "intensity" ? "intensity" : "shindo";
+    return [{
+      id: `${feature.properties.code ?? feature.properties.name}:${scale}:${rank}`,
+      center,
+      rank,
+      scale,
+      label: `${feature.properties.name} 官方${scale === "shindo" ? `震度 ${jmaShindoLabel(rank)}` : `烈度 ${intensityRomanLabel(rank)}`}`,
+    }];
+  }).slice(0, 64), [props.officialRegions.features]);
   return (
     <MapContainer center={[36.2, 133.2]} zoom={5} minZoom={2} maxZoom={13} worldCopyJump preferCanvas scrollWheelZoom zoomControl={false} className={`seismic-map seismic-map--${props.theme} seismic-map--${props.interactionMode}`}>
       <SeismicMapThemeClass theme={props.theme} />
@@ -2253,6 +2273,16 @@ const SeismicMap = memo(function SeismicMap(props: {
       </Pane>
       <Pane name="seismic-impact-official" style={{ zIndex: 320, pointerEvents: "none" }}>
         {props.showOfficialImpact && props.officialRegions.features.length > 0 && <LeafletGeoJSON key={`official:${props.selectedEvent?.id}:${props.selectedEvent?.serial}`} data={props.officialRegions} interactive={false} style={(feature) => { const rank = Number(feature?.properties?.rank ?? 0); const scale = feature?.properties?.scale === "intensity" ? "intensity" : "shindo"; const color = scale === "intensity" ? mmiIntensityColor(rank) : jmaShindoColor(rank); return { color: "#ffffff", fillColor: color, weight: 1.5, opacity: 0.94, fillOpacity: 0.56 }; }} />}
+      </Pane>
+      <Pane name="seismic-impact-official-labels" style={{ zIndex: 340, pointerEvents: "none" }}>
+        {props.showOfficialImpact && officialRegionMarkers.map((marker) => <StationValueMarker
+          key={marker.id}
+          latitude={marker.center.latitude}
+          longitude={marker.center.longitude}
+          rank={marker.rank}
+          scale={marker.scale}
+          label={marker.label}
+        />)}
       </Pane>
       <Pane name="seismic-global-faults" style={{ zIndex: 330, pointerEvents: "none" }}>
         {props.showGlobalFaults && layerComplexity >= 5 && props.globalFaults && <LeafletGeoJSON
@@ -2284,9 +2314,9 @@ const SeismicMap = memo(function SeismicMap(props: {
           && <SmoothWavefrontCircles event={props.waveEvent} waveNow={props.waveNow} playbackRate={props.wavePlaybackRate} />}
       </Pane>
       <Pane name="seismic-grid-pane" style={{ zIndex: 410, pointerEvents: "none" }}>
-        {layerComplexity >= 3 && detectionCells.map((cell) => <Rectangle key={`${props.detectionSessionKey}:${cell.id}`} bounds={cell.bounds} interactive={false} pathOptions={{ color: NIED_GRID_COLORS[cell.color], weight: blinkOn ? 2.8 : 1.6, opacity: blinkOn ? 1 : 0.28, dashArray: props.detectionMode === "replay" ? "7 5" : undefined, fill: false }} />)}
-        {layerComplexity >= 3 && props.showKma && kmaDetectionCells.map((cell) => <Rectangle key={`kma:${props.detectionSessionKey}:${cell.id}`} bounds={cell.bounds} interactive={false} pathOptions={{ color: NIED_GRID_COLORS[cell.color], weight: blinkOn ? 2.5 : 1.5, opacity: blinkOn ? 0.95 : 0.3, dashArray: "8 4", fill: false }} />)}
-        {layerComplexity >= 3 && props.showCwa && cwaDetectionCells.map((cell) => <Rectangle key={`cwa:${props.detectionSessionKey}:${cell.id}`} bounds={cell.bounds} interactive={false} pathOptions={{ color: NIED_GRID_COLORS[cell.color], weight: blinkOn ? 2.4 : 1.5, opacity: blinkOn ? 0.92 : 0.32, dashArray: "3 4", fill: false }} />)}
+        {props.showDetectionGrid && layerComplexity >= 3 && detectionCells.map((cell) => <Rectangle key={`${props.detectionSessionKey}:${cell.id}`} bounds={cell.bounds} interactive={false} pathOptions={{ color: NIED_GRID_COLORS[cell.color], weight: blinkOn ? 2.8 : 1.6, opacity: blinkOn ? 1 : 0.28, dashArray: props.detectionMode === "replay" ? "7 5" : undefined, fill: false }} />)}
+        {props.showDetectionGrid && layerComplexity >= 3 && props.showKma && kmaDetectionCells.map((cell) => <Rectangle key={`kma:${props.detectionSessionKey}:${cell.id}`} bounds={cell.bounds} interactive={false} pathOptions={{ color: NIED_GRID_COLORS[cell.color], weight: blinkOn ? 2.5 : 1.5, opacity: blinkOn ? 0.95 : 0.3, dashArray: "8 4", fill: false }} />)}
+        {props.showDetectionGrid && layerComplexity >= 3 && props.showCwa && cwaDetectionCells.map((cell) => <Rectangle key={`cwa:${props.detectionSessionKey}:${cell.id}`} bounds={cell.bounds} interactive={false} pathOptions={{ color: NIED_GRID_COLORS[cell.color], weight: blinkOn ? 2.4 : 1.5, opacity: blinkOn ? 0.92 : 0.32, dashArray: "3 4", fill: false }} />)}
       </Pane>
       <Pane name="seismic-jma-tsunami-pane" style={{ zIndex: 430, pointerEvents: "none" }}>
         {props.showTsunami && props.tsunamiRegions.features.length > 0 && <LeafletGeoJSON
@@ -2482,6 +2512,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [monitorDropTarget, setMonitorDropTarget] = useState<MonitorDock>("left");
   const [autoSelectWaveformStation, setAutoSelectWaveformStation] = usePersistentState("seismic-auto-select-waveform-station", true);
   const [autoOpenWniMonitor, setAutoOpenWniMonitor] = usePersistentState("seismic-auto-open-wni-monitor", true);
+  const [showShakeDetectionGrid, setShowShakeDetectionGrid] = usePersistentState("seismic-show-shake-detection-grid", true);
+  const [autoHypocenterEstimation, setAutoHypocenterEstimation] = usePersistentState("seismic-auto-hypocenter-estimation", true);
+  const [keepLatestWarningVisible, setKeepLatestWarningVisible] = usePersistentState("seismic-keep-latest-warning-visible", true);
   const [enabledEewSources, setEnabledEewSources] = usePersistentState<LiveEewSource[]>("seismic-enabled-eew-sources", [...LIVE_EEW_SOURCE_ORDER]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const primaryGridRef = useRef<HTMLElement | null>(null);
@@ -3801,6 +3834,14 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   }, [regionalHistory]);
   const persistentRegionalEvent = latestRegionalState.displayEvent;
   const persistentRegionalImpactEvent = latestRegionalState.impactEvent;
+  const visiblePersistentRegionalEvent = persistentRegionalEvent
+    && (keepLatestWarningVisible || isLiveEewActive(persistentRegionalEvent, clock))
+    ? persistentRegionalEvent
+    : null;
+  const visiblePersistentRegionalImpactEvent = persistentRegionalImpactEvent
+    && (keepLatestWarningVisible || isLiveEewActive(persistentRegionalImpactEvent, clock))
+    ? persistentRegionalImpactEvent
+    : null;
   const historyEvents = useMemo(
     () => collapseEewHistoryEvents([...regionalHistory, ...institutionHistoryReports], institutionReports),
     [institutionHistoryReports, institutionReports, regionalHistory],
@@ -4638,9 +4679,15 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     if (strongest) focusStation(strongest);
   };
 
-  const rawLiveEstimate = useMemo(() => inferHypocenter(triggers), [triggers]);
+  const rawLiveEstimate = useMemo(
+    () => autoHypocenterEstimation ? inferHypocenter(triggers) : null,
+    [autoHypocenterEstimation, triggers],
+  );
   const replayObservationCount = replaySimulation?.observations.length ?? 0;
-  const rawReplayEstimate = useMemo(() => inferHypocenter((replaySimulation?.observations ?? []).slice(0, 24)), [replayEvent?.id, replayObservationCount]);
+  const rawReplayEstimate = useMemo(
+    () => autoHypocenterEstimation ? inferHypocenter((replaySimulation?.observations ?? []).slice(0, 24)) : null,
+    [autoHypocenterEstimation, replayEvent?.id, replayObservationCount],
+  );
   const liveEstimate = useMemo(() => rawLiveEstimate && latestEvent
     ? constrainHypocenterEstimate(rawLiveEstimate, latestEvent, 10)
     : rawLiveEstimate, [latestEvent, rawLiveEstimate]);
@@ -4658,16 +4705,16 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       : jmaShindoColor(selectedRank ?? 0);
   const selectedOrigin = selectedEvent ? Date.parse(selectedEvent.originTime) : 0;
   const previewEvent = warningOverlayTab === "selected" && selectedEvent && clock < selectedPreviewUntil ? selectedEvent : null;
-  const rawMapEvent = replayEvent ?? previewEvent ?? liveWavefrontEvent ?? persistentRegionalEvent ?? autoGlobalEvent ?? latestEvent;
+  const rawMapEvent = replayEvent ?? previewEvent ?? liveWavefrontEvent ?? visiblePersistentRegionalEvent ?? autoGlobalEvent ?? latestEvent;
   const mapEvent = useMemo(
     () => enrichLiveEewWithOfficialAreas(rawMapEvent, institutionReports),
     [institutionReports, rawMapEvent],
   );
   const persistentRegionalMapEvent = useMemo(
-    () => enrichLiveEewWithOfficialAreas(persistentRegionalImpactEvent, institutionReports),
-    [institutionReports, persistentRegionalImpactEvent],
+    () => enrichLiveEewWithOfficialAreas(visiblePersistentRegionalImpactEvent, institutionReports),
+    [institutionReports, visiblePersistentRegionalImpactEvent],
   );
-  const cameraEventCandidate = replayEvent ?? liveWavefrontEvent ?? autoGlobalEvent ?? persistentRegionalEvent ?? latestEvent;
+  const cameraEventCandidate = replayEvent ?? liveWavefrontEvent ?? autoGlobalEvent ?? visiblePersistentRegionalEvent ?? latestEvent;
   const cameraEvent = autoOpenWniMonitor && cameraEventCandidate && cameraEventCandidate.hypocenterKnown !== false
     ? cameraEventCandidate
     : null;
@@ -4821,9 +4868,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     ? Boolean(selectedSnetEvent?.active && activeOceanCount)
     : Boolean(activeOceanCount);
   const overlayEvent = warningOverlayTab === "selected"
-    ? selectedEvent ?? persistentRegionalEvent ?? autoGlobalEvent ?? latestEvent
-    : persistentRegionalEvent ?? autoGlobalEvent ?? latestEvent;
-  const latestDisplayEvent = persistentRegionalEvent ?? latestEvent;
+    ? selectedEvent ?? visiblePersistentRegionalEvent ?? autoGlobalEvent ?? latestEvent
+    : visiblePersistentRegionalEvent ?? autoGlobalEvent ?? latestEvent;
+  const latestDisplayEvent = visiblePersistentRegionalEvent ?? latestEvent;
   const cencMetrics = cencReport?.stationMetrics?.length ? cencReport.stationMetrics : cencReport?.stations ?? [];
   const cencMaxIntensity = cencMetrics[0]?.intensity ?? null;
   const cencMaxPga = cencMetrics.length ? cencMetrics.reduce((max, station) => Math.max(max, station.pgaGal ?? 0), 0) : null;
@@ -5359,6 +5406,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               <header><div><strong>实时监控设置</strong><small>低档复杂度优先保证回放帧率</small></div><button aria-label="关闭实时地震设置" onClick={() => setSettingsOpen(false)}>×</button></header>
               <label className="toggle-row"><input type="checkbox" checked={autoSelectWaveformStation} onChange={(event) => setAutoSelectWaveformStation(event.target.checked)} />自动寻找最近可用波形测站 <em>{autoSelectWaveformStation ? "开启" : "关闭"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={autoOpenWniMonitor} onChange={(event) => setAutoOpenWniMonitor(event.target.checked)} />自动打开 WNI / 实时监控 <em>{autoOpenWniMonitor ? "开启" : "关闭"}</em></label>
+              <label className="toggle-row"><input type="checkbox" checked={showShakeDetectionGrid} onChange={(event) => setShowShakeDetectionGrid(event.target.checked)} />摇晃检知框 <em>{showShakeDetectionGrid ? "显示" : "隐藏"}</em></label>
+              <label className="toggle-row"><input type="checkbox" checked={autoHypocenterEstimation} onChange={(event) => setAutoHypocenterEstimation(event.target.checked)} />自动震源推算 <em>{autoHypocenterEstimation ? "开启" : "关闭"}</em></label>
+              <label className="toggle-row"><input type="checkbox" checked={keepLatestWarningVisible} onChange={(event) => setKeepLatestWarningVisible(event.target.checked)} />一直显示最新预警 <em>{keepLatestWarningVisible ? "保持" : "按时结束"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={showWniCameras} onChange={(event) => setShowWniCameras(event.target.checked)} />显示 WNI 摄像头图层 <em>{showWniCameras ? "显示" : "隐藏"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={seismicAlertSoundEnabled} onChange={(event) => setSeismicAlertSoundEnabled(event.target.checked)} />实时预警与回放音效 <em>{seismicAlertSoundEnabled ? "开启" : "关闭"}</em></label>
               <label className="seismic-layer-complexity"><span><strong>图层复杂度</strong><output>{normalizedMapLayerComplexity}/6</output></span><input type="range" min="1" max="6" step="1" value={normalizedMapLayerComplexity} aria-label="地图图层复杂度 1 到 6" onChange={(event) => setMapLayerComplexity(Number(event.target.value))} /><small>1 仅事件与核心响应；6 显示完整测站、标签、产品和背景层。</small></label>
@@ -5485,6 +5535,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                     ? `live:${wavefrontEvent.source}:${wavefrontEvent.id}`
                     : "live:idle"}
                 blinkNow={mapDetectionStationIds.length ? clock : 0}
+                showDetectionGrid={showShakeDetectionGrid}
                 waveNow={waveNow}
                 wavePlaybackRate={replayEvent ? replayPlaying ? normalizedReplaySpeed : 0 : 1}
                 showWaves={showWaves}
@@ -5703,7 +5754,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
           <div className="seismic-lower-body">
             {bottomTab === "inference" && <>
               <header className="seismic-lower-heading"><div><strong>突发地震本地震源推算</strong><span>NIED 聚类检知站的首次上升时刻 · 确定性网格反演</span></div><div><span>活动簇</span><strong>{niedDetection.clusterCount} 簇 / {niedDetection.activeStationIds.length} 站</strong></div><b className="experimental">实验性 · 非官方 EEW</b></header>
-              <div className="seismic-bottom-analysis-grid"><div>{estimate ? <><div className="seismic-inference-result"><strong>{estimate.latitude.toFixed(3)}, {estimate.longitude.toFixed(3)}</strong><span>深度 {estimate.depthKm.toFixed(1)} km · {formatTime(estimate.originTime)}</span></div><div className="seismic-eew-metrics"><div><span>参与测站</span><strong>{estimate.stationCount}</strong></div><div><span>中位残差</span><strong>{estimate.residualMs} ms</strong></div><div><span>置信度</span><strong>{estimate.confidence}%</strong></div></div><dl className="earthquake-detail-list"><div><dt>方法</dt><dd>{estimate.method}</dd></div><div><dt>官方震源距离</dt><dd>{estimate.referenceDistanceKm !== undefined ? `${estimate.referenceDistanceKm.toFixed(2)} km` : "无同期官方震源"}{estimate.unconstrainedDistanceKm !== undefined ? `（约束前 ${estimate.unconstrainedDistanceKm.toFixed(1)} km）` : ""}</dd></div><div><dt>P 波速度</dt><dd>6.0 km/s</dd></div><div><dt>有效窗口</dt><dd>聚类激活后 120 秒</dd></div></dl></> : <div className="seismic-lower-empty"><CircleGauge size={28} /><strong>等待 NIED 邻站聚类检知</strong><span>至少 4 个有效触发站后生成本地震源；当前 {triggers.length} 站。</span></div>}</div><div className="seismic-trigger-list seismic-bottom-trigger-list">{triggers.length ? triggers.slice(0, 40).map((trigger) => { const station = catalogue?.stations.find((item) => item.id === trigger.stationId); return <div key={trigger.stationId}><i /><span><strong>{station?.stationName ?? trigger.stationId}</strong><small>{station?.stationCode ?? "NIED"}</small></span><time>{formatTime(trigger.triggeredAt)}</time></div>; }) : <div className="seismic-lower-empty"><Antenna size={22} /><span>尚无通过聚类判定的触发站</span></div>}</div></div>
+              <div className="seismic-bottom-analysis-grid"><div>{estimate ? <><div className="seismic-inference-result"><strong>{estimate.latitude.toFixed(3)}, {estimate.longitude.toFixed(3)}</strong><span>深度 {estimate.depthKm.toFixed(1)} km · {formatTime(estimate.originTime)}</span></div><div className="seismic-eew-metrics"><div><span>参与测站</span><strong>{estimate.stationCount}</strong></div><div><span>中位残差</span><strong>{estimate.residualMs} ms</strong></div><div><span>置信度</span><strong>{estimate.confidence}%</strong></div></div><dl className="earthquake-detail-list"><div><dt>方法</dt><dd>{estimate.method}</dd></div><div><dt>官方震源距离</dt><dd>{estimate.referenceDistanceKm !== undefined ? `${estimate.referenceDistanceKm.toFixed(2)} km` : "无同期官方震源"}{estimate.unconstrainedDistanceKm !== undefined ? `（约束前 ${estimate.unconstrainedDistanceKm.toFixed(1)} km）` : ""}</dd></div><div><dt>P 波速度</dt><dd>6.0 km/s</dd></div><div><dt>有效窗口</dt><dd>聚类激活后 120 秒</dd></div></dl></> : <div className="seismic-lower-empty"><CircleGauge size={28} /><strong>{autoHypocenterEstimation ? "等待 NIED 邻站聚类检知" : "自动震源推算已关闭"}</strong><span>{autoHypocenterEstimation ? `至少 4 个有效触发站后生成本地震源；当前 ${triggers.length} 站。` : "可在右上角设置中重新开启，关闭时不执行反演计算。"}</span></div>}</div><div className="seismic-trigger-list seismic-bottom-trigger-list">{triggers.length ? triggers.slice(0, 40).map((trigger) => { const station = catalogue?.stations.find((item) => item.id === trigger.stationId); return <div key={trigger.stationId}><i /><span><strong>{station?.stationName ?? trigger.stationId}</strong><small>{station?.stationCode ?? "NIED"}</small></span><time>{formatTime(trigger.triggeredAt)}</time></div>; }) : <div className="seismic-lower-empty"><Antenna size={22} /><span>尚无通过聚类判定的触发站</span></div>}</div></div>
             </>}
 
             {bottomTab === "replay" && <>
@@ -5718,7 +5769,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 <div>
                   <div className="seismic-wave-legend"><div><i className="p" /><span>P 波</span><strong>{selectedEvent ? waveRadiusKm(selectedEvent.originTime, 6, selectedOrigin + replaySeismicSeconds * 1000).toFixed(0) : 0} km</strong></div><div><i className="s" /><span>S 波</span><strong>{selectedEvent ? waveRadiusKm(selectedEvent.originTime, 3.5, selectedOrigin + replaySeismicSeconds * 1000).toFixed(0) : 0} km</strong></div></div>
                   <dl className="earthquake-detail-list"><div><dt>JMA 海啸回放</dt><dd>{replayTsunamiSnapshot ? `${replayTsunamiSnapshot.cancelled ? "预报解除" : replayTsunamiSnapshot.title} · ${formatTime(replayTsunamiSnapshot.issuedAt ?? selectedOrigin)}` : replayTsunamiEpisode ? `等待首报 · 共 ${replayTsunamiEpisode.reports.length} 份` : jmaTsunamiHistory ? "当前事件无匹配报文" : "历史报文加载中"}</dd></div><div><dt>NIED 陆地响应</dt><dd>{replaySimulation ? `${replaySimulation.activeStationIds.length} 站 / 最大震度 ${jmaShindoLabel(replaySimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>KMA-PEWS 响应</dt><dd>{kmaReplaySimulation ? `${kmaReplaySimulation.activeStationIds.length} 站 / 最大烈度 ${intensityRomanLabel(kmaReplaySimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>海底台网响应</dt><dd>{oceanSimulation ? `${oceanSimulation.activeStationIds.length} 站 / 最大震度 ${jmaShindoLabel(oceanSimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>全球 FDSN 响应</dt><dd>{globalSimulation ? `${globalSimulation.arrivedStationIds.length} 站已到达 / 最大 MMI ${globalSimulation.maxRank.toFixed(1)}` : "等待播放"}</dd></div><div><dt>CWA CWASN 响应</dt><dd>{cwaSimulation ? `${cwaSimulation.arrivedStationIds.length} 站已到达 / 最大震度 ${jmaShindoLabel(cwaSimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>回放音效</dt><dd>NIED {niedSoundEnabled ? "启用" : "关闭"} / 海啸 {jmaTsunamiSoundEnabled ? "启用" : "关闭"}</dd></div><div><dt>P / S 速度</dt><dd>6.0 / 3.5 km/s（仅前 300 秒）</dd></div><div><dt>用途</dt><dd>传播时序与官方海啸报文复盘，不代表当前预警</dd></div></dl>
-                  {replayEstimate ? <div className="seismic-replay-inference"><span><CircleGauge size={15} />回放本地震源反演</span><strong>{replayEstimate.latitude.toFixed(3)}, {replayEstimate.longitude.toFixed(3)}</strong><small>深度 {replayEstimate.depthKm.toFixed(1)} km · {replayEstimate.stationCount} 站 · 残差 {replayEstimate.residualMs} ms · 距官方 {replayEstimate.referenceDistanceKm?.toFixed(2) ?? "--"} km</small></div> : <div className="seismic-replay-inference waiting"><span><CircleGauge size={15} />等待至少 4 个模拟 P 波触发站</span><small>测站按理论到时逐一响应，满足条件后自动生成震源。</small></div>}
+                  {replayEstimate ? <div className="seismic-replay-inference"><span><CircleGauge size={15} />回放本地震源反演</span><strong>{replayEstimate.latitude.toFixed(3)}, {replayEstimate.longitude.toFixed(3)}</strong><small>深度 {replayEstimate.depthKm.toFixed(1)} km · {replayEstimate.stationCount} 站 · 残差 {replayEstimate.residualMs} ms · 距官方 {replayEstimate.referenceDistanceKm?.toFixed(2) ?? "--"} km</small></div> : <div className="seismic-replay-inference waiting"><span><CircleGauge size={15} />{autoHypocenterEstimation ? "等待至少 4 个模拟 P 波触发站" : "自动震源推算已关闭"}</span><small>{autoHypocenterEstimation ? "测站按理论到时逐一响应，满足条件后自动生成震源。" : "可在右上角设置中重新开启。"}</small></div>}
                 </div>
               </div>
             </>}

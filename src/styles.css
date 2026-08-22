@@ -5100,6 +5100,7 @@ body.seismic-panel-resizing {
 }
 
 .seismic-map .seismic-station-value-icon {
+  border-radius: 50%;
   pointer-events: none;
 }
 
@@ -5114,6 +5115,8 @@ body.seismic-panel-resizing {
   height: 100%;
   transform: none;
 }
+
+.seismic-map .seismic-station-value-icon img { border-radius: 50%; }
 
 .seismic-map .seismic-station-value-icon.selected {
   filter: drop-shadow(0 0 2px #ffffff) drop-shadow(0 2px 3px rgba(0, 0, 0, 0.72));
