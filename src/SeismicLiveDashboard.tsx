@@ -1218,12 +1218,11 @@ const JshisFaultPointCloud = memo(function JshisFaultPointCloud(props: {
 
   useEffect(() => {
     if (!normalizedPositions.length) return undefined;
-    const pane = map.getPane("seismic-jshis-products");
-    if (!pane) return undefined;
+    const container = map.getContainer();
     const canvas = document.createElement("canvas");
     canvas.className = "seismic-jshis-webgl-layer";
     canvas.setAttribute("aria-hidden", "true");
-    pane.appendChild(canvas);
+    container.appendChild(canvas);
 
     const gl = canvas.getContext("webgl", {
       alpha: true,
@@ -1297,8 +1296,6 @@ const JshisFaultPointCloud = memo(function JshisFaultPointCloud(props: {
       }
       const origin = map.getPixelOrigin();
       const worldScale = 256 * 2 ** map.getZoom();
-      const topLeft = map.containerPointToLayerPoint([0, 0]);
-      canvas.style.transform = `translate3d(${topLeft.x}px, ${topLeft.y}px, 0)`;
       if (gl && program && buffer) {
         gl.viewport(0, 0, width, height);
         gl.clearColor(0, 0, 0, 0);
@@ -1320,7 +1317,9 @@ const JshisFaultPointCloud = memo(function JshisFaultPointCloud(props: {
       if (context2d) {
         context2d.clearRect(0, 0, width, height);
         context2d.fillStyle = "rgba(239, 68, 68, 0.78)";
-        for (let index = 0; index < normalizedPositions.length; index += 2) {
+        const pointCount = normalizedPositions.length / 2;
+        const coordinateStride = Math.max(2, Math.ceil(pointCount / 12_000) * 2);
+        for (let index = 0; index < normalizedPositions.length; index += coordinateStride) {
           const x = (normalizedPositions[index] * worldScale - origin.x) * pixelRatio;
           const y = (normalizedPositions[index + 1] * worldScale - origin.y) * pixelRatio;
           context2d.fillRect(x - pixelRatio, y - pixelRatio, 2 * pixelRatio, 2 * pixelRatio);
@@ -1330,12 +1329,12 @@ const JshisFaultPointCloud = memo(function JshisFaultPointCloud(props: {
     const scheduleDraw = () => {
       if (!frame) frame = window.requestAnimationFrame(draw);
     };
-    map.on("moveend zoomend resize viewreset", scheduleDraw);
+    map.on("move zoom resize viewreset", scheduleDraw);
     scheduleDraw();
     return () => {
       disposed = true;
       if (frame) window.cancelAnimationFrame(frame);
-      map.off("moveend zoomend resize viewreset", scheduleDraw);
+      map.off("move zoom resize viewreset", scheduleDraw);
       if (gl) {
         if (buffer) gl.deleteBuffer(buffer);
         if (program) gl.deleteProgram(program);
@@ -2213,7 +2212,7 @@ const SeismicMap = memo(function SeismicMap(props: {
         fault={props.jshisFault}
         showHazard={props.showJshisHazard && layerComplexity >= 4}
         showSite={props.showJshisSite && layerComplexity >= 4}
-        showFault={props.showJshisFault && layerComplexity >= 5}
+        showFault={props.showJshisFault && layerComplexity >= 4}
       />
       <ShakeMapContourLayer visible={props.showShakeMap} shakeMap={props.shakeMap} contours={props.shakeMapContours} />
       <Pane name="seismic-wave-pane" style={{ zIndex: 390, pointerEvents: "none" }}>

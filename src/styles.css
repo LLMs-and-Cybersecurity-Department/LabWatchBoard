@@ -4594,9 +4594,10 @@ body.seismic-panel-resizing {
   position: absolute;
   top: 0;
   left: 0;
-  z-index: auto;
+  z-index: 335;
   display: block;
   pointer-events: none;
+  transform: none !important;
 }
 
 .seismic-map .leaflet-popup-pane {
