@@ -38,6 +38,7 @@ import {
   Video,
   Volume2,
   Waves,
+  X,
 } from "lucide-react";
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { icon as createLeafletIcon, type Circle as LeafletCircleLayer, type Icon as LeafletIcon } from "leaflet";
@@ -185,6 +186,7 @@ import { usePersistentState } from "./usePersistentState";
 import type { Station } from "./types";
 import { FdsnWaveformPanel } from "./FdsnWaveformPanel";
 import { FocalMechanismDialog } from "./FocalMechanismDialog";
+import { CwaProductsDialog, type CwaIntensityLayer } from "./CwaProductsDialog";
 import { UsgsDyfiDialog } from "./UsgsDyfiDialog";
 import { UsgsPagerDialog } from "./UsgsPagerDialog";
 import { JshisDialog } from "./JshisDialog";
@@ -898,6 +900,22 @@ function isCwaStation(station: SelectableStation): station is GlobalSeismicStati
   return isGlobalStation(station) && station.providerId === "cwa";
 }
 
+function isCwaProductQueryable(event: EarthquakeEvent) {
+  return event.source === "cwa" && !event.sourceEventId.startsWith("catalogue:");
+}
+
+function cwaOfficialIntensityColor(rank: number) {
+  if (rank >= 7) return "#7e22ce";
+  if (rank >= 6.5) return "#991b1b";
+  if (rank >= 6) return "#dc2626";
+  if (rank >= 5.5) return "#f97316";
+  if (rank >= 5) return "#f59e0b";
+  if (rank >= 4) return "#facc15";
+  if (rank >= 3) return "#22c55e";
+  if (rank >= 2) return "#38bdf8";
+  return "#cbd5e1";
+}
+
 const JAPAN_MINI_MAP = { width: 300, height: 330, minLon: 127, maxLon: 149, minLat: 29, maxLat: 46.5 } as const;
 
 function projectJapan(latitude: number, longitude: number) {
@@ -981,7 +999,7 @@ function OfficialHypocenterCard({ record, regions }: { record: EarthquakeEvent; 
   );
 }
 
-function InstitutionReportDetail({ record, onFocus, onMechanism, onShakeMap, onPager, onDyfi, onJshis }: {
+function InstitutionReportDetail({ record, onFocus, onMechanism, onShakeMap, onPager, onDyfi, onJshis, onCwaProducts }: {
   record: EarthquakeEvent;
   onFocus: () => void;
   onMechanism: (record: EarthquakeEvent) => void;
@@ -989,6 +1007,7 @@ function InstitutionReportDetail({ record, onFocus, onMechanism, onShakeMap, onP
   onPager: (record: EarthquakeEvent) => void;
   onDyfi: (record: EarthquakeEvent) => void;
   onJshis: (record: EarthquakeEvent) => void;
+  onCwaProducts: (record: EarthquakeEvent) => void;
 }) {
   const report = record.shakeAlertReport;
   return (
@@ -1013,7 +1032,7 @@ function InstitutionReportDetail({ record, onFocus, onMechanism, onShakeMap, onP
         {report.cities.length > 0 && <div className="seismic-shakealert-cities">{report.cities.slice(0, 4).map((city) => <span key={city.name}><strong>{city.name}</strong><em>{city.mmi === null ? "--" : `MMI ${city.mmi.toFixed(0)}`} · {city.warningSeconds === null ? "--" : `${city.warningSeconds.toFixed(1)} s`}</em></span>)}</div>}
       </section>}
       {record.note && <p className="earthquake-event-note">{record.note}</p>}
-      <div className="seismic-institution-actions"><button onClick={onFocus}><LocateFixed size={14} />定位报告</button>{isMechanismQueryable(record) && <button onClick={() => onMechanism(record)}><CircleGauge size={14} />{record.source === "usgs" ? "USGS 机制解" : "机制解"}</button>}{isJshisPositionSupported(record.latitude, record.longitude) && <button onClick={() => onJshis(record)}><Layers3 size={14} />J-SHIS</button>}{isShakeMapQueryable(record) && <button onClick={() => onShakeMap(record)}><MapIcon size={14} />叠加 ShakeMap</button>}{isPagerQueryable(record) && <button onClick={() => onPager(record)}><BarChart3 size={14} />PAGER 影响</button>}{isDyfiQueryable(record) && <button onClick={() => onDyfi(record)}><MessageCircle size={14} />DYFI</button>}<a href={record.url} target="_blank" rel="noreferrer">机构原文<ExternalLink size={13} /></a>{report?.summaryJsonUrl && <a href={report.summaryJsonUrl} target="_blank" rel="noreferrer">报告 JSON<ExternalLink size={13} /></a>}{report?.summaryPdfUrl && <a href={report.summaryPdfUrl} target="_blank" rel="noreferrer">报告 PDF<ExternalLink size={13} /></a>}</div>
+      <div className="seismic-institution-actions"><button onClick={onFocus}><LocateFixed size={14} />定位报告</button>{isMechanismQueryable(record) && <button onClick={() => onMechanism(record)}><CircleGauge size={14} />{record.source === "usgs" ? "USGS 机制解" : "机制解"}</button>}{isJshisPositionSupported(record.latitude, record.longitude) && <button onClick={() => onJshis(record)}><Layers3 size={14} />J-SHIS</button>}{isCwaProductQueryable(record) && <button onClick={() => onCwaProducts(record)}><Activity size={14} />CWA 官方震度</button>}{isShakeMapQueryable(record) && <button onClick={() => onShakeMap(record)}><MapIcon size={14} />叠加 ShakeMap</button>}{isPagerQueryable(record) && <button onClick={() => onPager(record)}><BarChart3 size={14} />PAGER 影响</button>}{isDyfiQueryable(record) && <button onClick={() => onDyfi(record)}><MessageCircle size={14} />DYFI</button>}<a href={record.url} target="_blank" rel="noreferrer">机构原文<ExternalLink size={13} /></a>{report?.summaryJsonUrl && <a href={report.summaryJsonUrl} target="_blank" rel="noreferrer">报告 JSON<ExternalLink size={13} /></a>}{report?.summaryPdfUrl && <a href={report.summaryPdfUrl} target="_blank" rel="noreferrer">报告 PDF<ExternalLink size={13} /></a>}</div>
     </aside>
   );
 }
@@ -1954,6 +1973,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   verifiedWaveformStationIds: string[];
   palertStations: PalertStation[];
   cencReport: CencIntensityReport | null;
+  cwaOfficialLayer: CwaIntensityLayer | null;
   niedFrame: NiedRealtimeFrame | null;
   kmaValues: number[];
   kmaReplayRanks: Record<string, number> | null;
@@ -2405,6 +2425,17 @@ const SeismicMap = memo(function SeismicMap(props: {
           <Popup><strong>{EARTHQUAKE_SOURCE_LABELS[props.selectedReport.source]} 机构报告</strong><br />{props.selectedReport.place}<br />{formatMagnitudeType(props.selectedReport.magnitudeType)} {props.selectedReport.magnitude.toFixed(1)}<br /><a href={props.selectedReport.url} target="_blank" rel="noreferrer">打开机构原文</a></Popup>
         </Marker>}
       </Pane>
+      <Pane name="seismic-cwa-official-products" style={{ zIndex: 475 }}>
+        {props.cwaOfficialLayer?.points.map((point) => <CircleMarker
+          key={`${props.cwaOfficialLayer?.eventId}:${props.cwaOfficialLayer?.kind}:${point.id}`}
+          center={[point.latitude, point.longitude]}
+          radius={9}
+          pathOptions={{ color: "#f8fafc", fillColor: cwaOfficialIntensityColor(point.rank), weight: 1.6, opacity: 1, fillOpacity: 0.97 }}
+        >
+          <LeafletTooltip permanent direction="center" className="cwa-intensity-map-label">{point.intensity.replace(/級$/, "")}</LeafletTooltip>
+          <Popup><strong>{point.kind === "station" ? "CWA 实测站" : "CWA 乡镇震度"} · {point.intensity}</strong><br />{point.areaName} · {point.name}{point.epicenterDistanceKm === null ? "" : <><br />震中距 {point.epicenterDistanceKm.toFixed(1)} km</>}</Popup>
+        </CircleMarker>)}
+      </Pane>
       <Pane name="seismic-user-location-pane" style={{ zIndex: 455, pointerEvents: "none" }}>
         {props.warningLocation && <CircleMarker
           center={[props.warningLocation.lat, props.warningLocation.lon]}
@@ -2713,6 +2744,8 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [shakeMapReport, setShakeMapReport] = useState<EarthquakeEvent | null>(null);
   const [pagerReport, setPagerReport] = useState<EarthquakeEvent | null>(null);
   const [dyfiEvent, setDyfiEvent] = useState<EarthquakeEvent | null>(null);
+  const [cwaProductEvent, setCwaProductEvent] = useState<EarthquakeEvent | null>(null);
+  const [cwaOfficialLayer, setCwaOfficialLayer] = useState<CwaIntensityLayer | null>(null);
   const [jshisTarget, setJshisTarget] = useState<{ latitude: number; longitude: number; label: string } | null>(null);
   const [jshisLocation, setJshisLocation] = useState<JshisLocationSnapshot | null>(null);
   const [jshisFault, setJshisFault] = useState<JshisFaultShape | null>(null);
@@ -4757,6 +4790,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     chooseInstitutionReport(report);
   };
 
+  const chooseCwaProductReport = (report: EarthquakeEvent) => {
+    setCwaProductEvent(report);
+    chooseInstitutionReport(report);
+  };
+
   const chooseJshisReport = (report: EarthquakeEvent) => {
     setJshisTarget({
       latitude: report.latitude,
@@ -5645,6 +5683,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 verifiedWaveformStationIds={verifiedWaveformStationIds}
                 palertStations={palertSnapshot?.stations ?? []}
                 cencReport={showCenc ? cencReport : null}
+                cwaOfficialLayer={cwaOfficialLayer}
                 niedFrame={mapDetectionStationIds.length ? niedFrame : null}
                 kmaValues={kmaDetection.activeStationIds.length ? kmaValues : EMPTY_NUMBERS}
                 kmaReplayRanks={replayEvent ? visibleKmaReplaySimulation?.ranks ?? EMPTY_RANKS : null}
@@ -5725,6 +5764,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 onSelectStation={focusStation}
                 onViewportChange={updateMapViewport}
               />
+              {cwaOfficialLayer && <button className="seismic-cwa-product-layer-chip" onClick={() => setCwaOfficialLayer(null)} title="移除 CWA 官方震度图层"><Layers3 size={13} /><span>{cwaOfficialLayer.kind === "station" ? "CWA 测站" : "CWA 乡镇"} {cwaOfficialLayer.points.length} 点</span><X size={12} /></button>}
               {sWaveWarningVisible && <section className={`seismic-s-wave-banner ${sWaveArrived ? "arrived" : "counting"}`} role="status" aria-live="assertive">
                 <div className="seismic-s-wave-stripes" aria-hidden="true" />
                 <div className="seismic-s-wave-title">
@@ -6000,13 +6040,13 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                         <b>{formatMagnitudeType(report.magnitudeType)} {report.magnitude.toFixed(1)}</b>
                         <em>{report.status}</em>
                       </button>
-                      <div className="seismic-institution-row-actions">{isMechanismQueryable(report) && <button title="查看已确认存在的官方机制解" aria-label={`查看 ${report.place} 官方机制解`} onClick={() => setMechanismEvent(report)}><CircleGauge size={13} /></button>}{isJshisPositionSupported(report.latitude, report.longitude) && <button title="查看震中 J-SHIS 官方位置产品" aria-label={`查看 ${report.place} J-SHIS`} onClick={() => chooseJshisReport(report)}><Layers3 size={13} /></button>}{isShakeMapQueryable(report) && <button title="在实时地图叠加官方 USGS ShakeMap" aria-label={`叠加 ${report.place} USGS ShakeMap`} onClick={() => chooseShakeMapReport(report)}><MapIcon size={13} /></button>}{isPagerQueryable(report) && <button title="查看 USGS PAGER 三图、全部城市与人口暴露" aria-label={`查看 ${report.place} USGS PAGER`} onClick={() => choosePagerReport(report)}><BarChart3 size={13} /></button>}{isDyfiQueryable(report) && <button title="查看 USGS Did You Feel It? 图片与图表" aria-label={`查看 ${report.place} USGS DYFI`} onClick={() => chooseDyfiReport(report)}><MessageCircle size={13} /></button>}<a href={report.url} target="_blank" rel="noreferrer" aria-label={`打开 ${report.place} 机构原文`}><ExternalLink size={13} /></a></div>
+                      <div className="seismic-institution-row-actions">{isMechanismQueryable(report) && <button title="查看已确认存在的官方机制解" aria-label={`查看 ${report.place} 官方机制解`} onClick={() => setMechanismEvent(report)}><CircleGauge size={13} /></button>}{isJshisPositionSupported(report.latitude, report.longitude) && <button title="查看震中 J-SHIS 官方位置产品" aria-label={`查看 ${report.place} J-SHIS`} onClick={() => chooseJshisReport(report)}><Layers3 size={13} /></button>}{isCwaProductQueryable(report) && <button title="按需读取 CWA 官方震度、测站与强震产品" aria-label={`查看 ${report.place} CWA 官方产品`} onClick={() => chooseCwaProductReport(report)}><Activity size={13} /></button>}{isShakeMapQueryable(report) && <button title="在实时地图叠加官方 USGS ShakeMap" aria-label={`叠加 ${report.place} USGS ShakeMap`} onClick={() => chooseShakeMapReport(report)}><MapIcon size={13} /></button>}{isPagerQueryable(report) && <button title="查看 USGS PAGER 三图、全部城市与人口暴露" aria-label={`查看 ${report.place} USGS PAGER`} onClick={() => choosePagerReport(report)}><BarChart3 size={13} /></button>}{isDyfiQueryable(report) && <button title="查看 USGS Did You Feel It? 图片与图表" aria-label={`查看 ${report.place} USGS DYFI`} onClick={() => chooseDyfiReport(report)}><MessageCircle size={13} /></button>}<a href={report.url} target="_blank" rel="noreferrer" aria-label={`打开 ${report.place} 机构原文`}><ExternalLink size={13} /></a></div>
                     </div>)}
                     {!filteredInstitutionReports.length && <div className="seismic-institution-filter-empty"><Filter size={18} /><span>当前震级与机构组合没有报告</span></div>}
                     {displayedInstitutionReports.length < filteredInstitutionReports.length && <button className="seismic-institution-load-more" onClick={() => setInstitutionReportLimit((current) => Math.min(filteredInstitutionReports.length, current + INSTITUTION_REPORT_PAGE_SIZE))}>加载更多报告（{displayedInstitutionReports.length} / {filteredInstitutionReports.length}）</button>}
                   </div>
                   {selectedInstitutionReport
-                    ? <InstitutionReportDetail record={selectedInstitutionReport} onFocus={() => chooseInstitutionReport(selectedInstitutionReport)} onMechanism={setMechanismEvent} onShakeMap={chooseShakeMapReport} onPager={choosePagerReport} onDyfi={chooseDyfiReport} onJshis={chooseJshisReport} />
+                    ? <InstitutionReportDetail record={selectedInstitutionReport} onFocus={() => chooseInstitutionReport(selectedInstitutionReport)} onMechanism={setMechanismEvent} onShakeMap={chooseShakeMapReport} onPager={choosePagerReport} onDyfi={chooseDyfiReport} onJshis={chooseJshisReport} onCwaProducts={chooseCwaProductReport} />
                     : <div className="seismic-lower-empty seismic-institution-empty"><Database size={26} /><strong>选择一份机构报告</strong><span>可查看来源原值，并在地图中定位震中。</span></div>}
                 </div>
               </> : <div className="seismic-lower-empty"><Loader2 className="spin" size={26} /><strong>正在获取机构报告</strong><span>其他实时台网与预警流不受目录加载影响。</span></div>}
@@ -6027,6 +6067,15 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       {mechanismEvent && <FocalMechanismDialog event={mechanismEvent} onClose={() => setMechanismEvent(null)} />}
       {pagerEvent && <UsgsPagerDialog event={pagerEvent} initialPager={usgsPager} onLoaded={setUsgsPager} onClose={() => setPagerEvent(null)} />}
       {dyfiEvent && <UsgsDyfiDialog event={dyfiEvent} onClose={() => setDyfiEvent(null)} />}
+      {cwaProductEvent && <CwaProductsDialog
+        event={cwaProductEvent}
+        onClose={() => setCwaProductEvent(null)}
+        onShowLayer={(layer) => {
+          setCwaOfficialLayer(layer);
+          setCwaProductEvent(null);
+          commitMapFocus({ id: `cwa-product:${layer.eventId}:${layer.kind}`, latitude: cwaProductEvent.latitude, longitude: cwaProductEvent.longitude, zoom: 7, exact: true });
+        }}
+      />}
       {jshisTarget && <JshisDialog
         latitude={jshisTarget.latitude}
         longitude={jshisTarget.longitude}

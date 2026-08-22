@@ -4677,6 +4677,46 @@ body.seismic-panel-resizing {
   z-index: 2000 !important;
 }
 
+.seismic-cwa-product-layer-chip {
+  position: absolute;
+  z-index: 1600;
+  top: 10px;
+  left: 50%;
+  min-height: 29px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid #f472b6;
+  border-radius: 5px;
+  background: rgba(31, 14, 25, 0.92);
+  color: #fce7f3;
+  font-size: 9px;
+  transform: translateX(-50%);
+  backdrop-filter: blur(6px);
+}
+
+.seismic-map-shell.has-s-wave-warning .seismic-cwa-product-layer-chip {
+  top: 70px;
+}
+
+.seismic-map .leaflet-tooltip.cwa-intensity-map-label {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #071012;
+  box-shadow: none;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 18px;
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.9);
+}
+
+.seismic-map .leaflet-tooltip.cwa-intensity-map-label::before {
+  display: none;
+}
+
 .seismic-map .seismic-user-location-label {
   margin-left: 9px;
   padding: 3px 6px;
