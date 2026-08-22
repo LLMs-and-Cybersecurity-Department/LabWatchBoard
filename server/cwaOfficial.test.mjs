@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   clearCwaOfficialCache,
+  getCwaCatalogueSnapshot,
   getCwaOfficialSnapshot,
   getCwaProductSnapshot,
   getCwaTsunamiSnapshot,
@@ -176,6 +177,48 @@ describe("CWA dedicated official report snapshot", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(4);
     expect(requests.every((request) => request.authorization === "private-token")).toBe(true);
     expect(requests.every((request) => !request.url.includes("private-token"))).toBe(true);
+  });
+
+  it("loads the reviewed annual CWA catalogue through the ETag-capable file API", async () => {
+    const requests = [];
+    const fetchImpl = vi.fn(async (input, options) => {
+      requests.push({ url: String(input), authorization: options.headers.Authorization });
+      return new Response(JSON.stringify({
+        cwaopendata: {
+          Dataset: {
+            DatasetInfo: { IssueTime: "2026-08-17T00:00:00+08:00" },
+            Catalog: {
+              CatalogInfo: {
+                StartTime: "2026-01-01T08:00:00+08:00",
+                EndTime: "2026-08-01T08:00:00+08:00",
+                RecordNumber: "2",
+              },
+              EarthquakeInfo: [
+                { OriginTime: "2026-08-01T08:00:00+08:00", EpicenterLongitude: "121.567", EpicenterLatitude: "23.618", FocalDepth: "51.5", LocalMagnitude: "4.2", StationNumber: "99", PhaseNumber: "371", Quality: "C", ReviewStatus: "F" },
+                { OriginTime: "2026-01-01T08:16:17+08:00", EpicenterLongitude: "119.399", EpicenterLatitude: "22.369", FocalDepth: "62.4", LocalMagnitude: "3.4", StationNumber: "60", PhaseNumber: "108", Quality: "D", ReviewStatus: "F" },
+              ],
+            },
+          },
+        },
+      }), { status: 200, headers: { ETag: '"catalog-v1"' } });
+    });
+    const params = new URLSearchParams({ range: "90d", min_magnitude: "4" });
+    const now = Date.parse("2026-08-23T10:00:00+08:00");
+    const options = { now, fetchImpl, env: { CWA_API_TOKEN: "private-token" } };
+
+    const snapshot = await getCwaCatalogueSnapshot(params, options);
+    const cached = await getCwaCatalogueSnapshot(params, { ...options, now: now + 30 * 60_000 });
+
+    expect(snapshot).toMatchObject({
+      datasetId: "E-A0073-001",
+      cache: "MISS",
+      declaredCount: 2,
+      events: [{ source: "cwa", magnitude: 4.2, magnitudeType: "ML", status: "CWA 年度地震目录 · F" }],
+    });
+    expect(cached.cache).toBe("HIT");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(requests[0].authorization).toBe("private-token");
+    expect(requests[0].url).not.toContain("private-token");
   });
 
   it("keeps only the latest report of each tsunami episode active and never revives a cancelled warning", async () => {

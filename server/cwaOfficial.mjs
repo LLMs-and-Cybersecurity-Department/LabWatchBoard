@@ -3,10 +3,12 @@ import { parseCwaOpenDataPayload } from "./earthquake.mjs";
 const CWA_REST_BASE = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/";
 const CWA_REPORT_DATASETS = ["E-A0015-001", "E-A0016-001"];
 const CWA_TSUNAMI_DATASET = "E-A0014-001";
+const CWA_ANNUAL_CATALOGUE_DATASET = "E-A0073-001";
 const REPORT_CACHE_TTL_MS = Math.max(1_000, Number(process.env.CWA_REPORT_CACHE_TTL_MS ?? 3_000) || 3_000);
 const TSUNAMI_CACHE_TTL_MS = Math.max(5_000, Number(process.env.CWA_TSUNAMI_CACHE_TTL_MS ?? 15_000) || 15_000);
 const REQUEST_TIMEOUT_MS = Math.max(1_000, Number(process.env.CWA_REQUEST_TIMEOUT_MS ?? 12_000) || 12_000);
 const PRODUCT_CACHE_TTL_MS = Math.max(60_000, Number(process.env.CWA_PRODUCT_CACHE_TTL_MS ?? 10 * 60_000) || 10 * 60_000);
+const CATALOGUE_CACHE_TTL_MS = Math.max(10 * 60_000, Number(process.env.CWA_CATALOGUE_CACHE_TTL_MS ?? 60 * 60_000) || 60 * 60_000);
 const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 const CWA_FILE_BASE = "https://opendata.cwa.gov.tw/fileapi/v1/opendataapi/";
 const CWA_PRODUCT_DATASETS = ["E-A0015-003", "E-A0015-004", "E-A0015-005"];
@@ -22,6 +24,7 @@ let reportCache = null;
 let reportRefresh = null;
 let tsunamiCache = null;
 let tsunamiRefresh = null;
+let annualCatalogueCache = null;
 const productCache = new Map();
 const fileDatasetCache = new Map();
 
@@ -241,7 +244,7 @@ export function normalizeCwaProductReport(item, datasetId) {
   };
 }
 
-async function fetchFileDataset(datasetId, token, fetchImpl, now) {
+async function fetchFileDataset(datasetId, token, fetchImpl, now, cacheTtlMs = PRODUCT_CACHE_TTL_MS) {
   const cached = fileDatasetCache.get(datasetId);
   if (cached?.expiresAt > now) return { payload: cached.payload, cache: "HIT" };
   const url = new URL(datasetId, CWA_FILE_BASE);
@@ -260,7 +263,7 @@ async function fetchFileDataset(datasetId, token, fetchImpl, now) {
       },
     });
     if (response.status === 304 && cached) {
-      cached.expiresAt = now + PRODUCT_CACHE_TTL_MS;
+      cached.expiresAt = now + cacheTtlMs;
       return { payload: cached.payload, cache: "REVALIDATED" };
     }
     if (!response.ok) throw new CwaOfficialError(`CWA ${datasetId} 文件 API 返回 HTTP ${response.status}`, response.status);
@@ -268,7 +271,7 @@ async function fetchFileDataset(datasetId, token, fetchImpl, now) {
     fileDatasetCache.set(datasetId, {
       payload,
       etag: response.headers.get("etag"),
-      expiresAt: now + PRODUCT_CACHE_TTL_MS,
+      expiresAt: now + cacheTtlMs,
     });
     return { payload, cache: "MISS" };
   } finally {
@@ -309,6 +312,109 @@ function townIntensitiesFromFilePayload(payload, originTime) {
 
 function productMatchesEvent(resource, eventId) {
   return Boolean(resource?.url && resource.description.includes(eventId));
+}
+
+function normalizeCwaCatalogueEvent(item, issueTime) {
+  const originTimestamp = Date.parse(String(item?.OriginTime ?? ""));
+  const latitude = finiteNumber(item?.EpicenterLatitude);
+  const longitude = finiteNumber(item?.EpicenterLongitude);
+  const magnitude = finiteNumber(item?.LocalMagnitude);
+  if (!Number.isFinite(originTimestamp) || latitude === null || longitude === null || magnitude === null) return null;
+  const originTime = new Date(originTimestamp).toISOString();
+  const sourceEventId = `catalogue:${originTime.replace(/\D/g, "").slice(0, 14)}:${latitude.toFixed(3)}:${longitude.toFixed(3)}`;
+  const depthKm = finiteNumber(item?.FocalDepth);
+  const stationCount = finiteNumber(item?.StationNumber);
+  const phaseCount = finiteNumber(item?.PhaseNumber);
+  const quality = String(item?.Quality ?? "").trim();
+  const reviewStatus = String(item?.ReviewStatus ?? "").trim();
+  return {
+    id: `cwa:${sourceEventId}`,
+    source: "cwa",
+    sourceEventId,
+    time: originTime,
+    updatedAt: issueTime,
+    latitude,
+    longitude,
+    depthKm,
+    magnitude,
+    magnitudeType: "ML",
+    place: `台湾地区 ${latitude.toFixed(3)}, ${longitude.toFixed(3)}`,
+    status: `CWA 年度地震目录${reviewStatus ? ` · ${reviewStatus}` : ""}`,
+    intensity: null,
+    intensityValue: null,
+    intensityScale: null,
+    reportedIntensity: null,
+    felt: null,
+    tsunami: false,
+    alert: null,
+    significance: null,
+    agency: "中央气象署",
+    url: "https://scweb.cwa.gov.tw/zh-tw/earthquake/data/",
+    detailUrl: null,
+    mechanismAvailable: false,
+    shakeMapAvailable: false,
+    pagerAvailable: false,
+    dyfiAvailable: false,
+    note: `年度目录${quality ? ` · 品质 ${quality}` : ""}${stationCount === null ? "" : ` · ${stationCount} 站`}${phaseCount === null ? "" : ` · ${phaseCount} 相位`}`,
+  };
+}
+
+function normalizeCwaAnnualCatalogue(payload) {
+  const dataset = payload?.cwaopendata?.Dataset;
+  const catalog = dataset?.Catalog;
+  const issueTimestamp = Date.parse(String(dataset?.DatasetInfo?.IssueTime ?? ""));
+  const issueTime = Number.isFinite(issueTimestamp) ? new Date(issueTimestamp).toISOString() : null;
+  const events = asArray(catalog?.EarthquakeInfo)
+    .map((item) => normalizeCwaCatalogueEvent(item, issueTime))
+    .filter(Boolean)
+    .sort((left, right) => Date.parse(right.time) - Date.parse(left.time));
+  return {
+    issueTime,
+    startTime: String(catalog?.CatalogInfo?.StartTime ?? "").trim() || null,
+    endTime: String(catalog?.CatalogInfo?.EndTime ?? "").trim() || null,
+    declaredCount: finiteNumber(catalog?.CatalogInfo?.RecordNumber),
+    events,
+  };
+}
+
+async function getAnnualCatalogue(token, options) {
+  const now = options.now ?? Date.now();
+  if (annualCatalogueCache?.expiresAt > now) return { value: annualCatalogueCache, cache: "HIT", stale: false };
+  try {
+    const file = await fetchFileDataset(CWA_ANNUAL_CATALOGUE_DATASET, token, options.fetchImpl ?? fetch, now, CATALOGUE_CACHE_TTL_MS);
+    const normalized = normalizeCwaAnnualCatalogue(file.payload);
+    annualCatalogueCache = { ...normalized, expiresAt: now + CATALOGUE_CACHE_TTL_MS };
+    return { value: annualCatalogueCache, cache: file.cache, stale: false };
+  } catch (error) {
+    if (annualCatalogueCache) return { value: annualCatalogueCache, cache: "STALE", stale: true, error };
+    throw error;
+  }
+}
+
+export async function getCwaCatalogueSnapshot(searchParams, options = {}) {
+  const now = options.now ?? Date.now();
+  const query = parseQuery(searchParams, now);
+  const token = String((options.env ?? process.env)?.CWA_API_TOKEN ?? "").trim();
+  if (!token) throw new CwaOfficialError("服务端尚未配置 CWA_API_TOKEN", 503);
+  const result = await getAnnualCatalogue(token, options);
+  const events = result.value.events.filter((event) => {
+    const eventTime = Date.parse(event.time);
+    return eventTime >= query.startTime && eventTime <= query.endTime && event.magnitude >= query.minimumMagnitude;
+  });
+  return {
+    generatedAt: new Date(now).toISOString(),
+    configured: true,
+    membershipProfile: "advanced",
+    datasetId: CWA_ANNUAL_CATALOGUE_DATASET,
+    cacheTtlMs: CATALOGUE_CACHE_TTL_MS,
+    stale: result.stale,
+    cache: result.cache,
+    issueTime: result.value.issueTime,
+    coverage: { startTime: result.value.startTime, endTime: result.value.endTime },
+    declaredCount: result.value.declaredCount,
+    events,
+    error: result.error instanceof Error ? result.error.message : null,
+  };
 }
 
 export async function getCwaProductSnapshot(searchParams, options = {}) {
@@ -525,6 +631,7 @@ export function clearCwaOfficialCache() {
   reportRefresh = null;
   tsunamiCache = null;
   tsunamiRefresh = null;
+  annualCatalogueCache = null;
   productCache.clear();
   fileDatasetCache.clear();
 }

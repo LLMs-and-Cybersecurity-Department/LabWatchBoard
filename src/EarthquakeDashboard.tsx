@@ -88,6 +88,41 @@ const MIN_MAGNITUDES = [0, 1, 2.5, 4, 5, 6];
 const MAP_EVENT_LIMIT = 1200;
 const TABLE_EVENT_LIMIT = 100;
 
+type CwaCatalogueSnapshot = {
+  stale: boolean;
+  cache: "HIT" | "MISS" | "REVALIDATED" | "STALE";
+  issueTime: string | null;
+  coverage: { startTime: string | null; endTime: string | null };
+  declaredCount: number | null;
+  events: EarthquakeEvent[];
+};
+
+async function fetchCwaCatalogue(range: EarthquakeRange, minMagnitude: number, signal: AbortSignal) {
+  const query = new URLSearchParams({ range, min_magnitude: String(minMagnitude) });
+  const response = await fetch(`/api/cwa-catalogue?${query}`, { signal, headers: { Accept: "application/json" } });
+  const payload = await response.json().catch(() => null) as CwaCatalogueSnapshot | { error?: string; detail?: string } | null;
+  if (!response.ok || !payload || !("events" in payload) || !Array.isArray(payload.events)) {
+    const errorPayload = payload && !("events" in payload) ? payload : null;
+    throw new Error(errorPayload?.detail || errorPayload?.error || `CWA 年度目录返回 ${response.status}`);
+  }
+  return payload;
+}
+
+function mergeCwaCatalogue(snapshot: EarthquakeSnapshot, catalogue: CwaCatalogueSnapshot) {
+  const cwaReports = snapshot.events.filter((event) => event.source === "cwa");
+  const additions = catalogue.events.filter((candidate) => !cwaReports.some((report) => (
+    Math.abs(Date.parse(report.time) - Date.parse(candidate.time)) <= 15_000
+    && Math.abs(report.latitude - candidate.latitude) <= 0.15
+    && Math.abs(report.longitude - candidate.longitude) <= 0.15
+  )));
+  if (!additions.length) return snapshot;
+  return {
+    ...snapshot,
+    events: [...snapshot.events, ...additions].sort((left, right) => Date.parse(right.time) - Date.parse(left.time)),
+    sources: snapshot.sources.map((source) => source.id === "cwa" ? { ...source, count: source.count + additions.length } : source),
+  };
+}
+
 const MAGNITUDE_GUIDE = [
   { code: "Mw", name: "矩震级", detail: "由地震矩计算，适合中强及巨大地震，较少出现饱和。" },
   { code: "mb", name: "体波震级", detail: "主要使用短周期 P 波体波振幅，常见于远震目录。" },
@@ -134,6 +169,10 @@ function intensityLabel(event: EarthquakeEvent) {
   if (event.intensityScale === "JMA") return `JMA 震度 ${event.intensity}`;
   if (event.intensityScale === "CWA") return `CWA 震度 ${event.intensity}`;
   return `MMI ${event.intensity}`;
+}
+
+function isCwaProductQueryable(event: EarthquakeEvent) {
+  return event.source === "cwa" && !event.sourceEventId.startsWith("catalogue:");
 }
 
 function cwaIntensityColor(rank: number) {
@@ -388,6 +427,8 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
   const [storedRefreshIntervalSeconds, setRefreshIntervalSeconds] = usePersistentState("earthquake-refresh-interval-seconds", 60);
   const [search, setSearch] = useState("");
   const [snapshot, setSnapshot] = useState<EarthquakeSnapshot | null>(null);
+  const [cwaCatalogue, setCwaCatalogue] = useState<CwaCatalogueSnapshot | null>(null);
+  const [cwaCatalogueError, setCwaCatalogueError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -425,8 +466,21 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
     abortRef.current = controller;
     setLoading(true);
     setError("");
+    setCwaCatalogueError("");
     try {
-      const next = await fetchEarthquakeSnapshot({ range, minMagnitude, force, signal: controller.signal });
+      const [baseSnapshot, catalogueResult] = await Promise.all([
+        fetchEarthquakeSnapshot({ range, minMagnitude, force, signal: controller.signal }),
+        range === "30d" || range === "90d"
+          ? fetchCwaCatalogue(range, minMagnitude, controller.signal).catch((catalogueError) => {
+              if (!(catalogueError instanceof DOMException && catalogueError.name === "AbortError")) {
+                setCwaCatalogueError(catalogueError instanceof Error ? catalogueError.message : String(catalogueError));
+              }
+              return null;
+            })
+          : Promise.resolve(null),
+      ]);
+      const next = catalogueResult ? mergeCwaCatalogue(baseSnapshot, catalogueResult) : baseSnapshot;
+      setCwaCatalogue(catalogueResult);
       const queryKey = `${range}:${minMagnitude}`;
       if (previousQueryRef.current !== queryKey) {
         previousQueryRef.current = queryKey;
@@ -655,6 +709,8 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
 
         {error && <div className="error-banner">地震速报更新失败：{error}。{snapshot ? "继续显示上次成功数据。" : ""}</div>}
         {snapshot?.partial && <div className="earthquake-partial-banner"><AlertTriangle size={15} />部分机构暂不可用；有成功快照的机构继续显示缓存报告，其余地图和报表保持更新。</div>}
+        {cwaCatalogue && <div className="earthquake-cwa-catalogue-banner"><Database size={14} /><span><strong>CWA 年度地震目录 E-A0073</strong>本筛选读取 {cwaCatalogue.events.length} 条审核目录；官方文件覆盖至 {cwaCatalogue.coverage.endTime ? formatEarthquakeTime(cwaCatalogue.coverage.endTime, timeZone) : "未注明"}，每小时最多重验证一次{cwaCatalogue.stale ? " · 当前显示缓存" : ""}。</span></div>}
+        {cwaCatalogueError && <div className="earthquake-cwa-catalogue-banner warn"><AlertTriangle size={14} /><span><strong>CWA 年度目录暂不可用</strong>{cwaCatalogueError}；显著与小区域有感报告仍继续显示。</span></div>}
 
         <section className="earthquake-primary-grid">
           <div className="earthquake-map-panel">
@@ -718,7 +774,7 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
                   {isMechanismQueryable(selectedEvent) && <button onClick={() => setMechanismEvent(selectedEvent)}><CircleGauge size={15} />{selectedEvent.source === "emsc" ? "查询 EMSC 机制解" : "官方机制解"}</button>}
                   {isJshisPositionSupported(selectedEvent.latitude, selectedEvent.longitude) && <button onClick={() => setJshisEvent(selectedEvent)}><Layers3 size={15} />J-SHIS 位置产品</button>}
                   {selectedEvent.source === "cenc" && <button onClick={() => openCencProducts(selectedEvent)}><Layers3 size={15} />CENC 官方专题</button>}
-                  {selectedEvent.source === "cwa" && <button onClick={() => setCwaEvent(selectedEvent)}><Activity size={15} />CWA 官方震度</button>}
+                  {isCwaProductQueryable(selectedEvent) && <button onClick={() => setCwaEvent(selectedEvent)}><Activity size={15} />CWA 官方震度</button>}
                   {isShakeMapQueryable(selectedEvent) && <button onClick={() => setShakeMapEvent(selectedEvent)}><MapIcon size={15} />USGS ShakeMap</button>}
                   {isPagerQueryable(selectedEvent) && <button onClick={() => setPagerEvent(selectedEvent)}><BarChart3 size={15} />USGS PAGER</button>}
                   {isDyfiQueryable(selectedEvent) && <button onClick={() => setDyfiEvent(selectedEvent)}><MessageCircle size={15} />Did You Feel It?</button>}
@@ -798,7 +854,7 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
                     <td><span className="depth-readout"><i style={{ background: depthColor(event.depthKm) }} />{event.depthKm?.toFixed(0) ?? "--"} km</span></td>
                     <td>{intensityLabel(event)}</td>
                     <td>{event.status}</td>
-                    <td><div className="earthquake-product-actions">{event.shakeAlertReport && <button title="查看 ShakeAlert 性能报告" aria-label={`查看 ${event.place} ShakeAlert 性能报告`} onClick={() => chooseEvent(event)}><Radio size={14} /></button>}{isNiedQueryable(event) && <button title="查看 NIED F-net / Hi-net 一键详情" aria-label={`查看 ${event.place} NIED 一键详情`} onClick={() => setNiedEvent(event)}><Activity size={14} /></button>}{isMechanismQueryable(event) && <button title={event.source === "emsc" ? "查询 EMSC 收录的机制解" : "查看官方机制解"} aria-label={`查看 ${event.place} 官方机制解`} onClick={() => setMechanismEvent(event)}><CircleGauge size={14} /></button>}{isJshisPositionSupported(event.latitude, event.longitude) && <button title="查看 J-SHIS 官方位置产品" aria-label={`查看 ${event.place} J-SHIS`} onClick={() => setJshisEvent(event)}><Layers3 size={14} /></button>}{event.source === "cenc" && <button title="查看 CENC 官方专题产品" aria-label={`查看 ${event.place} CENC 官方专题`} onClick={() => openCencProducts(event)}><Layers3 size={14} /></button>}{event.source === "cwa" && <button title="查看 CWA 官方震度、测站与强震产品" aria-label={`查看 ${event.place} CWA 官方产品`} onClick={() => setCwaEvent(event)}><Activity size={14} /></button>}{isShakeMapQueryable(event) && <button title="查看已确认存在的 USGS ShakeMap" aria-label={`查看 ${event.place} USGS ShakeMap`} onClick={() => setShakeMapEvent(event)}><MapIcon size={14} /></button>}{isPagerQueryable(event) && <button title="查看已确认存在的 USGS PAGER 人口与损失估算" aria-label={`查看 ${event.place} USGS PAGER`} onClick={() => setPagerEvent(event)}><BarChart3 size={14} /></button>}{isDyfiQueryable(event) && <button title="查看已确认存在的 USGS Did You Feel It? 图片与图表" aria-label={`查看 ${event.place} USGS DYFI`} onClick={() => setDyfiEvent(event)}><MessageCircle size={14} /></button>}<a href={event.url} target="_blank" rel="noreferrer" aria-label={`打开 ${event.place} 官方记录`}><ExternalLink size={14} /></a></div></td>
+                    <td><div className="earthquake-product-actions">{event.shakeAlertReport && <button title="查看 ShakeAlert 性能报告" aria-label={`查看 ${event.place} ShakeAlert 性能报告`} onClick={() => chooseEvent(event)}><Radio size={14} /></button>}{isNiedQueryable(event) && <button title="查看 NIED F-net / Hi-net 一键详情" aria-label={`查看 ${event.place} NIED 一键详情`} onClick={() => setNiedEvent(event)}><Activity size={14} /></button>}{isMechanismQueryable(event) && <button title={event.source === "emsc" ? "查询 EMSC 收录的机制解" : "查看官方机制解"} aria-label={`查看 ${event.place} 官方机制解`} onClick={() => setMechanismEvent(event)}><CircleGauge size={14} /></button>}{isJshisPositionSupported(event.latitude, event.longitude) && <button title="查看 J-SHIS 官方位置产品" aria-label={`查看 ${event.place} J-SHIS`} onClick={() => setJshisEvent(event)}><Layers3 size={14} /></button>}{event.source === "cenc" && <button title="查看 CENC 官方专题产品" aria-label={`查看 ${event.place} CENC 官方专题`} onClick={() => openCencProducts(event)}><Layers3 size={14} /></button>}{isCwaProductQueryable(event) && <button title="查看 CWA 官方震度、测站与强震产品" aria-label={`查看 ${event.place} CWA 官方产品`} onClick={() => setCwaEvent(event)}><Activity size={14} /></button>}{isShakeMapQueryable(event) && <button title="查看已确认存在的 USGS ShakeMap" aria-label={`查看 ${event.place} USGS ShakeMap`} onClick={() => setShakeMapEvent(event)}><MapIcon size={14} /></button>}{isPagerQueryable(event) && <button title="查看已确认存在的 USGS PAGER 人口与损失估算" aria-label={`查看 ${event.place} USGS PAGER`} onClick={() => setPagerEvent(event)}><BarChart3 size={14} /></button>}{isDyfiQueryable(event) && <button title="查看已确认存在的 USGS Did You Feel It? 图片与图表" aria-label={`查看 ${event.place} USGS DYFI`} onClick={() => setDyfiEvent(event)}><MessageCircle size={14} /></button>}<a href={event.url} target="_blank" rel="noreferrer" aria-label={`打开 ${event.place} 官方记录`}><ExternalLink size={14} /></a></div></td>
                   </tr>
                 ))}
               </tbody>

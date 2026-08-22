@@ -8520,6 +8520,26 @@ body.seismic-monitor-moving * {
   font-size: 11px;
 }
 
+.earthquake-cwa-catalogue-banner {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid rgba(244, 114, 182, 0.34);
+  border-radius: 6px;
+  background: rgba(80, 24, 58, 0.2);
+  color: #dce7e4;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.earthquake-cwa-catalogue-banner svg { flex: 0 0 auto; color: #f472b6; }
+.earthquake-cwa-catalogue-banner strong { margin-right: 6px; color: #fbcfe8; }
+.earthquake-cwa-catalogue-banner.warn { border-color: rgba(245, 158, 11, 0.42); background: rgba(120, 53, 15, 0.2); color: #fde68a; }
+.earthquake-cwa-catalogue-banner.warn svg,
+.earthquake-cwa-catalogue-banner.warn strong { color: #fbbf24; }
+
 .earthquake-primary-grid {
   min-width: 0;
   display: grid;
