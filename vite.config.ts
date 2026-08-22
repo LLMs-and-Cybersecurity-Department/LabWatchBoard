@@ -39,6 +39,10 @@ function cleanBuildOutput(): Plugin {
     apply: "build",
     enforce: "pre",
     async buildStart() {
+      // The production server can keep serving dist while a local verification
+      // build is running. Preserve the previous hashed assets in that mode so
+      // already-open dashboards never observe a half-written bundle.
+      if (process.env.ECMWF_PBOARD_LIVE_BUILD === "1") return;
       await rm(path.resolve("dist"), {
         recursive: true,
         force: true,

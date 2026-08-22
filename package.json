@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
+    "build:live": "node scripts/build-live.mjs",
     "build:desktop-runtime": "node scripts/build-desktop-runtime.mjs",
     "start": "node --env-file-if-exists=.env.local server.mjs",
     "preview": "vite preview --host 127.0.0.1",
