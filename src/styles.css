@@ -3753,6 +3753,65 @@ button,
   line-height: 1.45;
 }
 
+.cwa-tsunami-status {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 7px;
+  padding: 7px;
+  border: 1px solid #38464a;
+  border-left: 3px solid #22c55e;
+  border-radius: 5px;
+  background: #0d1517;
+}
+
+.cwa-tsunami-status.advisory { border-left-color: #facc15; }
+.cwa-tsunami-status.information { border-left-color: #38bdf8; }
+.cwa-tsunami-status.warning {
+  border-left-color: #ef4444;
+  background: linear-gradient(90deg, rgba(127, 29, 29, 0.22), #0d1517 58%);
+}
+
+.cwa-tsunami-status > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.cwa-tsunami-status > header span {
+  color: #f9a8d4;
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.cwa-tsunami-status > header strong {
+  overflow: hidden;
+  color: #e9f1ef;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cwa-tsunami-status > header em {
+  color: #b8c5c2;
+  font-size: 7px;
+  font-style: normal;
+}
+
+.cwa-tsunami-status > p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: #aab8b5;
+  font-size: 8px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.cwa-tsunami-status > small { color: #7f918d; font-size: 7px; }
+.cwa-tsunami-status > a { display: inline-flex; align-items: center; gap: 4px; color: #7dd3fc; font-size: 8px; }
+
 .jma-tsunami-legend {
   display: grid;
   gap: 4px;

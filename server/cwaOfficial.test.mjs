@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { clearCwaOfficialCache, getCwaOfficialSnapshot, getCwaProductSnapshot } from "./cwaOfficial.mjs";
+import {
+  clearCwaOfficialCache,
+  getCwaOfficialSnapshot,
+  getCwaProductSnapshot,
+  getCwaTsunamiSnapshot,
+  normalizeCwaTsunamiReport,
+} from "./cwaOfficial.mjs";
 
 function report(originTime, webId, magnitude = 4.2) {
   return {
@@ -170,5 +176,68 @@ describe("CWA dedicated official report snapshot", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(4);
     expect(requests.every((request) => request.authorization === "private-token")).toBe(true);
     expect(requests.every((request) => !request.url.includes("private-token"))).toBe(true);
+  });
+
+  it("keeps only the latest report of each tsunami episode active and never revives a cancelled warning", async () => {
+    const now = Date.parse("2026-08-23T10:00:00+08:00");
+    const tsunamiReport = (overrides = {}) => ({
+      TsunamiNo: 115005,
+      ReportNo: "第1報",
+      ReportType: "海嘯消息",
+      ReportColor: "紅色",
+      ReportContent: "太平洋海嘯警報中心發布海嘯威脅資訊。",
+      IssueTime: "2026-08-23T09:00:00+08:00",
+      ValidTime: { EndTime: "2026-08-23T12:00:00+08:00" },
+      Web: "https://scweb.cwa.gov.tw/tsunami/11500501.html",
+      EarthquakeInfo: {
+        OriginTime: "2026-08-23T08:55:00+08:00",
+        Source: "太平洋海嘯警報中心",
+        FocalDepth: 10,
+        Epicenter: { Location: "日本九州", EpicenterLatitude: 32.6, EpicenterLongitude: 130.7 },
+        EarthquakeMagnitude: { MagnitudeValue: 7.1 },
+      },
+      ...overrides,
+    });
+    const cancelled = tsunamiReport({
+      ReportNo: "第2報",
+      ReportColor: "綠色",
+      ReportContent: "確認解除太平洋地區的海嘯威脅。",
+      IssueTime: "2026-08-23T09:30:00+08:00",
+    });
+    const active = tsunamiReport({
+      TsunamiNo: 115006,
+      ReportNo: "第1報",
+      IssueTime: "2026-08-23T09:45:00+08:00",
+      Web: "https://scweb.cwa.gov.tw/tsunami/11500601.html",
+    });
+    const fetchImpl = vi.fn(async (_input, options) => {
+      expect(options.headers.Authorization).toBe("server-only-token");
+      return new Response(JSON.stringify({ success: "true", records: { Tsunami: [cancelled, active, tsunamiReport()] } }), { status: 200 });
+    });
+
+    const snapshot = await getCwaTsunamiSnapshot({ now, fetchImpl, env: { CWA_API_TOKEN: "server-only-token" } });
+    const cached = await getCwaTsunamiSnapshot({ now: now + 1_000, fetchImpl, env: { CWA_API_TOKEN: "server-only-token" } });
+
+    expect(snapshot.activeReport).toMatchObject({ tsunamiNo: "115006", active: true, severity: "warning" });
+    expect(snapshot.latestReport).toMatchObject({ tsunamiNo: "115006", reportNo: "第1報" });
+    expect(snapshot.reports.find((item) => item.reportNo === "第2報")).toMatchObject({ active: false, cancelled: true, severity: "clear" });
+    expect(cached.cache).toBe("HIT");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires an explicit unexpired threat before a CWA tsunami message becomes active", () => {
+    const now = Date.parse("2026-08-23T10:00:00+08:00");
+    const base = {
+      TsunamiNo: 115007,
+      ReportNo: "第1報",
+      ReportType: "海嘯消息",
+      ReportColor: "紅色",
+      IssueTime: "2026-08-23T09:50:00+08:00",
+      ValidTime: { EndTime: "2026-08-23T11:00:00+08:00" },
+      ReportContent: "本署發布海嘯警報，沿海地區應提高警覺。",
+    };
+    expect(normalizeCwaTsunamiReport(base, now)).toMatchObject({ active: true, severity: "warning" });
+    expect(normalizeCwaTsunamiReport({ ...base, ReportContent: "研判不致造成海嘯威脅。" }, now)).toMatchObject({ active: false, severity: "clear" });
+    expect(normalizeCwaTsunamiReport({ ...base, ValidTime: { EndTime: "2026-08-23T09:59:59+08:00" } }, now)).toMatchObject({ active: false, severity: "clear" });
   });
 });

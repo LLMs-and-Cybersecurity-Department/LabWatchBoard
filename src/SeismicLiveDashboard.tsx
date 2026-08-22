@@ -323,6 +323,37 @@ type CwaOfficialSnapshot = {
   events: EarthquakeEvent[];
 };
 
+type CwaTsunamiReport = {
+  id: string;
+  tsunamiNo: string;
+  reportNo: string;
+  reportType: string;
+  reportColor: string;
+  reportContent: string;
+  issuedAt: string;
+  validUntil: string | null;
+  officialUrl: string | null;
+  active: boolean;
+  cancelled: boolean;
+  severity: "clear" | "information" | "advisory" | "warning";
+  earthquake: {
+    originTime: string;
+    source: string;
+    location: string;
+    latitude: number | null;
+    longitude: number | null;
+    depthKm: number | null;
+    magnitude: number | null;
+  } | null;
+};
+
+type CwaTsunamiSnapshot = {
+  stale: boolean;
+  activeReport: CwaTsunamiReport | null;
+  latestReport: CwaTsunamiReport | null;
+  reports: CwaTsunamiReport[];
+};
+
 async function fetchCwaOfficialSnapshot(options: { minMagnitude: number; signal?: AbortSignal }) {
   const query = new URLSearchParams({ range: "24h", min_magnitude: String(options.minMagnitude) });
   const response = await fetch(`/api/cwa-earthquakes?${query}`, {
@@ -333,6 +364,16 @@ async function fetchCwaOfficialSnapshot(options: { minMagnitude: number; signal?
   if (!response.ok || !payload || !("events" in payload) || !Array.isArray(payload.events)) {
     const errorPayload = payload && !("events" in payload) ? payload : null;
     throw new Error(errorPayload?.detail || errorPayload?.error || `CWA 官方报告接口返回 ${response.status}`);
+  }
+  return payload;
+}
+
+async function fetchCwaTsunamiSnapshot(signal?: AbortSignal) {
+  const response = await fetch("/api/cwa-tsunami", { signal, headers: { Accept: "application/json" } });
+  const payload = await response.json().catch(() => null) as CwaTsunamiSnapshot | { error?: string; detail?: string } | null;
+  if (!response.ok || !payload || !("reports" in payload) || !Array.isArray(payload.reports)) {
+    const errorPayload = payload && !("reports" in payload) ? payload : null;
+    throw new Error(errorPayload?.detail || errorPayload?.error || `CWA 海啸资讯接口返回 ${response.status}`);
   }
   return payload;
 }
@@ -2661,6 +2702,10 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [officialLatency, setOfficialLatency] = useState<number | null>(null);
   const [cwaOfficialState, setCwaOfficialState] = useState<SourceState>("connecting");
   const [cwaOfficialLatency, setCwaOfficialLatency] = useState<number | null>(null);
+  const [cwaTsunami, setCwaTsunami] = useState<CwaTsunamiSnapshot | null>(null);
+  const [cwaTsunamiState, setCwaTsunamiState] = useState<SourceState>("connecting");
+  const [cwaTsunamiLatency, setCwaTsunamiLatency] = useState<number | null>(null);
+  const [cwaTsunamiError, setCwaTsunamiError] = useState("");
   const [institutionSourceCount, setInstitutionSourceCount] = useState(0);
   const [selectedInstitutionReportId, setSelectedInstitutionReportId] = useState<string | null>(null);
   const [mechanismEvent, setMechanismEvent] = useState<EarthquakeEvent | null>(null);
@@ -2718,6 +2763,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     snapshot: { level: number; cancelled: boolean } | null;
   } | null>(null);
   const previousLiveTsunamiSoundState = useRef<{ reportKey: string; level: number; cancelled: boolean } | null>(null);
+  const previousCwaTsunamiSoundReport = useRef<string | null>(null);
   const liveEewSoundReports = useRef(new Map<string, LiveEew>());
   const liveEewSoundCues = useRef(new Set<string>());
   const customSoundUrlsRef = useRef(new Map<SeismicSoundAssetId, string>());
@@ -3189,6 +3235,40 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       controller?.abort();
     };
   }, [receiveMagnitudeThreshold]);
+
+  useEffect(() => {
+    let active = true;
+    let timer = 0;
+    let controller: AbortController | null = null;
+    const poll = async () => {
+      controller?.abort();
+      controller = new AbortController();
+      const started = Date.now();
+      let nextDelay = 30_000;
+      try {
+        const snapshot = await fetchCwaTsunamiSnapshot(controller.signal);
+        if (!active) return;
+        setCwaTsunami(snapshot);
+        setCwaTsunamiState(snapshot.stale ? "stale" : "online");
+        setCwaTsunamiLatency(Date.now() - started);
+        setCwaTsunamiError(snapshot.stale ? "正在显示最后一次成功的 CWA 海啸资讯" : "");
+      } catch (error) {
+        if (!active || (error instanceof DOMException && error.name === "AbortError")) return;
+        setCwaTsunamiState("error");
+        setCwaTsunamiLatency(null);
+        setCwaTsunamiError(error instanceof Error ? error.message : String(error));
+        nextDelay = 60_000;
+      } finally {
+        if (active) timer = window.setTimeout(poll, nextDelay);
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      controller?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -4415,6 +4495,18 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     if (fresh) void playJmaTsunamiCue(jmaTsunami, previous);
   }, [jmaTsunami, jmaTsunamiSoundEnabled, playJmaTsunamiCue, replayEvent]);
 
+  useEffect(() => {
+    const report = cwaTsunami?.latestReport;
+    if (!report || replayEvent) return;
+    const reportKey = `${report.id}:${report.issuedAt}`;
+    const previous = previousCwaTsunamiSoundReport.current;
+    previousCwaTsunamiSoundReport.current = reportKey;
+    if (previous === reportKey || !jmaTsunamiSoundEnabled || !report.active || !/紅|红/.test(report.reportColor)) return;
+    const issuedAt = Date.parse(report.issuedAt);
+    const fresh = previous !== null || (Number.isFinite(issuedAt) && Date.now() - issuedAt <= 5 * 60_000);
+    if (fresh) void playSoundAsset("srev-tsunami-warning", setJmaTsunamiSoundStatus);
+  }, [cwaTsunami, jmaTsunamiSoundEnabled, playSoundAsset, replayEvent]);
+
   const focusStation = useCallback((station: SelectableStation, reason: StationSelectionReason = "manual") => {
     setSelectedStationId(station.id);
     setSelectedGlobalStation(isGlobalStation(station) ? station : null);
@@ -4940,6 +5032,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const jmaRealtimeIntensity = activeEews.find((event) => event.source === "JMA" && event.observedIntensity && !event.cancelled) ?? null;
   const cwaRealtimeWarning = activeEews.find((event) => event.source === "CWA" && event.relay !== "Catalogue" && event.warning && !event.cancelled) ?? null;
   const latestCwaOfficialReport = institutionReports.find((event) => event.source === "cwa") ?? null;
+  const displayedCwaTsunami = cwaTsunami?.activeReport ?? cwaTsunami?.latestReport ?? null;
   const oceanHistorySelected = displayedOceanMode === "measured" && Boolean(snetMeasuredFrame) && !selectedSnetEvent?.active;
   const oceanResponseActive = displayedOceanMode === "measured"
     ? Boolean(selectedSnetEvent?.active && activeOceanCount)
@@ -5230,6 +5323,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               <SourceIndicator label={`CENC 烈度多源后端${cencOfficialEgressMode === "http-proxy" ? " · NSTI 7893" : cencOfficialEgressMode === "config-error" ? " · 代理配置错误" : ""}`} state={cencState} latency={cencLatency} />
               <SourceIndicator label="MSIL S-net 实测历史" state={snetState} latency={snetSnapshot?.latencyMs ?? null} />
               <SourceIndicator label="CWA 进阶会员官方报告 · 3 秒缓存" state={cwaOfficialState} latency={cwaOfficialLatency} />
+              <SourceIndicator label="CWA 海啸资讯 E-A0014 · 30 秒" state={cwaTsunamiState} latency={cwaTsunamiLatency} />
               <SourceIndicator label={`全球机构报告 ${institutionSourceCount}/${INSTITUTION_SOURCE_TOTAL}`} state={officialState} latency={officialLatency} />
               <SourceIndicator
                 label={`全球 FDSN 目录 ${globalStationSnapshot?.returnedCount ?? 0}`}
@@ -5295,7 +5389,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
             {(globalStationError || waveformStationError || cwaStationError) && <p className="seismic-source-error">{[globalStationError, waveformStationError, cwaStationError].filter(Boolean).join("；")}</p>}
           </section>
           <section className="control-section seismic-tsunami-control">
-            <div className="section-title"><span><Waves /></span><strong>JMA 海啸预报</strong></div>
+            <div className="section-title"><span><Waves /></span><strong>海啸资讯</strong></div>
             <div className={`jma-tsunami-status ${displayedJmaTsunami?.state ?? (replayEvent ? "clear" : jmaTsunamiState)}`}>
               <header><AlertTriangle size={15} /><strong>{displayedJmaTsunami?.title ?? (replayEvent ? replayTsunamiEpisode ? "等待回放中的首份海啸预报" : "当前事件没有匹配的海啸历史" : "正在读取气象厅海啸预报")}</strong><em>{displayedJmaTsunami?.active ? `${displayedJmaTsunami.areas.length} 区` : replayEvent ? "REPLAY" : jmaTsunamiState === "online" ? "监视中" : "连接中"}</em></header>
               <p>{displayedJmaTsunami?.issuedAt ? `${replayEvent ? "回放报文" : "气象厅最近发布"}：${formatTime(displayedJmaTsunami.issuedAt)}` : replayEvent ? `历史报文 ${replayTsunamiEpisode?.reports.length ?? 0} 份` : "尚未取得发布时间"}{displayedJmaTsunami?.stale ? " · 当前显示缓存并重连" : ""}</p>
@@ -5305,11 +5399,21 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 <span><i className="advisory" />海啸注意报</span>
               </div>
             </div>
+            <div className={`cwa-tsunami-status ${displayedCwaTsunami?.active ? displayedCwaTsunami.severity : "clear"}`}>
+              <header>
+                <span>CWA E-A0014</span>
+                <strong>{displayedCwaTsunami?.active ? displayedCwaTsunami.reportType : "当前无有效海啸威胁"}</strong>
+                <em>{displayedCwaTsunami?.reportNo || (cwaTsunamiState === "online" ? "监视中" : "连接中")}</em>
+              </header>
+              <p>{displayedCwaTsunami?.reportContent || "正在读取中央气象署官方海啸消息"}</p>
+              {displayedCwaTsunami && <small>{displayedCwaTsunami.earthquake?.location || "海啸资讯"} · {formatTime(displayedCwaTsunami.issuedAt)}{cwaTsunami?.stale ? " · 缓存" : ""}</small>}
+              {displayedCwaTsunami?.officialUrl && <a href={displayedCwaTsunami.officialUrl} target="_blank" rel="noreferrer">打开 CWA 官方报文<ExternalLink size={11} /></a>}
+            </div>
             <label className="toggle-row"><input type="checkbox" checked={showJmaTsunami} onChange={(event) => setShowJmaTsunami(event.target.checked)} />JMA 海啸预报区 <em>{tsunamiRegions?.features.length ?? "--"}</em></label>
             <label className="toggle-row"><input type="checkbox" checked={jmaTsunamiSoundEnabled} onChange={(event) => setJmaTsunamiSoundEnabled(event.target.checked)} />海啸预报 / 解除回放音效 <em>{jmaTsunamiSoundEnabled ? "启用" : "关闭"}</em></label>
             <output className={jmaTsunamiSoundStatus.includes("阻止") ? "error" : ""}>{jmaTsunamiSoundEnabled ? jmaTsunamiSoundStatus : "海啸回放音效已关闭"}</output>
             <a className="seismic-tsunami-source-link" href={jmaTsunami?.sourceUrl ?? "https://www.data.jma.go.jp/multi/tsunami/index.html?lang=jp"} target="_blank" rel="noreferrer">打开气象厅官方海啸信息<ExternalLink size={12} /></a>
-            {(jmaTsunamiError || jmaTsunamiHistoryError) && <p className="seismic-source-error">{[jmaTsunamiError, jmaTsunamiHistoryError && `历史：${jmaTsunamiHistoryError}`].filter(Boolean).join("；")}</p>}
+            {(jmaTsunamiError || jmaTsunamiHistoryError || cwaTsunamiError) && <p className="seismic-source-error">{[jmaTsunamiError, jmaTsunamiHistoryError && `JMA 历史：${jmaTsunamiHistoryError}`, cwaTsunamiError && `CWA：${cwaTsunamiError}`].filter(Boolean).join("；")}</p>}
           </section>
           <section className="control-section">
             <div className="section-title"><span><Layers3 /></span><strong>测站图层</strong></div>
@@ -5459,7 +5563,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
           </section>
           <section className="control-section seismic-legal-note">
             <div className="section-title"><span><AlertTriangle /></span><strong>数据级别</strong></div>
-            <p>NIED 帧经 Yahoo 公开边缘端点读取；S-net 实测历史来自 MSIL 观测瓦片色值反算。JMA 海啸状态由 P2P 地震信息转发的气象厅 code 552 报文驱动，海岸预报线来自 JMA 官方 GIS；CWA API 金钥只在本机服务端读取官方 E-A0015 / E-A0016 地震报告，这些是震后报告，不冒充秒级 EEW。CWA 实时预警若出现则来自已标明 relay 的区域转发源。全球台站来自 FDSN Station，CWASN 位置来自 CWA GDMS，P-Alert 仅实时读取中研院官方站点目录并遵守其资料使用说明。WNI 摄像头图层读取 Weathernews 官方公开目录，缩略图和详情均直接指向官方站点。全球断裂带来自 GEM GAF-DB（CC BY-SA 4.0），是地质背景参考，不代表实时风险。所有本地推算和传播回放均不作为官方预警。</p>
+            <p>NIED 帧经 Yahoo 公开边缘端点读取；S-net 实测历史来自 MSIL 观测瓦片色值反算。JMA 海啸状态由 P2P 地震信息转发的气象厅 code 552 报文驱动，海岸预报线来自 JMA 官方 GIS；CWA API 金钥只在本机服务端读取官方 E-A0014 海啸资讯与 E-A0015 / E-A0016 震后地震报告，不冒充秒级 EEW。CWA 实时预警若出现则来自已标明 relay 的区域转发源。全球台站来自 FDSN Station，CWASN 位置来自 CWA GDMS，P-Alert 仅实时读取中研院官方站点目录并遵守其资料使用说明。WNI 摄像头图层读取 Weathernews 官方公开目录，缩略图和详情均直接指向官方站点。全球断裂带来自 GEM GAF-DB（CC BY-SA 4.0），是地质背景参考，不代表实时风险。所有本地推算和传播回放均不作为官方预警。</p>
           </section>
         </div>
       </aside>
@@ -5475,7 +5579,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
             <div className={`earthquake-status-pill ${officialState === "online" ? "ok" : "warn"}`}><span>机构报告</span><strong>{institutionReports.length} 条</strong></div>
             <div className={`earthquake-status-pill ${activeGlobalCount || activeCwaCount ? "danger" : ""}`}><span>全球 / CWA 响应</span><strong>{activeGlobalCount} / {activeCwaCount} 站</strong></div>
             <div className={`earthquake-status-pill ${oceanResponseActive ? "danger" : ""}`}><span>{oceanHistorySelected ? "S-net 历史回看" : "海底台网响应"}</span><strong>{activeOceanCount ? oceanHistorySelected ? `历史 ${activeOceanCount} 站` : `${activeOceanCount} 站` : "待机"}</strong></div>
-            <div className={`earthquake-status-pill ${displayedJmaTsunami?.active ? "danger" : replayEvent || jmaTsunamiState === "online" ? "ok" : "warn"}`}><span>JMA 海啸</span><strong>{displayedJmaTsunami?.active ? displayedJmaTsunami.title : replayEvent ? displayedJmaTsunami?.cancelled ? "回放已解除" : "回放等待报文" : jmaTsunamiState === "online" ? "无警报" : "连接中"}</strong></div>
+            <div className={`earthquake-status-pill ${displayedJmaTsunami?.active || cwaTsunami?.activeReport ? "danger" : replayEvent || (jmaTsunamiState === "online" && cwaTsunamiState === "online") ? "ok" : "warn"}`}><span>海啸</span><strong>{displayedJmaTsunami?.active ? displayedJmaTsunami.title : cwaTsunami?.activeReport ? `CWA ${cwaTsunami.activeReport.reportType}` : replayEvent ? displayedJmaTsunami?.cancelled ? "回放已解除" : "回放等待报文" : jmaTsunamiState === "online" && cwaTsunamiState === "online" ? "无有效警报" : "连接中"}</strong></div>
             <div className="earthquake-status-pill"><span>本地时间</span><strong>{formatTime(clock)}</strong></div>
             </div>
             <button className="seismic-settings-button" aria-label="打开实时地震设置" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((value) => !value)}><Settings size={16} /><span>设置</span></button>

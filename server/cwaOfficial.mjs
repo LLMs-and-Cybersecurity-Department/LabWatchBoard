@@ -2,7 +2,9 @@ import { parseCwaOpenDataPayload } from "./earthquake.mjs";
 
 const CWA_REST_BASE = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/";
 const CWA_REPORT_DATASETS = ["E-A0015-001", "E-A0016-001"];
+const CWA_TSUNAMI_DATASET = "E-A0014-001";
 const REPORT_CACHE_TTL_MS = Math.max(1_000, Number(process.env.CWA_REPORT_CACHE_TTL_MS ?? 3_000) || 3_000);
+const TSUNAMI_CACHE_TTL_MS = Math.max(5_000, Number(process.env.CWA_TSUNAMI_CACHE_TTL_MS ?? 15_000) || 15_000);
 const REQUEST_TIMEOUT_MS = Math.max(1_000, Number(process.env.CWA_REQUEST_TIMEOUT_MS ?? 12_000) || 12_000);
 const PRODUCT_CACHE_TTL_MS = Math.max(60_000, Number(process.env.CWA_PRODUCT_CACHE_TTL_MS ?? 10 * 60_000) || 10 * 60_000);
 const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
@@ -18,6 +20,8 @@ const RANGE_HOURS = new Map([
 
 let reportCache = null;
 let reportRefresh = null;
+let tsunamiCache = null;
+let tsunamiRefresh = null;
 const productCache = new Map();
 const fileDatasetCache = new Map();
 
@@ -94,6 +98,60 @@ function officialUrl(value) {
   } catch {
     return null;
   }
+}
+
+function validUntilFromTsunami(value) {
+  const candidate = typeof value === "string"
+    ? value
+    : value?.EndTime ?? value?.endTime ?? value?.ValidTime ?? null;
+  const timestamp = Date.parse(String(candidate ?? ""));
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
+function tsunamiSeverity(reportColor, content, active) {
+  if (!active) return "clear";
+  const text = `${reportColor} ${content}`;
+  if (/紅|红/.test(text)) return "warning";
+  if (/橙|海嘯警報|海啸警报/.test(text)) return "warning";
+  if (/黃|黄|注意/.test(text)) return "advisory";
+  return "information";
+}
+
+export function normalizeCwaTsunamiReport(item, now = Date.now()) {
+  const issuedAtTimestamp = Date.parse(String(item?.IssueTime ?? ""));
+  if (!Number.isFinite(issuedAtTimestamp)) return null;
+  const content = String(item?.ReportContent ?? "").trim();
+  const reportColor = String(item?.ReportColor ?? "").trim();
+  const validUntil = validUntilFromTsunami(item?.ValidTime);
+  const validUntilTimestamp = Date.parse(String(validUntil ?? ""));
+  const clearMessage = /解除|取消|無海嘯威脅|无海啸威胁|不致|未達|未达|沒有|没有|不會|不会/.test(content);
+  const explicitThreat = /海嘯(?:警報|警告|威脅)|海啸(?:警报|警告|威胁)/.test(content);
+  const active = explicitThreat && !clearMessage && Number.isFinite(validUntilTimestamp) && validUntilTimestamp > now;
+  const info = item?.EarthquakeInfo;
+  const originTimeTimestamp = Date.parse(String(info?.OriginTime ?? ""));
+  return {
+    id: `${String(item?.TsunamiNo ?? "unknown")}:${String(item?.ReportNo ?? issuedAtTimestamp)}`,
+    tsunamiNo: String(item?.TsunamiNo ?? "").trim(),
+    reportNo: String(item?.ReportNo ?? "").trim(),
+    reportType: String(item?.ReportType ?? "海嘯消息").trim(),
+    reportColor,
+    reportContent: content,
+    issuedAt: new Date(issuedAtTimestamp).toISOString(),
+    validUntil,
+    officialUrl: officialUrl(item?.Web),
+    active,
+    cancelled: clearMessage,
+    severity: tsunamiSeverity(reportColor, content, active),
+    earthquake: Number.isFinite(originTimeTimestamp) ? {
+      originTime: new Date(originTimeTimestamp).toISOString(),
+      source: String(info?.Source ?? "").trim(),
+      location: String(info?.Epicenter?.Location ?? "").trim(),
+      latitude: finiteNumber(info?.Epicenter?.EpicenterLatitude),
+      longitude: finiteNumber(info?.Epicenter?.EpicenterLongitude),
+      depthKm: finiteNumber(info?.FocalDepth),
+      magnitude: finiteNumber(info?.EarthquakeMagnitude?.MagnitudeValue),
+    } : null,
+  };
 }
 
 function cwaIntensityRank(value) {
@@ -368,6 +426,75 @@ async function getReports(token, options) {
   }
 }
 
+async function refreshTsunami(token, fetchImpl, now) {
+  const url = new URL(CWA_TSUNAMI_DATASET, CWA_REST_BASE);
+  url.searchParams.set("format", "JSON");
+  url.searchParams.set("limit", "100");
+  const started = Date.now();
+  const payload = await fetchJson(url, token, fetchImpl);
+  const reports = asArray(payload?.records?.Tsunami)
+    .map((item) => normalizeCwaTsunamiReport(item, now))
+    .filter(Boolean)
+    .sort((left, right) => Date.parse(right.issuedAt) - Date.parse(left.issuedAt));
+
+  const latestByEpisode = new Map();
+  for (const report of reports) {
+    const episodeKey = report.tsunamiNo || report.id;
+    if (!latestByEpisode.has(episodeKey)) latestByEpisode.set(episodeKey, report);
+  }
+  const activeReport = [...latestByEpisode.values()]
+    .filter((report) => report.active)
+    .sort((left, right) => Date.parse(right.issuedAt) - Date.parse(left.issuedAt))[0] ?? null;
+  tsunamiCache = {
+    fetchedAt: now,
+    expiresAt: now + TSUNAMI_CACHE_TTL_MS,
+    latencyMs: Date.now() - started,
+    reports,
+    latestReport: reports[0] ?? null,
+    activeReport,
+  };
+  return tsunamiCache;
+}
+
+async function getTsunami(token, options) {
+  const now = options.now ?? Date.now();
+  if (tsunamiCache && tsunamiCache.expiresAt > now) return { value: tsunamiCache, cache: "HIT", stale: false };
+  if (!tsunamiRefresh) {
+    tsunamiRefresh = refreshTsunami(token, options.fetchImpl ?? fetch, now)
+      .finally(() => {
+        tsunamiRefresh = null;
+      });
+  }
+  try {
+    return { value: await tsunamiRefresh, cache: "MISS", stale: false };
+  } catch (error) {
+    if (tsunamiCache) return { value: tsunamiCache, cache: "STALE", stale: true, error };
+    throw error;
+  }
+}
+
+export async function getCwaTsunamiSnapshot(options = {}) {
+  const now = options.now ?? Date.now();
+  const token = String((options.env ?? process.env)?.CWA_API_TOKEN ?? "").trim();
+  if (!token) throw new CwaOfficialError("服务端尚未配置 CWA_API_TOKEN", 503);
+  const result = await getTsunami(token, options);
+  return {
+    generatedAt: new Date(now).toISOString(),
+    configured: true,
+    membershipProfile: "advanced",
+    datasetId: CWA_TSUNAMI_DATASET,
+    cacheTtlMs: TSUNAMI_CACHE_TTL_MS,
+    recommendedPollMs: 30_000,
+    stale: result.stale,
+    cache: result.cache,
+    latencyMs: result.value.latencyMs,
+    activeReport: result.value.activeReport,
+    latestReport: result.value.latestReport,
+    reports: result.value.reports,
+    error: result.error instanceof Error ? result.error.message : null,
+  };
+}
+
 export async function getCwaOfficialSnapshot(searchParams, options = {}) {
   const now = options.now ?? Date.now();
   const query = parseQuery(searchParams, now);
@@ -396,6 +523,8 @@ export async function getCwaOfficialSnapshot(searchParams, options = {}) {
 export function clearCwaOfficialCache() {
   reportCache = null;
   reportRefresh = null;
+  tsunamiCache = null;
+  tsunamiRefresh = null;
   productCache.clear();
   fileDatasetCache.clear();
 }
