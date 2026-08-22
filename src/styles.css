@@ -4945,7 +4945,8 @@ body.seismic-panel-resizing {
   color: #bae6fd;
 }
 
-.seismic-map-shell:has(.seismic-camera-relay:not(.is-collapsed)) .seismic-map-overlay-stack {
+.seismic-map-shell:has(.seismic-camera-relay:not(.is-collapsed)) .seismic-monitor-rail[data-dock="left"],
+.seismic-map-shell:has(.seismic-camera-relay:not(.is-collapsed)) .seismic-monitor-rail[data-dock="right"] {
   max-height: calc(100% - 310px);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -5111,49 +5112,58 @@ body.seismic-panel-resizing {
   backdrop-filter: blur(5px);
 }
 
-.seismic-map-overlay-stack {
+.seismic-monitor-layer {
   --monitor-scale: 1;
-  --monitor-drag-x: 0px;
-  --monitor-drag-y: 0px;
   position: absolute;
+  inset: 0;
   z-index: 650;
+  pointer-events: none;
+}
+
+.seismic-monitor-rail {
+  position: absolute;
   width: min(330px, calc(100% - 72px));
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
   pointer-events: none;
   transition: inset 180ms ease, transform 180ms ease;
-  will-change: transform;
 }
 
-.seismic-map-overlay-stack[data-dock="left"] {
+.seismic-monitor-rail:not(:has(.seismic-monitor-widget)) {
+  display: none;
+}
+
+.seismic-monitor-rail[data-dock="left"] {
   top: 10px;
   left: 10px;
-  transform: translate3d(var(--monitor-drag-x), var(--monitor-drag-y), 0) scale(var(--monitor-scale));
+  transform: scale(var(--monitor-scale));
   transform-origin: top left;
 }
 
-.seismic-map-overlay-stack[data-dock="right"] {
+.seismic-monitor-rail[data-dock="right"] {
   top: 10px;
   right: 10px;
-  transform: translate3d(var(--monitor-drag-x), var(--monitor-drag-y), 0) scale(var(--monitor-scale));
+  transform: scale(var(--monitor-scale));
   transform-origin: top right;
 }
 
-.seismic-map-overlay-stack[data-dock="top"] {
+.seismic-monitor-rail[data-dock="top"] {
   top: 10px;
   left: 50%;
-  transform: translate3d(calc(-50% + var(--monitor-drag-x)), var(--monitor-drag-y), 0) scale(var(--monitor-scale));
+  transform: translateX(-50%) scale(var(--monitor-scale));
   transform-origin: top center;
 }
 
-.seismic-map-overlay-stack[data-dock="bottom"] {
+.seismic-monitor-rail[data-dock="bottom"] {
   bottom: 72px;
   left: 50%;
-  transform: translate3d(calc(-50% + var(--monitor-drag-x)), var(--monitor-drag-y), 0) scale(var(--monitor-scale));
+  transform: translateX(-50%) scale(var(--monitor-scale));
   transform-origin: bottom center;
 }
 
-.seismic-map-shell.has-s-wave-warning .seismic-map-overlay-stack:not([data-dock="bottom"]) {
+.seismic-map-shell.has-s-wave-warning .seismic-monitor-rail:not([data-dock="bottom"]),
+.seismic-map-shell.has-s-wave-warning .seismic-monitor-toolbar {
   top: 74px;
 }
 
@@ -5161,7 +5171,7 @@ body.seismic-panel-resizing {
   top: 62px;
 }
 
-.seismic-map-shell:has(.seismic-map-overlay-stack[data-dock="right"]) .leaflet-top.leaflet-right {
+.seismic-map-shell:has(.seismic-monitor-rail[data-dock="right"] .seismic-monitor-widget) .leaflet-top.leaflet-right {
   right: auto;
   left: 10px;
 }
@@ -5178,12 +5188,16 @@ body.seismic-monitor-resizing * {
   user-select: none !important;
 }
 
-body.seismic-monitor-moving .seismic-map-overlay-stack,
-body.seismic-monitor-resizing .seismic-map-overlay-stack {
+body.seismic-monitor-resizing .seismic-monitor-rail {
   transition: none;
 }
 
 .seismic-monitor-toolbar {
+  position: absolute;
+  top: 10px;
+  right: 48px;
+  z-index: 20;
+  width: 226px;
   height: 25px;
   display: flex;
   align-items: center;
@@ -5196,9 +5210,10 @@ body.seismic-monitor-resizing .seismic-map-overlay-stack {
   color: #dbe6e4;
   pointer-events: auto;
   backdrop-filter: blur(8px);
+  transition: top 180ms ease;
 }
 
-.seismic-monitor-drag-handle {
+.seismic-monitor-scale-handle {
   min-width: 0;
   height: 100%;
   flex: 1;
@@ -5209,16 +5224,16 @@ body.seismic-monitor-resizing .seismic-map-overlay-stack {
   border: 0;
   background: transparent;
   color: inherit;
-  cursor: grab;
+  cursor: ew-resize;
   text-align: left;
 }
 
-.seismic-monitor-drag-handle span {
+.seismic-monitor-scale-handle span {
   font-size: 8px;
   font-weight: 800;
 }
 
-.seismic-monitor-drag-handle small {
+.seismic-monitor-scale-handle small {
   overflow: hidden;
   color: #859592;
   font-size: 7px;
@@ -5233,49 +5248,68 @@ body.seismic-monitor-resizing .seismic-map-overlay-stack {
   font-weight: 800;
 }
 
-.seismic-monitor-resize-handle {
-  position: absolute;
-  right: -8px;
-  bottom: -8px;
-  z-index: 4;
-  width: 23px;
-  height: 23px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: nwse-resize;
+.seismic-monitor-widget {
+  --monitor-drag-x: 0px;
+  --monitor-drag-y: 0px;
+  position: relative;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 18px auto;
+  transform: translate3d(var(--monitor-drag-x), var(--monitor-drag-y), 0);
   pointer-events: auto;
 }
 
-.seismic-map-overlay-stack[data-dock="right"] .seismic-monitor-resize-handle {
-  right: auto;
-  left: -8px;
-  cursor: nesw-resize;
+.seismic-monitor-widget.is-wide {
+  grid-column: 1 / -1;
 }
 
-.seismic-map-overlay-stack[data-dock="bottom"] .seismic-monitor-resize-handle {
-  top: -8px;
-  bottom: auto;
-  cursor: nesw-resize;
+.seismic-monitor-widget.is-dragging {
+  filter: drop-shadow(0 16px 26px rgba(0, 0, 0, 0.52));
+  opacity: 0.94;
+  will-change: transform;
 }
 
-.seismic-monitor-resize-handle span,
-.seismic-monitor-resize-handle span::after {
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  width: 10px;
-  height: 1px;
-  background: #f6b554;
-  content: "";
-  transform: rotate(-45deg);
-  transform-origin: right center;
+.seismic-monitor-widget-drag-handle {
+  min-width: 0;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 1px solid rgba(126, 145, 147, 0.55);
+  border-bottom: 0;
+  border-radius: 5px 5px 0 0;
+  background: rgba(14, 22, 24, 0.96);
+  color: #9fadaa;
+  cursor: grab;
+  text-align: left;
 }
 
-.seismic-monitor-resize-handle span::after {
-  right: 0;
-  bottom: 3px;
-  width: 6px;
+.seismic-monitor-widget-drag-handle:hover,
+.seismic-monitor-widget-drag-handle:focus-visible {
+  border-color: rgba(245, 158, 11, 0.8);
+  color: #f6b554;
+}
+
+.seismic-monitor-widget-drag-handle span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 7px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seismic-monitor-widget-drag-handle small {
+  color: #72817e;
+  font-size: 6px;
+  white-space: nowrap;
+}
+
+.seismic-monitor-widget > :not(.seismic-monitor-widget-drag-handle) {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 .seismic-monitor-drop-zones {
@@ -5518,7 +5552,7 @@ body.seismic-monitor-resizing .seismic-map-overlay-stack {
 }
 
 .seismic-map-warning-overlay,
-.seismic-detection-strip {
+.seismic-detection-card {
   pointer-events: auto;
 }
 
@@ -5645,13 +5679,7 @@ body.seismic-monitor-resizing .seismic-map-overlay-stack {
   font-size: 8px;
 }
 
-.seismic-detection-strip {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
-}
-
-.seismic-detection-strip > button {
+.seismic-detection-card {
   min-width: 0;
   min-height: 83px;
   display: grid;
@@ -5666,46 +5694,42 @@ body.seismic-monitor-resizing .seismic-map-overlay-stack {
   backdrop-filter: blur(7px);
 }
 
-.seismic-detection-strip > button:not(:disabled):hover {
+.seismic-detection-card:not(:disabled):hover {
   border-color: #f59e0b;
   background: rgba(23, 33, 36, 0.96);
 }
 
-.seismic-detection-strip > button:disabled {
+.seismic-detection-card:disabled {
   cursor: default;
   opacity: 1;
 }
 
-.seismic-detection-strip > button.detected {
+.seismic-detection-card.detected {
   border-color: rgba(126, 145, 147, 0.72);
   box-shadow: inset 3px 0 #7e9193;
 }
 
-.seismic-detection-strip > button.ocean {
-  grid-column: 1 / -1;
-}
-
-.seismic-detection-strip > button.detected.ocean {
+.seismic-detection-card.detected.ocean {
   border-color: rgba(34, 211, 238, 0.86);
   box-shadow: inset 3px 0 #22d3ee;
 }
 
-.seismic-detection-strip > button.detected.ocean span i {
+.seismic-detection-card.detected.ocean span i {
   background: #22d3ee;
   box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.18);
 }
 
-.seismic-detection-strip > button.replay {
+.seismic-detection-card.replay {
   border-color: rgba(250, 204, 21, 0.66);
   box-shadow: inset 3px 0 #facc15;
 }
 
-.seismic-detection-strip > button.replay span i {
+.seismic-detection-card.replay span i {
   background: #facc15;
   box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.15);
 }
 
-.seismic-detection-strip span {
+.seismic-detection-card span {
   min-width: 0;
   display: inline-flex;
   align-items: center;
@@ -5716,57 +5740,57 @@ body.seismic-monitor-resizing .seismic-map-overlay-stack {
   white-space: nowrap;
 }
 
-.seismic-detection-strip span i {
+.seismic-detection-card span i {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: #22c55e;
 }
 
-.seismic-detection-strip .detected span i {
+.seismic-detection-card.detected span i {
   background: #7e9193;
   box-shadow: 0 0 0 3px rgba(126, 145, 147, 0.18);
 }
 
-.seismic-detection-strip > button.detected.green {
+.seismic-detection-card.detected.green {
   border-color: rgba(22, 163, 74, 0.9);
   box-shadow: inset 3px 0 #16a34a;
 }
 
-.seismic-detection-strip > button.detected.yellow {
+.seismic-detection-card.detected.yellow {
   border-color: rgba(250, 204, 21, 0.9);
   box-shadow: inset 3px 0 #facc15;
 }
 
-.seismic-detection-strip > button.detected.red {
+.seismic-detection-card.detected.red {
   border-color: rgba(239, 68, 68, 0.9);
   box-shadow: inset 3px 0 #ef4444;
 }
 
-.seismic-detection-strip > button.detected.green span i {
+.seismic-detection-card.detected.green span i {
   background: #16a34a;
   box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.18);
 }
 
-.seismic-detection-strip > button.detected.yellow span i {
+.seismic-detection-card.detected.yellow span i {
   background: #facc15;
   box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.18);
 }
 
-.seismic-detection-strip > button.detected.red span i {
+.seismic-detection-card.detected.red span i {
   background: #ef4444;
   box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18);
 }
 
-.seismic-detection-strip strong {
+.seismic-detection-card strong {
   justify-self: end;
   color: #f6b554;
   font-size: 12px;
   white-space: nowrap;
 }
 
-.seismic-detection-strip small,
-.seismic-detection-strip time {
+.seismic-detection-card small,
+.seismic-detection-card time {
   min-width: 0;
   overflow: hidden;
   color: #8d9c99;
@@ -5775,7 +5799,7 @@ body.seismic-monitor-resizing .seismic-map-overlay-stack {
   white-space: nowrap;
 }
 
-.seismic-detection-strip time {
+.seismic-detection-card time {
   justify-self: end;
 }
 
@@ -7737,7 +7761,8 @@ body.seismic-monitor-resizing .seismic-map-overlay-stack {
     width: min(276px, calc(100% - 62px));
   }
 
-  .seismic-map-shell:has(.seismic-camera-relay:not(.is-collapsed)) .seismic-map-overlay-stack {
+  .seismic-map-shell:has(.seismic-camera-relay:not(.is-collapsed)) .seismic-monitor-rail[data-dock="left"],
+  .seismic-map-shell:has(.seismic-camera-relay:not(.is-collapsed)) .seismic-monitor-rail[data-dock="right"] {
     max-height: calc(100% - 300px);
   }
 
@@ -7912,14 +7937,14 @@ body.seismic-monitor-resizing .seismic-map-overlay-stack {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .seismic-map-overlay-stack {
+  .seismic-monitor-rail {
     width: min(330px, calc(100% - 62px));
   }
 
-  .seismic-map-overlay-stack[data-dock="left"] { left: 8px; }
-  .seismic-map-overlay-stack[data-dock="right"] { right: 8px; }
-  .seismic-map-overlay-stack[data-dock="top"],
-  .seismic-map-overlay-stack[data-dock="bottom"] { left: 50%; }
+  .seismic-monitor-rail[data-dock="left"] { left: 8px; }
+  .seismic-monitor-rail[data-dock="right"] { right: 8px; }
+  .seismic-monitor-rail[data-dock="top"],
+  .seismic-monitor-rail[data-dock="bottom"] { left: 50%; }
 
   .seismic-s-wave-banner {
     grid-template-columns: 44px minmax(130px, 1fr) minmax(104px, 0.8fr) minmax(80px, 0.65fr) 44px;
@@ -7939,12 +7964,12 @@ body.seismic-monitor-resizing .seismic-map-overlay-stack {
     padding: 7px 8px;
   }
 
-  .seismic-detection-strip > button {
+  .seismic-detection-card {
     min-height: 74px;
     padding: 6px 7px;
   }
 
-  .seismic-detection-strip time {
+  .seismic-detection-card time {
     display: none;
   }
 
