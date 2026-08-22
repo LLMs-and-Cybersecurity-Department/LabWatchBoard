@@ -5525,14 +5525,14 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 <div className="seismic-s-wave-stripes" aria-hidden="true" />
                 <div className="seismic-s-wave-title">
                   <Siren size={18} />
-                  <span><strong>S-WAVE WARNING</strong><small>S 波到达警报 · {userStation.name}</small></span>
+                  <span><strong>{sWaveArrived ? "S-WAVE WARNING" : "S-WAVE ARRIVAL"}</strong><small>{sWaveArrived ? "S 波已到达" : "距离 S 波到达还有"} · {userStation.name}</small></span>
                 </div>
-                <output aria-label={sWaveArrived ? "S 波已到达定位点" : `S 波预计 ${formatSArrivalCountdown(sWaveRemainingSeconds)} 后到达定位点`}>
+                <output aria-label={sWaveArrived ? "S 波已到达定位点" : `距离 S 波到达定位点还有 ${formatSArrivalCountdown(sWaveRemainingSeconds)}`}>
                   {sWaveArrived ? "已到达" : formatSArrivalCountdown(sWaveRemainingSeconds)}
                 </output>
                 <div className="seismic-s-wave-meta"><strong>{userExpectedIntensity}</strong><small>震中距 {userSurfaceDistanceKm.toFixed(0)} km</small></div>
                 <div className="seismic-s-wave-stripes" aria-hidden="true" />
-                <div className="seismic-s-wave-marquee"><span>{sWaveArrived ? "S 波已抵达定位点，请注意强烈摇晃并远离坠落物。" : `S 波正向定位点传播，预计 ${formatSArrivalCountdown(sWaveRemainingSeconds)} 后到达。`} 理论速度 3.5 km/s · {replayEvent ? `回放 T+${replaySeconds.toFixed(1)} s` : "实时传播定位"} · {wavefrontEvent?.place}</span></div>
+                <div className="seismic-s-wave-marquee"><span>{sWaveArrived ? "S 波已抵达定位点，请注意强烈摇晃并远离坠落物。" : `距离 S 波到达还有 ${formatSArrivalCountdown(sWaveRemainingSeconds)}。`} 理论速度 3.5 km/s · {replayEvent ? `回放 T+${replaySeconds.toFixed(1)} s` : "实时传播定位"} · {wavefrontEvent?.place}</span></div>
               </section>}
               <SeismicIntensityLegend />
               {showWniCameras && <a className={`seismic-wni-camera-map-status ${wniCameraState}`} href={WNI_CAMERA_MAP_URL} target="_blank" rel="noreferrer" title="打开 WNI 官方全国摄像头地图">
