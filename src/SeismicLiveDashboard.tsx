@@ -78,6 +78,7 @@ import {
   intensityRomanLabel,
   intensityColor,
   isLiveEewActive,
+  isSameEewEvent,
   LIVE_EEW_SOURCE_ORDER,
   makeKmaStations,
   mergeEewHistory,
@@ -96,6 +97,7 @@ import {
   replayNiedSoundIndex,
   selectAutoLocatedGlobalEvent,
   selectAutoLocatedGlobalEvents,
+  shouldDisplayLiveWavefront,
   JMA_SHINDO_LEGEND,
   MMI_LEGEND,
   jmaShindoColor,
@@ -313,6 +315,7 @@ const MONITOR_WIDGET_LABELS: Record<MonitorWidgetId, string> = {
   global: "全球 FDSN 响应",
   ocean: "海底测站",
 };
+const PERSISTENT_REGIONAL_EEW_SOURCES = new Set<LiveEewSource>(["JMA", "KMA", "CENC", "CWA"]);
 
 function normalizeMonitorDock(value: unknown): MonitorDock {
   return MONITOR_DOCKS.includes(value as MonitorDock) ? value as MonitorDock : "left";
@@ -1760,6 +1763,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   showPalert: boolean;
   selectedStation: SelectableStation | null;
   selectedEvent: LiveEew | null;
+  waveEvent: LiveEew | null;
   selectedReport: EarthquakeEvent | null;
   estimate: HypocenterEstimate | null;
   estimateMode: "live" | "replay";
@@ -1819,8 +1823,8 @@ const SeismicMap = memo(function SeismicMap(props: {
     const timer = window.setTimeout(() => setBaseLayerStage((stage) => stage + 1), 350);
     return () => window.clearTimeout(timer);
   }, [baseLayerStage]);
-  const pRadius = props.selectedEvent && props.showWaves ? waveRadiusKm(props.selectedEvent.originTime, 6, props.waveNow) : 0;
-  const sRadius = props.selectedEvent && props.showWaves ? waveRadiusKm(props.selectedEvent.originTime, 3.5, props.waveNow) : 0;
+  const pRadius = props.waveEvent && props.showWaves ? waveRadiusKm(props.waveEvent.originTime, 6, props.waveNow) : 0;
+  const sRadius = props.waveEvent && props.showWaves ? waveRadiusKm(props.waveEvent.originTime, 3.5, props.waveNow) : 0;
   const detectionStationSet = useMemo(() => new Set(props.detectionStationIds), [props.detectionStationIds]);
   const cwaArrivedStationSet = useMemo(() => new Set(props.cwaArrivedStationIds), [props.cwaArrivedStationIds]);
   const detectedStations = useMemo(
@@ -2106,9 +2110,9 @@ const SeismicMap = memo(function SeismicMap(props: {
       />
       <ShakeMapContourLayer visible={props.showShakeMap} shakeMap={props.shakeMap} contours={props.shakeMapContours} />
       <Pane name="seismic-wave-pane" style={{ zIndex: 390, pointerEvents: "none" }}>
-        {props.selectedEvent && props.selectedEvent.hypocenterKnown !== false && !props.selectedEvent.cancelled && <>
-          {pRadius > 0 && <Circle center={[props.selectedEvent.latitude, props.selectedEvent.longitude]} radius={pRadius * 1000} interactive={false} pathOptions={{ color: "#38bdf8", weight: 2, opacity: 0.8, fillOpacity: 0.03 }} />}
-          {sRadius > 0 && <Circle center={[props.selectedEvent.latitude, props.selectedEvent.longitude]} radius={sRadius * 1000} interactive={false} pathOptions={{ color: "#f97316", weight: 3, opacity: 0.88, fillOpacity: 0.04 }} />}
+        {props.waveEvent && props.waveEvent.hypocenterKnown !== false && !props.waveEvent.cancelled && <>
+          {pRadius > 0 && <Circle center={[props.waveEvent.latitude, props.waveEvent.longitude]} radius={pRadius * 1000} interactive={false} pathOptions={{ color: "#38bdf8", weight: 2, opacity: 0.8, fillOpacity: 0.03 }} />}
+          {sRadius > 0 && <Circle center={[props.waveEvent.latitude, props.waveEvent.longitude]} radius={sRadius * 1000} interactive={false} pathOptions={{ color: "#f97316", weight: 3, opacity: 0.88, fillOpacity: 0.04 }} />}
         </>}
       </Pane>
       <Pane name="seismic-grid-pane" style={{ zIndex: 410, pointerEvents: "none" }}>
@@ -3611,6 +3615,40 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       && meetsEewMagnitudeThreshold(event, receiveMagnitudeThreshold)),
     [eewHistory, receiveMagnitudeThreshold],
   );
+  const latestRegionalState = useMemo(() => {
+    const regionalReports = regionalHistory.filter((event) => PERSISTENT_REGIONAL_EEW_SOURCES.has(event.source));
+    const groups = collapseEewHistoryEvents(regionalReports).map((group) => ({
+      group,
+      updatedAt: Math.max(...group.reports.map((report) => Date.parse(report.announcedAt)).filter(Number.isFinite), 0),
+    })).sort((left, right) => right.updatedAt - left.updatedAt);
+    const current = groups[0];
+    if (!current) return { displayEvent: null, impactEvent: null, waveEvent: null, terminated: false, updatedAt: 0 };
+    const seed = current.group.latestReport;
+    const seedOrigin = Date.parse(seed.originTime);
+    const relatedReports = regionalReports.filter((report) => {
+      if (isSameEewEvent(seed, report)) return true;
+      const reportOrigin = Date.parse(report.originTime);
+      return seed.source === report.source
+        && Number.isFinite(seedOrigin)
+        && Number.isFinite(reportOrigin)
+        && Math.abs(seedOrigin - reportOrigin) <= 120_000
+        && (seed.hypocenterKnown === false || report.hypocenterKnown === false);
+    });
+    const reports = [...new Map(relatedReports.map((report) => [eewReportKey(report), report])).values()].sort((left, right) => (
+      Date.parse(right.announcedAt) - Date.parse(left.announcedAt)
+      || right.serial - left.serial
+    ));
+    const displayEvent = reports[0] ?? current.group.latestReport;
+    const terminated = reports.some((report) => report.cancelled || report.final || report.observedIntensity);
+    const impactEvent = reports.find((report) => report.observedIntensity || (report.affectedAreas?.length ?? 0) > 0)
+      ?? displayEvent;
+    const waveEvent = terminated
+      ? null
+      : reports.find((report) => report.hypocenterKnown !== false && !report.cancelled) ?? null;
+    return { displayEvent, impactEvent, waveEvent, terminated, updatedAt: current.updatedAt };
+  }, [regionalHistory]);
+  const persistentRegionalEvent = latestRegionalState.displayEvent;
+  const persistentRegionalImpactEvent = latestRegionalState.impactEvent;
   const historyEvents = useMemo(
     () => collapseEewHistoryEvents([...regionalHistory, ...institutionHistoryReports], institutionReports),
     [institutionHistoryReports, institutionReports, regionalHistory],
@@ -3843,6 +3881,25 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     ?? (selectedGlobalStation?.id === selectedStationId ? selectedGlobalStation : null);
   const replayEvent = selectedEvent && (replayPlaying || replaySeconds > 0) ? selectedEvent : null;
   const replaySeismicSeconds = Math.min(replaySeconds, 300);
+  const regionalLiveWaveEvent = latestRegionalState.waveEvent
+    && shouldDisplayLiveWavefront(latestRegionalState.waveEvent, clock)
+    ? latestRegionalState.waveEvent
+    : null;
+  const autoGlobalSuppressedByRegionalReport = Boolean(
+    autoGlobalEvent
+      && persistentRegionalEvent
+      && latestRegionalState.terminated
+      && isSameEewEvent(autoGlobalEvent, persistentRegionalEvent),
+  );
+  const globalLiveWaveEvent = autoGlobalEvent
+    && !autoGlobalSuppressedByRegionalReport
+    && shouldDisplayLiveWavefront(autoGlobalEvent, clock, false)
+    ? autoGlobalEvent
+    : null;
+  const liveWavefrontEvent = [regionalLiveWaveEvent, globalLiveWaveEvent]
+    .filter((event): event is LiveEew => Boolean(event))
+    .sort((left, right) => Date.parse(right.announcedAt) - Date.parse(left.announcedAt))[0] ?? null;
+  const wavefrontEvent = replayEvent ?? liveWavefrontEvent;
   const replayTsunamiSnapshot = replayEvent
     ? jmaTsunamiSnapshotAt(replayTsunamiEpisode, replaySeconds)
     : null;
@@ -3859,7 +3916,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const kmaReplaySimulation = useMemo(() => kmaReplayProfile
     ? simulatePreparedReplayStationResponse(kmaReplayProfile, replaySeismicSeconds)
     : null, [kmaReplayProfile, replaySeismicSeconds]);
-  const oceanResponseEvent = replayEvent ?? autoGlobalEvent ?? latestEvent;
+  const oceanResponseEvent = replayEvent ?? liveWavefrontEvent ?? persistentRegionalEvent ?? autoGlobalEvent ?? latestEvent;
   const oceanResponseElapsed = oceanResponseEvent
     ? replayEvent
       ? replaySeismicSeconds
@@ -4462,12 +4519,16 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       : jmaShindoColor(selectedRank ?? 0);
   const selectedOrigin = selectedEvent ? Date.parse(selectedEvent.originTime) : 0;
   const previewEvent = warningOverlayTab === "selected" && selectedEvent && clock < selectedPreviewUntil ? selectedEvent : null;
-  const rawMapEvent = replayEvent ?? previewEvent ?? autoGlobalEvent ?? latestEvent;
+  const rawMapEvent = replayEvent ?? previewEvent ?? liveWavefrontEvent ?? persistentRegionalEvent ?? autoGlobalEvent ?? latestEvent;
   const mapEvent = useMemo(
     () => enrichLiveEewWithOfficialAreas(rawMapEvent, institutionReports),
     [institutionReports, rawMapEvent],
   );
-  const cameraEventCandidate = replayEvent ?? autoGlobalEvent ?? latestEvent;
+  const persistentRegionalMapEvent = useMemo(
+    () => enrichLiveEewWithOfficialAreas(persistentRegionalImpactEvent, institutionReports),
+    [institutionReports, persistentRegionalImpactEvent],
+  );
+  const cameraEventCandidate = replayEvent ?? liveWavefrontEvent ?? autoGlobalEvent ?? persistentRegionalEvent ?? latestEvent;
   const cameraEvent = autoOpenWniMonitor && cameraEventCandidate && cameraEventCandidate.hypocenterKnown !== false
     ? cameraEventCandidate
     : null;
@@ -4482,17 +4543,33 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const mapOrigin = mapEvent ? Date.parse(mapEvent.originTime) : 0;
   const impactElapsed = replayEvent
     ? replaySeismicSeconds
-    : (rawMapEvent === latestEvent || rawMapEvent === autoGlobalEvent) && mapOrigin
+    : rawMapEvent === liveWavefrontEvent && mapOrigin
       ? Math.max(0, Math.min(300, (clock - mapOrigin) / 1000))
       : null;
   const impactRegions = useMemo(
     () => mergeImpactRegionCollections(jmaRegions, eastAsiaImpactRegions),
     [eastAsiaImpactRegions, jmaRegions],
   );
-  const affectedLayers = useMemo(
+  const currentAffectedLayers = useMemo(
     () => affectedRegionLayers(impactRegions, jmaSeismicSites, mapEvent, impactElapsed),
     [impactElapsed, impactRegions, jmaSeismicSites, mapEvent],
   );
+  const supplementPersistentRegionalOfficial = Boolean(
+    !replayEvent
+      && persistentRegionalMapEvent
+      && (!mapEvent || eewReportKey(mapEvent) !== eewReportKey(persistentRegionalMapEvent)),
+  );
+  const persistentRegionalOfficialRegions = useMemo(
+    () => supplementPersistentRegionalOfficial && persistentRegionalMapEvent
+      ? affectedRegionLayers(impactRegions, jmaSeismicSites, persistentRegionalMapEvent, null).official
+      : null,
+    [impactRegions, jmaSeismicSites, persistentRegionalMapEvent, supplementPersistentRegionalOfficial],
+  );
+  const affectedLayers = useMemo(() => ({
+    local: currentAffectedLayers.local,
+    official: mergeImpactRegionCollections(currentAffectedLayers.official, persistentRegionalOfficialRegions)
+      ?? currentAffectedLayers.official,
+  }), [currentAffectedLayers, persistentRegionalOfficialRegions]);
   const localAdministrativeRegionCount = affectedLayers.local.features
     .filter((feature) => !feature.properties.contour).length;
   const activeTsunamiRegions = useMemo<TsunamiRegionCollection>(() => {
@@ -4513,40 +4590,38 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       }),
     };
   }, [displayedJmaTsunami, tsunamiRegions]);
-  const waveNow = replayEvent ? mapOrigin + replaySeismicSeconds * 1000 : mapOrigin ? Math.min(clock, mapOrigin + 300_000) : clock;
+  const waveOrigin = wavefrontEvent ? Date.parse(wavefrontEvent.originTime) : 0;
+  const waveNow = replayEvent ? waveOrigin + replaySeismicSeconds * 1000 : clock;
   const showWaves = replayEvent
-    ? replaySeconds > 0
-    : Boolean(rawMapEvent
-      && rawMapEvent.hypocenterKnown !== false
-      && !rawMapEvent.cancelled
-      && (rawMapEvent === latestEvent || rawMapEvent === autoGlobalEvent));
+    ? replaySeconds > 0 && replaySeismicSeconds < 300
+    : Boolean(liveWavefrontEvent);
   const userWarningLocation = Number.isFinite(userStation.lat) && Number.isFinite(userStation.lon)
     ? { latitude: userStation.lat, longitude: userStation.lon }
     : null;
-  const sWaveArrivalSeconds = mapEvent && userWarningLocation
-    ? seismicWaveArrivalSeconds(mapEvent, userWarningLocation, 3.5)
+  const sWaveArrivalSeconds = wavefrontEvent && userWarningLocation
+    ? seismicWaveArrivalSeconds(wavefrontEvent, userWarningLocation, 3.5)
     : Number.POSITIVE_INFINITY;
   const sWaveElapsedSeconds = replayEvent
     ? replaySeconds
-    : mapOrigin
-      ? Math.max(0, (clock - mapOrigin) / 1000)
+    : waveOrigin
+      ? Math.max(0, (clock - waveOrigin) / 1000)
       : 0;
   const sWaveRemainingSeconds = sWaveArrivalSeconds - sWaveElapsedSeconds;
   const sWaveArrived = sWaveRemainingSeconds <= 0;
   const sWaveWarningVisible = Boolean(
     showWaves
-      && mapEvent
+      && wavefrontEvent
       && userWarningLocation
       && Number.isFinite(sWaveArrivalSeconds)
       && sWaveRemainingSeconds > -12,
   );
-  const userSurfaceDistanceKm = mapEvent && userWarningLocation
-    ? haversineKm(mapEvent, userWarningLocation)
+  const userSurfaceDistanceKm = wavefrontEvent && userWarningLocation
+    ? haversineKm(wavefrontEvent, userWarningLocation)
     : 0;
-  const userExpectedIntensity = mapEvent && userWarningLocation
+  const userExpectedIntensity = wavefrontEvent && userWarningLocation
     ? usesShindoScaleForLocation(userWarningLocation)
-      ? `预计震度 ${jmaShindoLabel(jmaShindoRank(calculateJmaShindo(mapEvent, userWarningLocation)))}`
-      : `预计烈度 ${intensityRomanLabel(calculateLocalIntensity(mapEvent, userWarningLocation))}`
+      ? `预计震度 ${jmaShindoLabel(jmaShindoRank(calculateJmaShindo(wavefrontEvent, userWarningLocation)))}`
+      : `预计烈度 ${intensityRomanLabel(calculateLocalIntensity(wavefrontEvent, userWarningLocation))}`
     : "预计烈度 --";
   const globalAutoPresentation = Boolean(!replayEvent && autoGlobalEvent && rawMapEvent === autoGlobalEvent);
   const rawMapDetectionStationIds = globalAutoPresentation
@@ -4578,8 +4653,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     ? Boolean(selectedSnetEvent?.active && activeOceanCount)
     : Boolean(activeOceanCount);
   const overlayEvent = warningOverlayTab === "selected"
-    ? selectedEvent ?? autoGlobalEvent ?? latestEvent
-    : autoGlobalEvent ?? latestEvent;
+    ? selectedEvent ?? persistentRegionalEvent ?? autoGlobalEvent ?? latestEvent
+    : persistentRegionalEvent ?? autoGlobalEvent ?? latestEvent;
+  const latestDisplayEvent = persistentRegionalEvent ?? latestEvent;
   const cencMetrics = cencReport?.stationMetrics?.length ? cencReport.stationMetrics : cencReport?.stations ?? [];
   const cencMaxIntensity = cencMetrics[0]?.intensity ?? null;
   const cencMaxPga = cencMetrics.length ? cencMetrics.reduce((max, station) => Math.max(max, station.pgaGal ?? 0), 0) : null;
@@ -5108,7 +5184,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
             <div className="status-strip">
             <div className={`earthquake-status-pill ${activeNiedCount ? "danger" : ""}`}><span>NIED 检知</span><strong>{activeNiedCount} 站</strong></div>
             <div className={`earthquake-status-pill ${activeKmaCount ? "danger" : ""}`}><span>KMA-PEWS</span><strong>{activeKmaCount} 站</strong></div>
-            <div className={`earthquake-status-pill ${latestEvent?.warning ? "danger" : "ok"}`}><span>最新事件</span><strong>{latestEvent ? latestEvent.relay === "Catalogue" ? `${latestEvent.source} 机构报告` : `${latestEvent.source} 第 ${latestEvent.serial} 报` : "监视中"}</strong></div>
+            <div className={`earthquake-status-pill ${latestDisplayEvent?.warning ? "danger" : "ok"}`}><span>最新事件</span><strong>{latestDisplayEvent ? latestDisplayEvent.relay === "Catalogue" ? `${latestDisplayEvent.source} 机构报告` : `${latestDisplayEvent.source} 第 ${latestDisplayEvent.serial} 报` : "监视中"}</strong></div>
             <div className={`earthquake-status-pill ${officialState === "online" ? "ok" : "warn"}`}><span>机构报告</span><strong>{institutionReports.length} 条</strong></div>
             <div className={`earthquake-status-pill ${activeGlobalCount || activeCwaCount ? "danger" : ""}`}><span>全球 / CWA 响应</span><strong>{activeGlobalCount} / {activeCwaCount} 站</strong></div>
             <div className={`earthquake-status-pill ${oceanResponseActive ? "danger" : ""}`}><span>{oceanHistorySelected ? "S-net 历史回看" : "海底台网响应"}</span><strong>{activeOceanCount ? oceanHistorySelected ? `历史 ${activeOceanCount} 站` : `${activeOceanCount} 站` : "待机"}</strong></div>
@@ -5188,6 +5264,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 showPalert={showPalertStations}
                 selectedStation={selectedStation}
                 selectedEvent={mapEvent ?? null}
+                waveEvent={wavefrontEvent}
                 selectedReport={selectedInstitutionReport}
                 estimate={estimate}
                 estimateMode={replayEvent ? "replay" : "live"}
@@ -5252,7 +5329,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 </output>
                 <div className="seismic-s-wave-meta"><strong>{userExpectedIntensity}</strong><small>震中距 {userSurfaceDistanceKm.toFixed(0)} km</small></div>
                 <div className="seismic-s-wave-stripes" aria-hidden="true" />
-                <div className="seismic-s-wave-marquee"><span>{sWaveArrived ? "S 波已抵达定位点，请注意强烈摇晃并远离坠落物。" : `S 波正向定位点传播，预计 ${formatSArrivalCountdown(sWaveRemainingSeconds)} 后到达。`} 理论速度 3.5 km/s · {replayEvent ? `回放 T+${replaySeconds.toFixed(1)} s` : "实时传播定位"} · {mapEvent?.place}</span></div>
+                <div className="seismic-s-wave-marquee"><span>{sWaveArrived ? "S 波已抵达定位点，请注意强烈摇晃并远离坠落物。" : `S 波正向定位点传播，预计 ${formatSArrivalCountdown(sWaveRemainingSeconds)} 后到达。`} 理论速度 3.5 km/s · {replayEvent ? `回放 T+${replaySeconds.toFixed(1)} s` : "实时传播定位"} · {wavefrontEvent?.place}</span></div>
               </section>}
               <SeismicIntensityLegend />
               {showWniCameras && <a className={`seismic-wni-camera-map-status ${wniCameraState}`} href={WNI_CAMERA_MAP_URL} target="_blank" rel="noreferrer" title="打开 WNI 官方全国摄像头地图">
