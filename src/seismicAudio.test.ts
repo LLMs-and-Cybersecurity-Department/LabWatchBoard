@@ -38,9 +38,11 @@ describe("seismic sound cue mapping", () => {
     const issue = { serial: 1, warning: false, final: false, cancelled: false, magnitude: 5.2, hypocenterKnown: true };
     const update = { ...issue, serial: 2 };
     const prompt = { ...issue, hypocenterKnown: false };
+    const scalePrompt = { ...prompt, observedIntensity: true };
     const detail = { ...update, observedIntensity: true, affectedAreas: [{ name: "熊本県", rank: 4 }] };
     expect(replayEewSoundAssetForTransition(issue, null)).toBe("srev-issue");
     expect(replayEewSoundAssetForTransition(prompt, null)).toBe("srev-prompt");
+    expect(replayEewSoundAssetForTransition(scalePrompt, update)).toBeNull();
     expect(replayEewSoundAssetForTransition(update, issue)).toBe("srev-update");
     expect(replayEewSoundAssetForTransition(detail, update)).toBe("srev-detail");
     expect(replayEewReportOffsetSeconds({ originTime: "2026-08-23T00:00:00Z", announcedAt: "2026-08-23T00:00:08Z" })).toBe(8);

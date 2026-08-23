@@ -200,7 +200,9 @@ export function replayEewSoundAssetForTransition(
 ): SeismicSoundAssetId | null {
   if (next.cancelled && !previous?.cancelled) return "srev-cancel";
   if (next.observedIntensity) {
-    if (!previous?.observedIntensity) return "srev-detail";
+    const hasOfficialAreas = Boolean(next.affectedAreas?.length);
+    const previousHasOfficialAreas = Boolean(previous?.observedIntensity && previous.affectedAreas?.length);
+    if (hasOfficialAreas && !previousHasOfficialAreas) return "srev-detail";
     return null;
   }
   if (next.hypocenterKnown === false) {

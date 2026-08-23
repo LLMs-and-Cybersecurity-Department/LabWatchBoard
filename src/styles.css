@@ -4663,6 +4663,41 @@ body.seismic-panel-resizing {
   background: #0a1012;
 }
 
+.seismic-replay-live-notice {
+  position: absolute;
+  z-index: 1900;
+  top: 14px;
+  left: 14px;
+  width: min(310px, calc(100% - 28px));
+  min-height: 68px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border: 1px solid rgba(248, 113, 113, 0.9);
+  border-left: 4px solid #ef4444;
+  border-radius: 5px;
+  background: rgba(21, 10, 12, 0.96);
+  color: #fecaca;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42);
+  pointer-events: none;
+  animation: seismic-replay-live-notice 5s ease-in-out both;
+  backdrop-filter: blur(8px);
+}
+
+.seismic-replay-live-notice > svg { color: #f87171; }
+.seismic-replay-live-notice > span { min-width: 0; display: grid; gap: 2px; }
+.seismic-replay-live-notice small { color: #fca5a5; font-size: 8px; letter-spacing: 0.08em; }
+.seismic-replay-live-notice strong { overflow: hidden; color: #fff; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.seismic-replay-live-notice em { color: #d1b4b7; font-size: 9px; font-style: normal; }
+
+@keyframes seismic-replay-live-notice {
+  0% { opacity: 0; transform: translateX(calc(-100% - 20px)); }
+  8%, 90% { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(calc(-100% - 20px)); }
+}
+
 .seismic-jshis-webgl-layer {
   position: absolute;
   top: 0;

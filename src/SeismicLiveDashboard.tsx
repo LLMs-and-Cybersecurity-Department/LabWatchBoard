@@ -176,6 +176,8 @@ import {
   isNewerEewSoundReport,
   isRegionalEewSoundSource,
   NIED_SOUND_ASSETS,
+  replayEewReportOffsetSeconds,
+  replayEewSoundAssetForTransition,
   replaySecondSoundAsset,
   SEISMIC_SOUND_LIBRARY,
   sWaveCountdownMilestone,
@@ -423,6 +425,7 @@ const NIED_GRID_COLORS = {
 const EMPTY_NUMBERS: number[] = [];
 const EMPTY_STATION_IDS: string[] = [];
 const EMPTY_RANKS: Record<string, number> = {};
+const EMPTY_IMPACT_REGIONS: JmaRegionCollection = { type: "FeatureCollection", features: [] };
 
 const NIED_SOUND_CUES: Record<NiedSoundCue, SeismicSoundAssetId> = NIED_SOUND_ASSETS;
 
@@ -2780,6 +2783,19 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [kmaDetection, setKmaDetection] = useState(() => blankDetection("KMA-PEWS"));
   const [replaySeconds, setReplaySeconds] = useState(0);
   const [replayPlaying, setReplayPlaying] = useState(false);
+  const [replayOfficialFlash, setReplayOfficialFlash] = useState<{
+    sessionKey: string;
+    report: LiveEew;
+    until: number;
+  } | null>(null);
+  const [replayLiveNotice, setReplayLiveNotice] = useState<{
+    key: string;
+    event: LiveEew;
+    until: number;
+  } | null>(null);
+  const replayModeActive = replayPlaying || replaySeconds > 0;
+  const replayModeActiveRef = useRef(replayModeActive);
+  replayModeActiveRef.current = replayModeActive;
   const [replaySpeed, setReplaySpeed] = usePersistentState<ReplaySpeed>("seismic-replay-speed", 60);
   const [replayStepMinutes, setReplayStepMinutes] = usePersistentState("seismic-replay-step-minutes", 1);
   const [clock, setClock] = useState(Date.now());
@@ -2801,7 +2817,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const liveEewSoundCues = useRef(new Set<string>());
   const customSoundUrlsRef = useRef(new Map<SeismicSoundAssetId, string>());
   const sWaveCountdownSoundClock = useRef<{ sessionKey: string; remainingSeconds: number } | null>(null);
-  const replayResponseSoundState = useRef<{ sessionKey: string; arrived: boolean } | null>(null);
+  const replayEewSoundState = useRef<{
+    sessionKey: string;
+    lastSeconds: number;
+    playedReportKeys: Set<string>;
+  } | null>(null);
   const intenseSoundSession = useRef<string | null>(null);
   const replayClockRef = useRef<number | null>(null);
   const replayDurationRef = useRef(300);
@@ -3035,6 +3055,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const clearReplayPresentation = useCallback(() => {
     setReplayPlaying(false);
     setReplaySeconds(0);
+    setReplayOfficialFlash(null);
+    setReplayLiveNotice(null);
+    replayEewSoundState.current = null;
     setSelectedPreviewUntil(0);
     setWarningOverlayTab("latest");
   }, []);
@@ -3185,6 +3208,13 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
         liveEewSoundReports.current.set(soundKey, normalized);
         const announcedAt = Date.parse(normalized.announcedAt);
         const isFresh = Number.isFinite(announcedAt) && Math.abs(Date.now() - announcedAt) <= 120_000;
+        if (replayModeActiveRef.current && isFresh) {
+          setReplayLiveNotice({
+            key: eewReportKey(normalized),
+            event: normalized,
+            until: Date.now() + 5_000,
+          });
+        }
         if (seismicAlertSoundEnabled && assetId && (previous !== null || isFresh)) {
           const cueKey = eewSoundCueKey(normalized, assetId);
           if (!liveEewSoundCues.current.has(cueKey)) {
@@ -3206,7 +3236,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       return next.sort((a, b) => Date.parse(b.announcedAt) - Date.parse(a.announcedAt)).slice(0, 30);
     });
     setEewHistory((current) => mergeEewHistory(current, normalized));
-    setSelectedEewKey((current) => current ?? eewReportKey(normalized));
+    setSelectedEewKey((current) => replayModeActiveRef.current ? current : current ?? eewReportKey(normalized));
   }, [autoMagnitudeThreshold, enabledEewSourceSet, playSoundAsset, receiveMagnitudeThreshold, setEewHistory, seismicAlertSoundEnabled]);
 
   const loadCatalogues = useCallback(() => {
@@ -3858,7 +3888,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   }, [clock, selectedPreviewUntil, warningOverlayTab]);
 
   useEffect(() => {
-    if (!replayPlaying) {
+    if (!replayPlaying || replayOfficialFlash) {
       replayClockRef.current = null;
       return;
     }
@@ -3870,7 +3900,28 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       setReplaySeconds((value) => Math.min(replayDurationRef.current, value + elapsedSeconds * normalizedReplaySpeed));
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [normalizedReplaySpeed, replayPlaying, replaySeconds]);
+  }, [normalizedReplaySpeed, replayOfficialFlash, replayPlaying, replaySeconds]);
+
+  useEffect(() => {
+    if (!replayOfficialFlash) return;
+    const remainingMs = Math.max(0, replayOfficialFlash.until - Date.now());
+    const timer = window.setTimeout(() => {
+      setReplayOfficialFlash((current) => current?.sessionKey === replayOfficialFlash.sessionKey
+        && current.report.id === replayOfficialFlash.report.id
+        && current.report.announcedAt === replayOfficialFlash.report.announcedAt
+        ? null
+        : current);
+    }, remainingMs);
+    return () => window.clearTimeout(timer);
+  }, [replayOfficialFlash]);
+
+  useEffect(() => {
+    if (!replayLiveNotice) return;
+    const timer = window.setTimeout(() => {
+      setReplayLiveNotice((current) => current?.key === replayLiveNotice.key ? null : current);
+    }, Math.max(0, replayLiveNotice.until - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [replayLiveNotice]);
 
   useEffect(() => {
     if (replaySeconds < replayDurationRef.current) return;
@@ -3885,6 +3936,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   useEffect(() => {
     setReplayPlaying(false);
     setReplaySeconds(0);
+    setReplayOfficialFlash(null);
+    setReplayLiveNotice(null);
+    replayEewSoundState.current = null;
     replayDurationRef.current = 300;
   }, [selectedEewKey]);
 
@@ -4039,6 +4093,44 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       : null;
     return selected ?? historyEvents[0]?.latestReport ?? latestEvent ?? null;
   }, [historyEvents, institutionEewReports, latestEvent, regionalHistory, selectedEewKey]);
+  const selectedReplayReports = useMemo(() => {
+    if (!selectedEvent) return [];
+    const selectedOrigin = Date.parse(selectedEvent.originTime);
+    const reports = [...regionalHistory, ...institutionEewReports, selectedEvent].filter((report) => {
+      if (isSameEewEvent(selectedEvent, report)) return true;
+      const reportOrigin = Date.parse(report.originTime);
+      return report.source === selectedEvent.source
+        && Number.isFinite(selectedOrigin)
+        && Number.isFinite(reportOrigin)
+        && Math.abs(selectedOrigin - reportOrigin) <= 120_000;
+    });
+    return [...new Map(reports.map((report) => [eewReportKey(report), report])).values()]
+      .sort((left, right) => (
+        Date.parse(left.announcedAt) - Date.parse(right.announcedAt)
+        || left.serial - right.serial
+      ));
+  }, [institutionEewReports, regionalHistory, selectedEvent]);
+  const selectedReplayPropagationEvent = useMemo(() => {
+    const regionalLocatedReports = selectedReplayReports.filter((report) => (
+      report.relay !== "Catalogue"
+      && !report.observedIntensity
+      && !report.cancelled
+      && report.hypocenterKnown !== false
+      && Number.isFinite(report.latitude)
+      && Number.isFinite(report.longitude)
+    ));
+    return regionalLocatedReports[regionalLocatedReports.length - 1]
+      ?? selectedReplayReports.find((report) => !report.observedIntensity && report.hypocenterKnown !== false)
+      ?? selectedEvent;
+  }, [selectedEvent, selectedReplayReports]);
+  const selectedReplayReportTimeline = useMemo(() => selectedReplayReports.flatMap((report) => {
+    const offsetSeconds = replayEewReportOffsetSeconds(report);
+    return offsetSeconds === null ? [] : [{ report, offsetSeconds }];
+  }), [selectedReplayReports]);
+  const selectedReplayReportDurationSeconds = Math.max(
+    300,
+    ...selectedReplayReportTimeline.map(({ offsetSeconds }) => Math.ceil(offsetSeconds) + 3),
+  );
   const selectedInstitutionRecord = useMemo(() => {
     if (!selectedEvent) return null;
     return institutionReports.find((report) => {
@@ -4060,10 +4152,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     () => selectedEvent
       ? Math.max(
         jmaTsunamiReplayDurationSeconds(selectedEvent.originTime, replayTsunamiEpisode),
+        selectedReplayReportDurationSeconds,
         normalizedReplayStepMinutes * 60,
       )
       : 300,
-    [normalizedReplayStepMinutes, replayTsunamiEpisode, selectedEvent],
+    [normalizedReplayStepMinutes, replayTsunamiEpisode, selectedEvent, selectedReplayReportDurationSeconds],
   );
   useEffect(() => {
     replayDurationRef.current = replayDurationSeconds;
@@ -4097,6 +4190,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   }, [activeEews, autoLocateGlobalEarthquakes, autoMagnitudeThreshold, clock, movieAutoTracking, movieCameraEvent]);
 
   useEffect(() => {
+    if (replayModeActive) return;
     if (!autoLocateGlobalEarthquakes || !autoGlobalEvent) {
       handledGlobalAutoEvent.current = null;
       setAutoGlobalEventKey(null);
@@ -4135,6 +4229,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     movieAutoTracking,
     movieCameraEnteredAt,
     playSoundAsset,
+    replayModeActive,
     setShowWaveformStations,
     seismicAlertSoundEnabled,
   ]);
@@ -4243,7 +4338,15 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   }, [catalogue, cencReport, cwaStations, globalFdsnStations, kmaStations, oceanCatalogue, waveformFdsnStations]);
   const selectedStation = allSelectableStations.find((station) => station.id === selectedStationId)
     ?? (selectedGlobalStation?.id === selectedStationId ? selectedGlobalStation : null);
-  const replayEvent = selectedEvent && (replayPlaying || replaySeconds > 0) ? selectedEvent : null;
+  const replayEvent = selectedReplayPropagationEvent && (replayPlaying || replaySeconds > 0)
+    ? selectedReplayPropagationEvent
+    : null;
+  const replaySessionKey = selectedEvent ? eewSoundEventKey(selectedEvent) : "";
+  const replayOfficialFlashActive = Boolean(
+    replayEvent
+      && replayOfficialFlash
+      && replayOfficialFlash.sessionKey === replaySessionKey,
+  );
   const replayPropagationActive = Boolean(replayEvent && isReplayPropagationActive(replaySeconds));
   const replaySeismicSeconds = Math.min(replaySeconds, 300);
   const regionalLiveWaveEvent = latestRegionalState.waveEvent
@@ -4352,7 +4455,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const cwaSimulation = useMemo(() => cwaResponseProfile
     ? simulatePreparedReplayStationResponse(cwaResponseProfile, oceanResponseElapsed)
     : null, [cwaResponseProfile, oceanResponseElapsed]);
-  const waveResponsePresentationActive = showShakeDetectionGrid && (replayEvent
+  const waveResponsePresentationActive = !replayOfficialFlashActive && showShakeDetectionGrid && (replayEvent
     ? replayPropagationActive
     : Boolean(liveWavefrontEvent));
   const visibleReplaySimulation = waveResponsePresentationActive ? replaySimulation : null;
@@ -4484,24 +4587,85 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     if (shouldPlay) void playJmaTsunamiCue(replayTsunamiSnapshot, previous?.snapshot ?? null);
   }, [jmaTsunamiSoundEnabled, playJmaTsunamiCue, replayEvent, replayNiedSoundSessionKey, replayPlaying, replayTsunamiEpisode, replayTsunamiSnapshot]);
 
-  const replayWaveResponseArrived = Boolean(
-    replayEvent
-      && ((replaySimulation?.arrivedStationIds.length ?? 0) > 0
-        || (kmaReplaySimulation?.arrivedStationIds.length ?? 0) > 0
-        || (globalSimulation?.arrivedStationIds.length ?? 0) > 0
-        || (cwaSimulation?.arrivedStationIds.length ?? 0) > 0),
-  );
   useEffect(() => {
-    if (!replayEvent || !replayPlaying || !seismicAlertSoundEnabled) {
-      if (!replayEvent) replayResponseSoundState.current = null;
+    if (!replayEvent || !replaySessionKey) {
+      replayEewSoundState.current = null;
       return;
     }
-    const sessionKey = replayNiedSoundSessionKey;
-    const previous = replayResponseSoundState.current;
-    replayResponseSoundState.current = { sessionKey, arrived: replayWaveResponseArrived };
-    if ((!previous || previous.sessionKey !== sessionKey || previous.arrived) && replayWaveResponseArrived) return;
-    if (replayWaveResponseArrived && previous && !previous.arrived) void playSoundAsset("srev-detail");
-  }, [cwaSimulation?.arrivedStationIds.length, globalSimulation?.arrivedStationIds.length, kmaReplaySimulation?.arrivedStationIds.length, playSoundAsset, replayEvent, replayNiedSoundSessionKey, replayPlaying, replayWaveResponseArrived, seismicAlertSoundEnabled, replaySimulation?.arrivedStationIds.length]);
+    let state = replayEewSoundState.current;
+    if (!state || state.sessionKey !== replaySessionKey) {
+      state = {
+        sessionKey: replaySessionKey,
+        lastSeconds: replaySeconds,
+        playedReportKeys: new Set(
+          selectedReplayReportTimeline
+            .filter(({ offsetSeconds }) => offsetSeconds < replaySeconds - 0.01)
+            .map(({ report }) => eewReportKey(report)),
+        ),
+      };
+      replayEewSoundState.current = state;
+    }
+
+    if (replaySeconds < state.lastSeconds - 0.01) {
+      const visibleReportKeys = new Set(selectedReplayReportTimeline
+        .filter(({ offsetSeconds }) => offsetSeconds <= replaySeconds + 0.01)
+        .map(({ report }) => eewReportKey(report)));
+      state.playedReportKeys = new Set([...state.playedReportKeys].filter((key) => visibleReportKeys.has(key)));
+      setReplayOfficialFlash(null);
+    }
+    const previousSeconds = state.lastSeconds;
+    state.lastSeconds = replaySeconds;
+
+    if (!replayPlaying) {
+      for (const { report, offsetSeconds } of selectedReplayReportTimeline) {
+        if (offsetSeconds <= replaySeconds + 0.01) state.playedReportKeys.add(eewReportKey(report));
+      }
+      return;
+    }
+
+    const crossedReports = selectedReplayReportTimeline.filter(({ report, offsetSeconds }) => (
+      !state.playedReportKeys.has(eewReportKey(report))
+      && offsetSeconds >= previousSeconds - 0.01
+      && offsetSeconds <= replaySeconds + 0.01
+    ));
+    if (!crossedReports.length) return;
+
+    let soundAsset: SeismicSoundAssetId | null = null;
+    let officialDetailReport: LiveEew | null = null;
+    let officialDetailOffsetSeconds: number | null = null;
+    const firstOfficialDetailKey = selectedReplayReportTimeline.find(({ report }) => (
+      report.affectedAreas?.length
+        && (report.observedIntensity || report.relay === "Catalogue")
+    ));
+    for (const { report, offsetSeconds } of crossedReports) {
+      const reportIndex = selectedReplayReportTimeline.findIndex((entry) => eewReportKey(entry.report) === eewReportKey(report));
+      const previousReport = reportIndex > 0 ? selectedReplayReportTimeline[reportIndex - 1].report : null;
+      const isOfficialDetail = Boolean(
+        firstOfficialDetailKey
+          && eewReportKey(firstOfficialDetailKey.report) === eewReportKey(report),
+      );
+      state.playedReportKeys.add(eewReportKey(report));
+      if (isOfficialDetail) {
+        officialDetailReport = report;
+        officialDetailOffsetSeconds = offsetSeconds;
+        soundAsset = "srev-detail";
+        break;
+      } else {
+        soundAsset = replayEewSoundAssetForTransition(report, previousReport);
+      }
+    }
+
+    if (officialDetailReport && officialDetailOffsetSeconds !== null) {
+      state.lastSeconds = officialDetailOffsetSeconds;
+      setReplaySeconds(officialDetailOffsetSeconds);
+      setReplayOfficialFlash({
+        sessionKey: replaySessionKey,
+        report: officialDetailReport,
+        until: Date.now() + 3_000,
+      });
+    }
+    if (seismicAlertSoundEnabled && soundAsset) void playSoundAsset(soundAsset);
+  }, [playSoundAsset, replayEvent, replayPlaying, replaySeconds, replaySessionKey, seismicAlertSoundEnabled, selectedReplayReportTimeline]);
 
   const motionSoundSessionKey = replayEvent ? replayNiedSoundSessionKey : "live";
   const motionSoundMaximum = replayEvent
@@ -4912,10 +5076,13 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       : jmaShindoColor(selectedRank ?? 0);
   const selectedOrigin = selectedEvent ? Date.parse(selectedEvent.originTime) : 0;
   const previewEvent = warningOverlayTab === "selected" && selectedEvent && clock < selectedPreviewUntil ? selectedEvent : null;
-  const rawMapEvent = replayEvent ?? previewEvent ?? liveWavefrontEvent ?? visiblePersistentRegionalEvent ?? autoGlobalEvent ?? latestEvent;
+  const replayMapEvent = useMemo(() => replayEvent
+    ? { ...replayEvent, affectedAreas: undefined }
+    : null, [replayEvent]);
+  const rawMapEvent = replayMapEvent ?? previewEvent ?? liveWavefrontEvent ?? visiblePersistentRegionalEvent ?? autoGlobalEvent ?? latestEvent;
   const mapEvent = useMemo(
-    () => enrichLiveEewWithOfficialAreas(rawMapEvent, institutionReports),
-    [institutionReports, rawMapEvent],
+    () => replayEvent ? rawMapEvent : enrichLiveEewWithOfficialAreas(rawMapEvent, institutionReports),
+    [institutionReports, rawMapEvent, replayEvent],
   );
   const persistentRegionalMapEvent = useMemo(
     () => enrichLiveEewWithOfficialAreas(visiblePersistentRegionalImpactEvent, institutionReports),
@@ -4943,10 +5110,20 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     () => mergeImpactRegionCollections(jmaRegions, eastAsiaImpactRegions),
     [eastAsiaImpactRegions, jmaRegions],
   );
-  const currentAffectedLayers = useMemo(
-    () => affectedRegionLayers(impactRegions, jmaSeismicSites, mapEvent, impactElapsed),
-    [impactElapsed, impactRegions, jmaSeismicSites, mapEvent],
-  );
+  const currentAffectedLayers = useMemo(() => {
+    if (replayOfficialFlashActive && replayOfficialFlash?.report) {
+      return {
+        local: EMPTY_IMPACT_REGIONS,
+        official: affectedRegionLayers(
+          impactRegions,
+          jmaSeismicSites,
+          replayOfficialFlash.report,
+          null,
+        ).official,
+      };
+    }
+    return affectedRegionLayers(impactRegions, jmaSeismicSites, mapEvent, impactElapsed);
+  }, [impactElapsed, impactRegions, jmaSeismicSites, mapEvent, replayOfficialFlash, replayOfficialFlashActive]);
   const supplementPersistentRegionalOfficial = Boolean(
     !replayEvent
       && persistentRegionalMapEvent
@@ -4985,9 +5162,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   }, [displayedJmaTsunami, tsunamiRegions]);
   const waveOrigin = wavefrontEvent ? Date.parse(wavefrontEvent.originTime) : 0;
   const waveNow = replayEvent ? waveOrigin + replaySeismicSeconds * 1000 : clock;
-  const showWaves = replayEvent
+  const showWaves = !replayOfficialFlashActive && (replayEvent
     ? replayPropagationActive
-    : Boolean(liveWavefrontEvent);
+    : Boolean(liveWavefrontEvent));
   const userWarningLocation = Number.isFinite(userStation.lat) && Number.isFinite(userStation.lon)
     ? { latitude: userStation.lat, longitude: userStation.lon }
     : null;
@@ -5043,7 +5220,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       : `预计烈度 ${intensityRomanLabel(calculateLocalIntensity(wavefrontEvent, userWarningLocation))}`
     : "预计烈度 --";
   const globalAutoPresentation = Boolean(!replayEvent && autoGlobalEvent && rawMapEvent === autoGlobalEvent);
-  const rawMapDetectionStationIds = !showShakeDetectionGrid
+  const rawMapDetectionStationIds = replayOfficialFlashActive || !showShakeDetectionGrid
     ? EMPTY_STATION_IDS
     : globalAutoPresentation
     ? EMPTY_STATION_IDS
@@ -5251,19 +5428,16 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   };
 
   const toggleReplay = () => {
-    if (!selectedEvent) return;
+    if (!selectedEvent || !selectedReplayPropagationEvent) return;
     if (!replayPlaying) {
-      replayResponseSoundState.current = {
-        sessionKey: `replay:${eewReportKey(selectedEvent)}`,
-        arrived: Boolean(replaySimulation?.arrivedStationIds.length),
-      };
-      if (seismicAlertSoundEnabled) {
-        void primeReplayAudio()
-          .then(() => playSoundAsset("srev-prompt"));
-      } else {
-        void primeReplayAudio();
-      }
-      focusMap(`replay:${eewReportKey(selectedEvent)}`, selectedEvent.latitude, selectedEvent.longitude, 5, true);
+      void primeReplayAudio();
+      focusMap(
+        `replay:${eewReportKey(selectedEvent)}`,
+        selectedReplayPropagationEvent.latitude,
+        selectedReplayPropagationEvent.longitude,
+        5,
+        true,
+      );
     }
     setReplayPlaying((value) => !value);
   };
@@ -5677,6 +5851,10 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
             </header>
             <div ref={mapShellRef} className={`seismic-map-shell${sWaveWarningVisible ? " has-s-wave-warning" : ""}`}>
               {!catalogue && <div className="earthquake-map-loading"><Loader2 size={24} /><span>正在加载东亚测站目录</span></div>}
+              {replayEvent && replayLiveNotice && <section key={replayLiveNotice.key} className="seismic-replay-live-notice" role="status" aria-live="assertive">
+                <Siren size={18} />
+                <span><small>回放未中断 · 最新实时预警</small><strong>{replayLiveNotice.event.source} · {replayLiveNotice.event.place}</strong><em>M {replayLiveNotice.event.magnitude?.toFixed(1) ?? "--"} · 第 {replayLiveNotice.event.serial} 报</em></span>
+              </section>}
               <SeismicMap
                 theme={mapTheme}
                 interactionMode={mapInteractionMode}
@@ -5696,16 +5874,16 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 niedFrame={mapDetectionStationIds.length ? niedFrame : null}
                 kmaValues={kmaDetection.activeStationIds.length ? kmaValues : EMPTY_NUMBERS}
                 kmaReplayRanks={replayEvent ? visibleKmaReplaySimulation?.ranks ?? EMPTY_RANKS : null}
-                showNied={showNied}
-                showKma={showKma}
-                showOcean={showOcean}
-                showOtherOcean={showOtherOcean}
-                showCenc={showCenc}
-                showGlobal={showGlobalStations}
-                showWaveform={showWaveformStations}
-                showCwa={showCwaStations}
-                showGnss={showGnssStations}
-                showPalert={showPalertStations}
+                showNied={showNied && !replayOfficialFlashActive}
+                showKma={showKma && !replayOfficialFlashActive}
+                showOcean={showOcean && !replayOfficialFlashActive}
+                showOtherOcean={showOtherOcean && !replayOfficialFlashActive}
+                showCenc={showCenc && !replayOfficialFlashActive}
+                showGlobal={showGlobalStations && !replayOfficialFlashActive}
+                showWaveform={showWaveformStations && !replayOfficialFlashActive}
+                showCwa={showCwaStations && !replayOfficialFlashActive}
+                showGnss={showGnssStations && !replayOfficialFlashActive}
+                showPalert={showPalertStations && !replayOfficialFlashActive}
                 selectedStation={selectedStation}
                 selectedEvent={mapEvent ?? null}
                 waveEvent={wavefrontEvent}
@@ -5736,7 +5914,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 shakeMapContours={visibleShakeMapContours}
                 pagerCities={usgsPager?.allCities ?? []}
                 showLocalImpact={showLocalImpact}
-                showOfficialImpact={showOfficialImpact}
+                showOfficialImpact={showOfficialImpact || replayOfficialFlashActive}
                 showTsunami={showJmaTsunami}
                 showGlobalFaults={showGlobalFaults}
                 showJshisHazard={showJshisHazard}
