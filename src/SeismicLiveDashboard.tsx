@@ -41,7 +41,7 @@ import {
   X,
 } from "lucide-react";
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { icon as createLeafletIcon, type Circle as LeafletCircleLayer, type Icon as LeafletIcon } from "leaflet";
+import { icon as createLeafletIcon, type Circle as LeafletCircleLayer, type Icon as LeafletIcon, type LeafletMouseEvent } from "leaflet";
 import { Circle, CircleMarker, GeoJSON as LeafletGeoJSON, ImageOverlay, MapContainer, Marker, Pane, Popup, Rectangle, ScaleControl, TileLayer, Tooltip as LeafletTooltip, useMap, useMapEvents, ZoomControl } from "react-leaflet";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { feature as topojsonFeature } from "topojson-client";
@@ -1840,7 +1840,7 @@ const StationCanvasLayer = memo(function StationCanvasLayer(props: {
     canvas.className = "seismic-station-canvas";
     canvas.setAttribute("aria-hidden", "true");
     canvas.style.position = "absolute";
-    canvas.style.pointerEvents = onSelectPointRef.current ? "auto" : "none";
+    canvas.style.pointerEvents = "none";
     pane.appendChild(canvas);
     canvasRef.current = canvas;
     let animationFrame = 0;
@@ -1898,13 +1898,15 @@ const StationCanvasLayer = memo(function StationCanvasLayer(props: {
       hitCandidatesRef.current = hitCandidates;
       context.globalAlpha = 1;
     };
-    const handleClick = (event: MouseEvent) => {
+    const handleMapClick = (event: LeafletMouseEvent) => {
       const onSelectPoint = onSelectPointRef.current;
-      if (!onSelectPoint) return;
-      const bounds = canvas.getBoundingClientRect();
-      const match = findNearestCanvasHit(hitCandidatesRef.current, event.clientX - bounds.left, event.clientY - bounds.top);
+      // Let higher interactive Leaflet markers keep precedence. A background
+      // map click still reaches this handler even when another renderer Canvas
+      // is visually stacked above the station Canvas.
+      if (!onSelectPoint || event.sourceTarget !== map) return;
+      const match = findNearestCanvasHit(hitCandidatesRef.current, event.containerPoint.x, event.containerPoint.y);
       if (!match) return;
-      event.stopPropagation();
+      event.originalEvent.stopPropagation();
       onSelectPoint(match.value);
     };
     const scheduleDraw = () => {
@@ -1912,12 +1914,12 @@ const StationCanvasLayer = memo(function StationCanvasLayer(props: {
       animationFrame = window.requestAnimationFrame(draw);
     };
     redrawRef.current = scheduleDraw;
-    canvas.addEventListener("click", handleClick);
+    map.on("click", handleMapClick);
     map.on("moveend zoomend resize viewreset", scheduleDraw);
     scheduleDraw();
     return () => {
       map.off("moveend zoomend resize viewreset", scheduleDraw);
-      canvas.removeEventListener("click", handleClick);
+      map.off("click", handleMapClick);
       if (animationFrame) window.cancelAnimationFrame(animationFrame);
       redrawRef.current = () => undefined;
       canvasRef.current = null;
@@ -2039,7 +2041,9 @@ const PalertStationLayer = memo(function PalertStationLayer(props: {
     const station = point.hitId ? stationById.get(point.hitId) : null;
     if (station) props.onSelectStation(station);
   }, [props.onSelectStation, stationById]);
-  return <Pane name="seismic-station-base-palert" style={{ zIndex: 458 }}>{props.show ? <StationCanvasLayer paneName="seismic-station-base-palert" points={points} onSelectPoint={selectPoint} /> : null}</Pane>;
+  return <Pane name="seismic-station-base-palert" style={{ zIndex: 458 }}>
+    {props.show ? <StationCanvasLayer paneName="seismic-station-base-palert" points={points} onSelectPoint={selectPoint} /> : null}
+  </Pane>;
 });
 
 const NiedStationBaseLayer = memo(function NiedStationBaseLayer(props: { stations: SeismicStation[]; show: boolean; style: NiedStationStyle }) {
@@ -2483,7 +2487,6 @@ const SeismicMap = memo(function SeismicMap(props: {
     const stations = new Map<string, SelectableStation>();
     const add = (items: SelectableStation[]) => items.forEach((station) => stations.set(station.id, station));
     if (props.showCwa && layerComplexity >= 2 && baseLayerStage >= 1) add(selectableCwaStations);
-    if (props.showPalert && layerComplexity >= 2) add(props.palertStations);
     if ((props.showGlobal || props.showWaveform) && layerComplexity >= 3 && baseLayerStage >= 2) add(selectableGlobalStations);
     if (layerComplexity >= 3 && baseLayerStage >= 3) add(sampleStationMarkers(props.oceanStations.filter((station) => (
       station.network === "S-net" ? props.showOcean : props.showOtherOcean
@@ -2501,7 +2504,6 @@ const SeismicMap = memo(function SeismicMap(props: {
     props.kmaStations,
     props.niedStations,
     props.oceanStations,
-    props.palertStations,
     props.replayMode,
     props.showCenc,
     props.showCwa,
@@ -2510,7 +2512,6 @@ const SeismicMap = memo(function SeismicMap(props: {
     props.showNied,
     props.showOcean,
     props.showOtherOcean,
-    props.showPalert,
     props.showWaveform,
     responseBudget,
     selectableCwaStations,
