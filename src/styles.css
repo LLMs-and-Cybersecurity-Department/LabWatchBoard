@@ -4619,34 +4619,6 @@ body.seismic-panel-resizing {
   color: #f6b554;
 }
 
-.pager-map-city-label {
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 1.5px solid rgba(255, 255, 255, 0.92);
-  border-radius: 50%;
-  background: #d5d9db;
-  color: #081011;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.58);
-  font-size: 7px;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.pager-map-city-label::before { display: none; }
-.pager-map-city-label.mmi-1 { background: #d5d9db; }
-.pager-map-city-label.mmi-2 { background: #8ed8ef; }
-.pager-map-city-label.mmi-3 { background: #54c9ee; }
-.pager-map-city-label.mmi-4 { background: #5de38f; }
-.pager-map-city-label.mmi-5 { background: #f4e75a; }
-.pager-map-city-label.mmi-6 { background: #fbb347; }
-.pager-map-city-label.mmi-7 { background: #f57f36; }
-.pager-map-city-label.mmi-8 { background: #ef4444; color: #fff; }
-.pager-map-city-label.mmi-9 { background: #b91c1c; color: #fff; }
-.pager-map-city-label.mmi-10 { background: #7e22ce; color: #fff; }
-
 .seismic-map-shell {
   position: relative;
   height: var(--seismic-map-panel-height, 650px);
@@ -5234,6 +5206,7 @@ body.seismic-panel-resizing {
 }
 
 .seismic-map .seismic-station-value-icon,
+.seismic-map .seismic-pager-city-icon,
 .seismic-map .seismic-hypocenter-icon {
   border: 0;
   background: transparent;
@@ -5246,11 +5219,18 @@ body.seismic-panel-resizing {
   pointer-events: none;
 }
 
+.seismic-map .seismic-pager-city-icon {
+  border-radius: 50%;
+  pointer-events: auto;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.72));
+}
+
 .seismic-map .seismic-hypocenter-icon {
   pointer-events: auto;
 }
 
 .seismic-map .seismic-station-value-icon img,
+.seismic-map .seismic-pager-city-icon img,
 .seismic-map .seismic-hypocenter-icon img {
   display: block;
   width: 100%;
@@ -5258,7 +5238,8 @@ body.seismic-panel-resizing {
   transform: none;
 }
 
-.seismic-map .seismic-station-value-icon img { border-radius: 50%; }
+.seismic-map .seismic-station-value-icon img,
+.seismic-map .seismic-pager-city-icon img { border-radius: 50%; }
 
 .seismic-map .seismic-station-value-icon.selected {
   filter: drop-shadow(0 0 2px #ffffff) drop-shadow(0 2px 3px rgba(0, 0, 0, 0.72));

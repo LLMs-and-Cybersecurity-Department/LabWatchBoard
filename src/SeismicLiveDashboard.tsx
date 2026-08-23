@@ -83,6 +83,7 @@ import {
   isSameEewEvent,
   LIVE_EEW_SOURCE_ORDER,
   makeKmaStations,
+  matchOfficialHypocenter,
   mergeEewHistory,
   niedCharToLevel,
   niedGridAnchor,
@@ -184,6 +185,13 @@ import {
   tsunamiSoundAssetForTransition,
   type SeismicSoundAssetId,
 } from "./seismicAudio";
+import {
+  initialReplayProductStage,
+  nextReplayProductStage,
+  replayProductStageDelayMs,
+  replayProductStageVisibility,
+  type ReplayProductStage,
+} from "./seismicReplayPresentation";
 import { usePersistentState } from "./usePersistentState";
 import type { Station } from "./types";
 import { FdsnWaveformPanel } from "./FdsnWaveformPanel";
@@ -492,6 +500,7 @@ const HYPOCENTER_ICON_URLS = {
 } as const;
 
 const stationValueIconCache = new Map<string, LeafletIcon>();
+const pagerCityIconCache = new Map<number, LeafletIcon>();
 const hypocenterIconCache = new Map<keyof typeof HYPOCENTER_ICON_URLS, LeafletIcon>();
 
 function stationValueMapIcon(scale: "intensity" | "shindo", rank: number, selected = false) {
@@ -528,6 +537,23 @@ function hypocenterMapIcon(kind: keyof typeof HYPOCENTER_ICON_URLS) {
   });
   hypocenterIconCache.set(kind, eventIcon);
   return eventIcon;
+}
+
+function pagerCityMapIcon(rank: number) {
+  const normalizedRank = Math.max(0, Math.min(12, Math.round(Number(rank) || 0)));
+  const cached = pagerCityIconCache.get(normalizedRank);
+  if (cached) return cached;
+  const iconUrl = INTENSITY_ICON_URLS[normalizedRank];
+  const cityIcon = createLeafletIcon({
+    iconUrl,
+    iconRetinaUrl: iconUrl,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+    popupAnchor: [0, -15],
+    className: "seismic-pager-city-icon",
+  });
+  pagerCityIconCache.set(normalizedRank, cityIcon);
+  return cityIcon;
 }
 
 const StationValueMarker = memo(function StationValueMarker(props: {
@@ -1505,15 +1531,14 @@ const PagerCityMapLayer = memo(function PagerCityMapLayer(props: {
   return <Pane name="seismic-usgs-pager-cities" style={{ zIndex: 465 }}>
     {props.visible && props.cities.map((city) => {
       const rank = Math.max(1, Math.min(10, city.mmi));
-      return <CircleMarker
+      return <Marker
         key={`pager-city:${city.id}`}
-        center={[city.latitude, city.longitude]}
-        radius={2.2}
-        pathOptions={{ color: "#ffffff", fillColor: mmiIntensityColor(rank), weight: 0.8, opacity: 0.82, fillOpacity: 0.72 }}
+        position={[city.latitude, city.longitude]}
+        icon={pagerCityMapIcon(rank)}
+        alt={`${city.name} USGS PAGER MMI ${intensityRomanLabel(rank)}`}
       >
-        <LeafletTooltip permanent direction="center" className={`pager-map-city-label mmi-${Math.round(rank)}`}>{intensityRomanLabel(rank)}</LeafletTooltip>
         <Popup><strong>{city.name}</strong><br />USGS PAGER 城市估算<br />MMI {city.mmi.toFixed(1)} · {intensityRomanLabel(rank)}<br />人口 {city.population.toLocaleString("zh-CN")}<br />{city.onOfficialMap ? "USGS 默认地图城市" : "Show all cities 扩展城市"}</Popup>
-      </CircleMarker>;
+      </Marker>;
     })}
   </Pane>;
 });
@@ -2026,6 +2051,8 @@ const SeismicMap = memo(function SeismicMap(props: {
   showJshisFault: boolean;
   showShakeMap: boolean;
   showPagerCities: boolean;
+  forceLocalImpact: boolean;
+  forcePagerCities: boolean;
   showWniCameras: boolean;
   wniCameras: WniCamera[];
   highlightedWniCameraId: string | null;
@@ -2351,7 +2378,7 @@ const SeismicMap = memo(function SeismicMap(props: {
       <SeismicMapResizeSync />
       <TileLayer key={props.theme} url={layer.url} attribution={layer.attribution} maxZoom={19} />
       <Pane name="seismic-impact-local" style={{ zIndex: 310, pointerEvents: "none" }}>
-        {props.showLocalImpact && layerComplexity >= 3 && props.localRegions.features.length > 0 && <LeafletGeoJSON key={`local:${props.selectedEvent?.id}:${props.selectedEvent?.serial}:${localRegionKey}`} data={props.localRegions} interactive={false} style={(feature) => { const rank = Number(feature?.properties?.rank ?? 0); const currentRank = Number(feature?.properties?.currentRank ?? 0); const arrived = Boolean(feature?.properties?.arrived); const scale = feature?.properties?.scale === "intensity" ? "intensity" : "shindo"; const displayRank = arrived ? Math.max(1, currentRank) : rank; const color = scale === "intensity" ? mmiIntensityColor(displayRank) : jmaShindoColor(displayRank); const contour = Boolean(feature?.properties?.contour); return { color, fillColor: color, weight: arrived ? contour ? 1.8 : 1.45 : 0.8, opacity: arrived ? 0.96 : 0.66, fillOpacity: arrived ? contour ? 0.28 : 0.44 : contour ? 0.08 : 0.16, dashArray: arrived ? undefined : "4 3" }; }} />}
+        {props.showLocalImpact && (props.forceLocalImpact || layerComplexity >= 3) && props.localRegions.features.length > 0 && <LeafletGeoJSON key={`local:${props.selectedEvent?.id}:${props.selectedEvent?.serial}:${localRegionKey}`} data={props.localRegions} interactive={false} style={(feature) => { const rank = Number(feature?.properties?.rank ?? 0); const currentRank = Number(feature?.properties?.currentRank ?? 0); const arrived = Boolean(feature?.properties?.arrived); const scale = feature?.properties?.scale === "intensity" ? "intensity" : "shindo"; const displayRank = arrived ? Math.max(1, currentRank) : rank; const color = scale === "intensity" ? mmiIntensityColor(displayRank) : jmaShindoColor(displayRank); const contour = Boolean(feature?.properties?.contour); return { color, fillColor: color, weight: arrived ? contour ? 1.8 : 1.45 : 0.8, opacity: arrived ? 0.96 : 0.66, fillOpacity: arrived ? contour ? 0.28 : 0.44 : contour ? 0.08 : 0.16, dashArray: arrived ? undefined : "4 3" }; }} />}
       </Pane>
       <Pane name="seismic-impact-official" style={{ zIndex: 320, pointerEvents: "none" }}>
         {props.showOfficialImpact && props.officialRegions.features.length > 0 && <LeafletGeoJSON key={`official:${props.selectedEvent?.id}:${props.selectedEvent?.serial}`} data={props.officialRegions} interactive={false} style={(feature) => { const rank = Number(feature?.properties?.rank ?? 0); const scale = feature?.properties?.scale === "intensity" ? "intensity" : "shindo"; const color = scale === "intensity" ? mmiIntensityColor(rank) : jmaShindoColor(rank); return { color: "#ffffff", fillColor: color, weight: 1.5, opacity: 0.94, fillOpacity: 0.56 }; }} />}
@@ -2482,7 +2509,7 @@ const SeismicMap = memo(function SeismicMap(props: {
           <LeafletTooltip permanent direction="bottom" offset={[0, 9]} className="seismic-estimate-tooltip"><strong>{props.estimateMode === "replay" ? "回放反演" : "NIED 本地推算"}</strong><span>{props.estimate.latitude.toFixed(3)}, {props.estimate.longitude.toFixed(3)} · 深 {props.estimate.depthKm.toFixed(0)} km</span></LeafletTooltip>
         </CircleMarker>}
       </Pane>
-      <PagerCityMapLayer visible={props.showPagerCities && layerComplexity >= 5} cities={props.pagerCities} />
+      <PagerCityMapLayer visible={props.showPagerCities && (props.forcePagerCities || layerComplexity >= 5)} cities={props.pagerCities} />
       <CwaStationBaseLayer stations={props.cwaStations} maxMarkers={baseStationBudget} show={!props.replayMode && props.showCwa && layerComplexity >= 2 && baseLayerStage >= 1} onSelectStation={props.onSelectStation} />
       <GnssStationLayer stations={props.gnssStations} show={props.showGnss && layerComplexity >= 4} selectMode={props.interactionMode === "select"} />
       <PalertStationLayer stations={props.palertStations} show={props.showPalert && layerComplexity >= 3} selectMode={props.interactionMode === "select"} />
@@ -2758,6 +2785,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [usgsPager, setUsgsPager] = useState<EarthquakePager | null>(null);
   const [usgsPagerLoading, setUsgsPagerLoading] = useState(false);
   const [usgsPagerError, setUsgsPagerError] = useState("");
+  const [replayUsgsShakeMap, setReplayUsgsShakeMap] = useState<EarthquakeShakeMap | null>(null);
+  const [replayUsgsShakeMapLoading, setReplayUsgsShakeMapLoading] = useState(false);
+  const [replayUsgsShakeMapError, setReplayUsgsShakeMapError] = useState("");
+  const [replayUsgsPager, setReplayUsgsPager] = useState<EarthquakePager | null>(null);
+  const [replayUsgsPagerLoading, setReplayUsgsPagerLoading] = useState(false);
+  const [replayUsgsPagerError, setReplayUsgsPagerError] = useState("");
   const [expandedOfficialKey, setExpandedOfficialKey] = useState<string | null>(null);
   const [selectedEewKey, setSelectedEewKey] = useState<string | null>(null);
   const [selectedPreviewUntil, setSelectedPreviewUntil] = useState(0);
@@ -2783,10 +2816,10 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [kmaDetection, setKmaDetection] = useState(() => blankDetection("KMA-PEWS"));
   const [replaySeconds, setReplaySeconds] = useState(0);
   const [replayPlaying, setReplayPlaying] = useState(false);
-  const [replayOfficialFlash, setReplayOfficialFlash] = useState<{
+  const [replayProductPresentation, setReplayProductPresentation] = useState<{
     sessionKey: string;
     report: LiveEew;
-    until: number;
+    stage: ReplayProductStage;
   } | null>(null);
   const [replayLiveNotice, setReplayLiveNotice] = useState<{
     key: string;
@@ -2825,6 +2858,15 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const intenseSoundSession = useRef<string | null>(null);
   const replayClockRef = useRef<number | null>(null);
   const replayDurationRef = useRef(300);
+  const replayReportOffsetsRef = useRef<number[]>([]);
+  const replayProductLoadStateRef = useRef({ productsLoading: false, hasProducts: false });
+  replayProductLoadStateRef.current = {
+    productsLoading: replayUsgsShakeMapLoading || replayUsgsPagerLoading,
+    hasProducts: Boolean(replayUsgsShakeMap || replayUsgsPager),
+  };
+  const panelTabRef = useRef(panelTab);
+  panelTabRef.current = panelTab;
+  const replayExposurePreviousPanel = useRef<PanelTab | null>(null);
   const niedAudioRef = useRef<HTMLAudioElement | null>(null);
   const niedAudioContextRef = useRef<AudioContext | null>(null);
   const niedAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
@@ -3052,15 +3094,22 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     return () => controller.abort();
   }, [showWniCameras, wniCameraReloadKey]);
 
+  const restoreReplayExposurePanel = useCallback(() => {
+    const previousPanel = replayExposurePreviousPanel.current;
+    replayExposurePreviousPanel.current = null;
+    if (previousPanel && panelTabRef.current === "exposure") setPanelTab(previousPanel);
+  }, [setPanelTab]);
+
   const clearReplayPresentation = useCallback(() => {
     setReplayPlaying(false);
     setReplaySeconds(0);
-    setReplayOfficialFlash(null);
+    setReplayProductPresentation(null);
     setReplayLiveNotice(null);
     replayEewSoundState.current = null;
     setSelectedPreviewUntil(0);
     setWarningOverlayTab("latest");
-  }, []);
+    restoreReplayExposurePanel();
+  }, [restoreReplayExposurePanel]);
 
   const getNiedAudio = useCallback(() => {
     if (!niedAudioRef.current) niedAudioRef.current = new Audio();
@@ -3888,7 +3937,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   }, [clock, selectedPreviewUntil, warningOverlayTab]);
 
   useEffect(() => {
-    if (!replayPlaying || replayOfficialFlash) {
+    if (!replayPlaying || replayProductPresentation) {
       replayClockRef.current = null;
       return;
     }
@@ -3897,23 +3946,57 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       const currentTick = performance.now();
       const elapsedSeconds = Math.max(0, (currentTick - (replayClockRef.current ?? currentTick)) / 1000);
       replayClockRef.current = currentTick;
-      setReplaySeconds((value) => Math.min(replayDurationRef.current, value + elapsedSeconds * normalizedReplaySpeed));
+      setReplaySeconds((value) => {
+        const nextValue = Math.min(replayDurationRef.current, value + elapsedSeconds * normalizedReplaySpeed);
+        const crossedReportOffset = replayReportOffsetsRef.current.find((offsetSeconds) => (
+          offsetSeconds > value + 0.01 && offsetSeconds <= nextValue + 0.01
+        ));
+        return crossedReportOffset ?? nextValue;
+      });
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [normalizedReplaySpeed, replayOfficialFlash, replayPlaying, replaySeconds]);
+  }, [normalizedReplaySpeed, replayPlaying, replayProductPresentation, replaySeconds]);
 
   useEffect(() => {
-    if (!replayOfficialFlash) return;
-    const remainingMs = Math.max(0, replayOfficialFlash.until - Date.now());
+    if (!replayProductPresentation) return;
+    const delayMs = replayProductStageDelayMs(replayProductPresentation.stage);
+    if (delayMs === null) return;
     const timer = window.setTimeout(() => {
-      setReplayOfficialFlash((current) => current?.sessionKey === replayOfficialFlash.sessionKey
-        && current.report.id === replayOfficialFlash.report.id
-        && current.report.announcedAt === replayOfficialFlash.report.announcedAt
-        ? null
-        : current);
-    }, remainingMs);
+      setReplayProductPresentation((current) => {
+        if (!current
+          || current.sessionKey !== replayProductPresentation.sessionKey
+          || eewReportKey(current.report) !== eewReportKey(replayProductPresentation.report)
+          || current.stage !== replayProductPresentation.stage) return current;
+        const nextStage = nextReplayProductStage(current.stage, replayProductLoadStateRef.current);
+        return nextStage ? { ...current, stage: nextStage } : null;
+      });
+    }, delayMs);
     return () => window.clearTimeout(timer);
-  }, [replayOfficialFlash]);
+  }, [replayProductPresentation]);
+
+  useEffect(() => {
+    if (replayProductPresentation?.stage !== "waiting-products"
+      || replayUsgsShakeMapLoading
+      || replayUsgsPagerLoading) return;
+    const nextStage = nextReplayProductStage("waiting-products", {
+      productsLoading: false,
+      hasProducts: Boolean(replayUsgsShakeMap || replayUsgsPager),
+    });
+    setReplayProductPresentation((current) => current?.stage === "waiting-products"
+      ? nextStage ? { ...current, stage: nextStage } : null
+      : current);
+  }, [replayProductPresentation?.stage, replayUsgsPager, replayUsgsPagerLoading, replayUsgsShakeMap, replayUsgsShakeMapLoading]);
+
+  useEffect(() => {
+    if (replayProductPresentation?.stage !== "cities" || !replayUsgsPager) return;
+    if (replayExposurePreviousPanel.current === null) replayExposurePreviousPanel.current = panelTabRef.current;
+    setPanelTab("exposure");
+  }, [replayProductPresentation?.stage, replayUsgsPager, setPanelTab]);
+
+  useEffect(() => {
+    if (replayProductPresentation || replayExposurePreviousPanel.current === null) return;
+    restoreReplayExposurePanel();
+  }, [replayProductPresentation, restoreReplayExposurePanel]);
 
   useEffect(() => {
     if (!replayLiveNotice) return;
@@ -3936,11 +4019,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   useEffect(() => {
     setReplayPlaying(false);
     setReplaySeconds(0);
-    setReplayOfficialFlash(null);
+    setReplayProductPresentation(null);
     setReplayLiveNotice(null);
     replayEewSoundState.current = null;
     replayDurationRef.current = 300;
-  }, [selectedEewKey]);
+    restoreReplayExposurePanel();
+  }, [restoreReplayExposurePanel, selectedEewKey]);
 
   const niedNeighbors = useMemo(() => buildStationNeighborMap(catalogue?.stations ?? []), [catalogue]);
   const kmaNeighbors = useMemo(() => buildStationNeighborMap(kmaStations, 30, 64), [kmaStations]);
@@ -4127,6 +4211,30 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     const offsetSeconds = replayEewReportOffsetSeconds(report);
     return offsetSeconds === null ? [] : [{ report, offsetSeconds }];
   }), [selectedReplayReports]);
+  replayReportOffsetsRef.current = selectedReplayReportTimeline.map(({ offsetSeconds }) => offsetSeconds);
+  const selectedReplayInstitutionRecord = useMemo(() => {
+    if (!selectedEvent) return null;
+    const matched = matchOfficialHypocenter(selectedEvent, institutionReports);
+    return matched
+      ? institutionReports.find((report) => (
+        report.source === matched.source
+        && report.sourceEventId === matched.sourceEventId
+      )) ?? null
+      : null;
+  }, [institutionReports, selectedEvent]);
+  const selectedReplayPresentationEntry = useMemo(() => {
+    const officialEntry = selectedReplayReportTimeline.find(({ report }) => (
+      Boolean(report.affectedAreas?.length)
+      && (report.observedIntensity || report.relay === "Catalogue")
+    ));
+    if (officialEntry) return officialEntry;
+    if (!selectedReplayInstitutionRecord
+      || (!isShakeMapQueryable(selectedReplayInstitutionRecord) && !isPagerQueryable(selectedReplayInstitutionRecord))) return null;
+    const productReport = institutionReportToLiveEew(selectedReplayInstitutionRecord);
+    return productReport
+      ? selectedReplayReportTimeline.find(({ report }) => eewReportKey(report) === eewReportKey(productReport)) ?? null
+      : null;
+  }, [selectedReplayInstitutionRecord, selectedReplayReportTimeline]);
   const selectedReplayReportDurationSeconds = Math.max(
     300,
     ...selectedReplayReportTimeline.map(({ offsetSeconds }) => Math.ceil(offsetSeconds) + 3),
@@ -4251,6 +4359,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       : null,
     [enabledShakeMapMmiLevels, usgsShakeMap],
   );
+  const visibleReplayShakeMapContours = useMemo(
+    () => replayUsgsShakeMap
+      ? filterShakeMapContours(replayUsgsShakeMap, enabledShakeMapMmiLevels)
+      : null,
+    [enabledShakeMapMmiLevels, replayUsgsShakeMap],
+  );
   const toggleShakeMapMmiLevel = useCallback((level: number) => {
     setShakeMapMmiLevels((current) => (
       current.includes(level)
@@ -4300,6 +4414,49 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       });
     return () => controller.abort();
   }, [pagerReport]);
+  useEffect(() => {
+    const replayReport = bottomTab === "replay" ? selectedReplayInstitutionRecord : null;
+    const shouldLoadShakeMap = Boolean(replayReport && isShakeMapQueryable(replayReport));
+    const shouldLoadPager = Boolean(replayReport && isPagerQueryable(replayReport));
+    const controller = new AbortController();
+
+    setReplayUsgsShakeMap(null);
+    setReplayUsgsPager(null);
+    setReplayUsgsShakeMapError("");
+    setReplayUsgsPagerError("");
+    setReplayUsgsShakeMapLoading(shouldLoadShakeMap);
+    setReplayUsgsPagerLoading(shouldLoadPager);
+
+    if (replayReport && shouldLoadShakeMap) {
+      void fetchEarthquakeShakeMap(replayReport, controller.signal)
+        .then(setReplayUsgsShakeMap)
+        .catch((error: unknown) => {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          setReplayUsgsShakeMapError(error instanceof Error ? error.message : String(error));
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setReplayUsgsShakeMapLoading(false);
+        });
+    }
+    if (replayReport && shouldLoadPager) {
+      void fetchEarthquakePager(replayReport, controller.signal)
+        .then(setReplayUsgsPager)
+        .catch((error: unknown) => {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          setReplayUsgsPagerError(error instanceof Error ? error.message : String(error));
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setReplayUsgsPagerLoading(false);
+        });
+    }
+    return () => controller.abort();
+  }, [
+    bottomTab,
+    selectedReplayInstitutionRecord?.id,
+    selectedReplayInstitutionRecord?.pagerAvailable,
+    selectedReplayInstitutionRecord?.shakeMapAvailable,
+    selectedReplayInstitutionRecord?.updatedAt,
+  ]);
   const cwaStations = useMemo(
     () => cwaStationSnapshot?.stations ?? [],
     [cwaStationSnapshot],
@@ -4342,10 +4499,13 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     ? selectedReplayPropagationEvent
     : null;
   const replaySessionKey = selectedEvent ? eewSoundEventKey(selectedEvent) : "";
-  const replayOfficialFlashActive = Boolean(
+  const replayProductPresentationActive = Boolean(
     replayEvent
-      && replayOfficialFlash
-      && replayOfficialFlash.sessionKey === replaySessionKey,
+      && replayProductPresentation
+      && replayProductPresentation.sessionKey === replaySessionKey,
+  );
+  const replayProductVisibility = replayProductStageVisibility(
+    replayProductPresentationActive ? replayProductPresentation?.stage ?? null : null,
   );
   const replayPropagationActive = Boolean(replayEvent && isReplayPropagationActive(replaySeconds));
   const replaySeismicSeconds = Math.min(replaySeconds, 300);
@@ -4455,7 +4615,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const cwaSimulation = useMemo(() => cwaResponseProfile
     ? simulatePreparedReplayStationResponse(cwaResponseProfile, oceanResponseElapsed)
     : null, [cwaResponseProfile, oceanResponseElapsed]);
-  const waveResponsePresentationActive = !replayOfficialFlashActive && showShakeDetectionGrid && (replayEvent
+  const waveResponsePresentationActive = !replayProductPresentationActive && showShakeDetectionGrid && (replayEvent
     ? replayPropagationActive
     : Boolean(liveWavefrontEvent));
   const visibleReplaySimulation = waveResponsePresentationActive ? replaySimulation : null;
@@ -4611,7 +4771,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
         .filter(({ offsetSeconds }) => offsetSeconds <= replaySeconds + 0.01)
         .map(({ report }) => eewReportKey(report)));
       state.playedReportKeys = new Set([...state.playedReportKeys].filter((key) => visibleReportKeys.has(key)));
-      setReplayOfficialFlash(null);
+      setReplayProductPresentation(null);
     }
     const previousSeconds = state.lastSeconds;
     state.lastSeconds = replaySeconds;
@@ -4631,41 +4791,57 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     if (!crossedReports.length) return;
 
     let soundAsset: SeismicSoundAssetId | null = null;
-    let officialDetailReport: LiveEew | null = null;
-    let officialDetailOffsetSeconds: number | null = null;
-    const firstOfficialDetailKey = selectedReplayReportTimeline.find(({ report }) => (
-      report.affectedAreas?.length
-        && (report.observedIntensity || report.relay === "Catalogue")
-    ));
+    let presentationReport: LiveEew | null = null;
+    let presentationOffsetSeconds: number | null = null;
+    let presentationHasOfficialImpact = false;
     for (const { report, offsetSeconds } of crossedReports) {
       const reportIndex = selectedReplayReportTimeline.findIndex((entry) => eewReportKey(entry.report) === eewReportKey(report));
       const previousReport = reportIndex > 0 ? selectedReplayReportTimeline[reportIndex - 1].report : null;
-      const isOfficialDetail = Boolean(
-        firstOfficialDetailKey
-          && eewReportKey(firstOfficialDetailKey.report) === eewReportKey(report),
+      const startsProductPresentation = Boolean(
+        selectedReplayPresentationEntry
+          && eewReportKey(selectedReplayPresentationEntry.report) === eewReportKey(report),
       );
       state.playedReportKeys.add(eewReportKey(report));
-      if (isOfficialDetail) {
-        officialDetailReport = report;
-        officialDetailOffsetSeconds = offsetSeconds;
-        soundAsset = "srev-detail";
+      if (startsProductPresentation) {
+        presentationReport = report;
+        presentationOffsetSeconds = offsetSeconds;
+        presentationHasOfficialImpact = Boolean(report.affectedAreas?.length);
+        soundAsset = presentationHasOfficialImpact
+          ? "srev-detail"
+          : replayEewSoundAssetForTransition(report, previousReport);
         break;
       } else {
         soundAsset = replayEewSoundAssetForTransition(report, previousReport);
       }
     }
 
-    if (officialDetailReport && officialDetailOffsetSeconds !== null) {
-      state.lastSeconds = officialDetailOffsetSeconds;
-      setReplaySeconds(officialDetailOffsetSeconds);
-      setReplayOfficialFlash({
-        sessionKey: replaySessionKey,
-        report: officialDetailReport,
-        until: Date.now() + 3_000,
+    if (presentationReport && presentationOffsetSeconds !== null) {
+      const stage = initialReplayProductStage({
+        hasOfficialImpact: presentationHasOfficialImpact,
+        productsLoading: replayUsgsShakeMapLoading
+          || replayUsgsPagerLoading
+          || Boolean(selectedReplayInstitutionRecord
+            && isShakeMapQueryable(selectedReplayInstitutionRecord)
+            && !replayUsgsShakeMap
+            && !replayUsgsShakeMapError)
+          || Boolean(selectedReplayInstitutionRecord
+            && isPagerQueryable(selectedReplayInstitutionRecord)
+            && !replayUsgsPager
+            && !replayUsgsPagerError),
+        hasProducts: Boolean(replayUsgsShakeMap || replayUsgsPager),
       });
+      if (stage) {
+        state.lastSeconds = presentationOffsetSeconds;
+        setReplaySeconds(presentationOffsetSeconds);
+        setReplayProductPresentation({
+          sessionKey: replaySessionKey,
+          report: presentationReport,
+          stage,
+        });
+      }
     }
     if (seismicAlertSoundEnabled && soundAsset) void playSoundAsset(soundAsset);
-  }, [playSoundAsset, replayEvent, replayPlaying, replaySeconds, replaySessionKey, seismicAlertSoundEnabled, selectedReplayReportTimeline]);
+  }, [playSoundAsset, replayEvent, replayPlaying, replaySeconds, replaySessionKey, replayUsgsPager, replayUsgsPagerError, replayUsgsPagerLoading, replayUsgsShakeMap, replayUsgsShakeMapError, replayUsgsShakeMapLoading, seismicAlertSoundEnabled, selectedReplayInstitutionRecord, selectedReplayPresentationEntry, selectedReplayReportTimeline]);
 
   const motionSoundSessionKey = replayEvent ? replayNiedSoundSessionKey : "live";
   const motionSoundMaximum = replayEvent
@@ -5111,19 +5287,28 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     [eastAsiaImpactRegions, jmaRegions],
   );
   const currentAffectedLayers = useMemo(() => {
-    if (replayOfficialFlashActive && replayOfficialFlash?.report) {
+    if (replayProductPresentationActive && replayProductPresentation?.report) {
+      if (replayProductVisibility.impactRadius) {
+        return {
+          local: affectedRegionLayers(null, null, mapEvent, null).local,
+          official: EMPTY_IMPACT_REGIONS,
+        };
+      }
+      if (!replayProductVisibility.officialImpact) {
+        return { local: EMPTY_IMPACT_REGIONS, official: EMPTY_IMPACT_REGIONS };
+      }
       return {
         local: EMPTY_IMPACT_REGIONS,
         official: affectedRegionLayers(
           impactRegions,
           jmaSeismicSites,
-          replayOfficialFlash.report,
+          replayProductPresentation.report,
           null,
         ).official,
       };
     }
     return affectedRegionLayers(impactRegions, jmaSeismicSites, mapEvent, impactElapsed);
-  }, [impactElapsed, impactRegions, jmaSeismicSites, mapEvent, replayOfficialFlash, replayOfficialFlashActive]);
+  }, [impactElapsed, impactRegions, jmaSeismicSites, mapEvent, replayProductPresentation, replayProductPresentationActive, replayProductVisibility.impactRadius, replayProductVisibility.officialImpact]);
   const supplementPersistentRegionalOfficial = Boolean(
     !replayEvent
       && persistentRegionalMapEvent
@@ -5162,7 +5347,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   }, [displayedJmaTsunami, tsunamiRegions]);
   const waveOrigin = wavefrontEvent ? Date.parse(wavefrontEvent.originTime) : 0;
   const waveNow = replayEvent ? waveOrigin + replaySeismicSeconds * 1000 : clock;
-  const showWaves = !replayOfficialFlashActive && (replayEvent
+  const showWaves = !replayProductPresentationActive && (replayEvent
     ? replayPropagationActive
     : Boolean(liveWavefrontEvent));
   const userWarningLocation = Number.isFinite(userStation.lat) && Number.isFinite(userStation.lon)
@@ -5220,7 +5405,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       : `预计烈度 ${intensityRomanLabel(calculateLocalIntensity(wavefrontEvent, userWarningLocation))}`
     : "预计烈度 --";
   const globalAutoPresentation = Boolean(!replayEvent && autoGlobalEvent && rawMapEvent === autoGlobalEvent);
-  const rawMapDetectionStationIds = replayOfficialFlashActive || !showShakeDetectionGrid
+  const rawMapDetectionStationIds = replayProductPresentationActive || !showShakeDetectionGrid
     ? EMPTY_STATION_IDS
     : globalAutoPresentation
     ? EMPTY_STATION_IDS
@@ -5874,16 +6059,16 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 niedFrame={mapDetectionStationIds.length ? niedFrame : null}
                 kmaValues={kmaDetection.activeStationIds.length ? kmaValues : EMPTY_NUMBERS}
                 kmaReplayRanks={replayEvent ? visibleKmaReplaySimulation?.ranks ?? EMPTY_RANKS : null}
-                showNied={showNied && !replayOfficialFlashActive}
-                showKma={showKma && !replayOfficialFlashActive}
-                showOcean={showOcean && !replayOfficialFlashActive}
-                showOtherOcean={showOtherOcean && !replayOfficialFlashActive}
-                showCenc={showCenc && !replayOfficialFlashActive}
-                showGlobal={showGlobalStations && !replayOfficialFlashActive}
-                showWaveform={showWaveformStations && !replayOfficialFlashActive}
-                showCwa={showCwaStations && !replayOfficialFlashActive}
-                showGnss={showGnssStations && !replayOfficialFlashActive}
-                showPalert={showPalertStations && !replayOfficialFlashActive}
+                showNied={showNied && !replayProductPresentationActive}
+                showKma={showKma && !replayProductPresentationActive}
+                showOcean={showOcean && !replayProductPresentationActive}
+                showOtherOcean={showOtherOcean && !replayProductPresentationActive}
+                showCenc={showCenc && !replayProductPresentationActive}
+                showGlobal={showGlobalStations && !replayProductPresentationActive}
+                showWaveform={showWaveformStations && !replayProductPresentationActive}
+                showCwa={showCwaStations && !replayProductPresentationActive}
+                showGnss={showGnssStations && !replayProductPresentationActive}
+                showPalert={showPalertStations && !replayProductPresentationActive}
                 selectedStation={selectedStation}
                 selectedEvent={mapEvent ?? null}
                 waveEvent={wavefrontEvent}
@@ -5910,18 +6095,20 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 globalFaults={globalFaults}
                 jshisLocation={jshisLocation}
                 jshisFault={jshisFault}
-                shakeMap={usgsShakeMap}
-                shakeMapContours={visibleShakeMapContours}
-                pagerCities={usgsPager?.allCities ?? []}
-                showLocalImpact={showLocalImpact}
-                showOfficialImpact={showOfficialImpact || replayOfficialFlashActive}
+                shakeMap={replayEvent ? replayUsgsShakeMap : usgsShakeMap}
+                shakeMapContours={replayEvent ? visibleReplayShakeMapContours : visibleShakeMapContours}
+                pagerCities={(replayEvent ? replayUsgsPager : usgsPager)?.allCities ?? []}
+                showLocalImpact={showLocalImpact || replayProductVisibility.impactRadius}
+                showOfficialImpact={showOfficialImpact || replayProductVisibility.officialImpact}
                 showTsunami={showJmaTsunami}
                 showGlobalFaults={showGlobalFaults}
                 showJshisHazard={showJshisHazard}
                 showJshisSite={showJshisSite}
                 showJshisFault={showJshisFault}
-                showShakeMap={showUsgsShakeMap}
-                showPagerCities={showPagerCities}
+                showShakeMap={replayEvent ? replayProductVisibility.shakeMapContours : showUsgsShakeMap}
+                showPagerCities={replayEvent ? replayProductVisibility.pagerCities : showPagerCities}
+                forceLocalImpact={replayProductVisibility.impactRadius}
+                forcePagerCities={replayProductVisibility.pagerCities}
                 showWniCameras={showWniCameras}
                 wniCameras={visibleWniCameras}
                 highlightedWniCameraId={closestWniCamera?.camera.id ?? null}
@@ -6130,7 +6317,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 </>}
               </>}
 
-              {panelTab === "exposure" && <PagerExposurePanel pager={usgsPager} loading={usgsPagerLoading} error={usgsPagerError} />}
+              {panelTab === "exposure" && <PagerExposurePanel
+                pager={replayProductVisibility.populationExposure ? replayUsgsPager : usgsPager}
+                loading={replayProductVisibility.populationExposure ? replayUsgsPagerLoading : usgsPagerLoading}
+                error={replayProductVisibility.populationExposure ? replayUsgsPagerError : usgsPagerError}
+              />}
             </div>
             {selectedStation && isGlobalStation(selectedStation) && !isCwaStation(selectedStation) ? <FdsnWaveformPanel
               station={selectedStation}
@@ -6176,7 +6367,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 </div>
                 <div>
                   <div className="seismic-wave-legend"><div><i className="p" /><span>P 波</span><strong>{selectedEvent ? waveRadiusKm(selectedEvent.originTime, 6, selectedOrigin + replaySeismicSeconds * 1000).toFixed(0) : 0} km</strong></div><div><i className="s" /><span>S 波</span><strong>{selectedEvent ? waveRadiusKm(selectedEvent.originTime, 3.5, selectedOrigin + replaySeismicSeconds * 1000).toFixed(0) : 0} km</strong></div></div>
-                  <dl className="earthquake-detail-list"><div><dt>JMA 海啸回放</dt><dd>{replayTsunamiSnapshot ? `${replayTsunamiSnapshot.cancelled ? "预报解除" : replayTsunamiSnapshot.title} · ${formatTime(replayTsunamiSnapshot.issuedAt ?? selectedOrigin)}` : replayTsunamiEpisode ? `等待首报 · 共 ${replayTsunamiEpisode.reports.length} 份` : jmaTsunamiHistory ? "当前事件无匹配报文" : "历史报文加载中"}</dd></div><div><dt>NIED 陆地响应</dt><dd>{visibleReplaySimulation ? `${visibleReplaySimulation.activeStationIds.length} 站 / 最大震度 ${jmaShindoLabel(visibleReplaySimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>KMA-PEWS 响应</dt><dd>{visibleKmaReplaySimulation ? `${visibleKmaReplaySimulation.activeStationIds.length} 站 / 最大烈度 ${intensityRomanLabel(visibleKmaReplaySimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>海底台网响应</dt><dd>{visibleOceanSimulation ? `${visibleOceanSimulation.activeStationIds.length} 站 / 最大震度 ${jmaShindoLabel(visibleOceanSimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>全球 FDSN 响应</dt><dd>{visibleGlobalSimulation ? `${visibleGlobalSimulation.arrivedStationIds.length} 站已到达 / 最大 MMI ${visibleGlobalSimulation.maxRank.toFixed(1)}` : "等待播放"}</dd></div><div><dt>CWA CWASN 响应</dt><dd>{visibleCwaSimulation ? `${visibleCwaSimulation.arrivedStationIds.length} 站已到达 / 最大震度 ${jmaShindoLabel(visibleCwaSimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>回放音效</dt><dd>NIED {niedSoundEnabled ? "启用" : "关闭"} / 海啸 {jmaTsunamiSoundEnabled ? "启用" : "关闭"}</dd></div><div><dt>P / S 速度</dt><dd>6.0 / 3.5 km/s（仅前 300 秒）</dd></div><div><dt>用途</dt><dd>传播时序与官方海啸报文复盘，不代表当前预警</dd></div></dl>
+                  <dl className="earthquake-detail-list"><div><dt>JMA 海啸回放</dt><dd>{replayTsunamiSnapshot ? `${replayTsunamiSnapshot.cancelled ? "预报解除" : replayTsunamiSnapshot.title} · ${formatTime(replayTsunamiSnapshot.issuedAt ?? selectedOrigin)}` : replayTsunamiEpisode ? `等待首报 · 共 ${replayTsunamiEpisode.reports.length} 份` : jmaTsunamiHistory ? "当前事件无匹配报文" : "历史报文加载中"}</dd></div><div><dt>NIED 陆地响应</dt><dd>{visibleReplaySimulation ? `${visibleReplaySimulation.activeStationIds.length} 站 / 最大震度 ${jmaShindoLabel(visibleReplaySimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>KMA-PEWS 响应</dt><dd>{visibleKmaReplaySimulation ? `${visibleKmaReplaySimulation.activeStationIds.length} 站 / 最大烈度 ${intensityRomanLabel(visibleKmaReplaySimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>海底台网响应</dt><dd>{visibleOceanSimulation ? `${visibleOceanSimulation.activeStationIds.length} 站 / 最大震度 ${jmaShindoLabel(visibleOceanSimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>全球 FDSN 响应</dt><dd>{visibleGlobalSimulation ? `${visibleGlobalSimulation.arrivedStationIds.length} 站已到达 / 最大 MMI ${visibleGlobalSimulation.maxRank.toFixed(1)}` : "等待播放"}</dd></div><div><dt>CWA CWASN 响应</dt><dd>{visibleCwaSimulation ? `${visibleCwaSimulation.arrivedStationIds.length} 站已到达 / 最大震度 ${jmaShindoLabel(visibleCwaSimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>官方产品插播</dt><dd>{replayProductPresentation?.stage === "official" ? "官方地区上色 · 5 秒" : replayProductPresentation?.stage === "waiting-products" ? "等待 USGS 官方产品" : replayProductPresentation?.stage === "contours" ? "ShakeMap 烈度线" : replayProductPresentation?.stage === "cities" ? "PAGER SVG 城市烈度标 · 人口暴露" : replayProductPresentation?.stage === "radius" ? "烈度线 / 城市 / 影响半径 · 保持 5 秒" : replayUsgsShakeMapLoading || replayUsgsPagerLoading ? "正在预取 USGS ShakeMap / PAGER" : replayUsgsShakeMap || replayUsgsPager ? `已就绪 · ${replayUsgsShakeMap ? "ShakeMap" : ""}${replayUsgsShakeMap && replayUsgsPager ? " + " : ""}${replayUsgsPager ? "PAGER" : ""}` : "当前事件无匹配产品"}</dd></div><div><dt>回放音效</dt><dd>NIED {niedSoundEnabled ? "启用" : "关闭"} / 海啸 {jmaTsunamiSoundEnabled ? "启用" : "关闭"}</dd></div><div><dt>P / S 速度</dt><dd>6.0 / 3.5 km/s（仅前 300 秒）</dd></div><div><dt>用途</dt><dd>传播时序与官方海啸报文复盘，不代表当前预警</dd></div></dl>
                   {replayEstimate ? <div className="seismic-replay-inference"><span><CircleGauge size={15} />回放本地震源反演</span><strong>{replayEstimate.latitude.toFixed(3)}, {replayEstimate.longitude.toFixed(3)}</strong><small>深度 {replayEstimate.depthKm.toFixed(1)} km · {replayEstimate.stationCount} 站 · 残差 {replayEstimate.residualMs} ms · 距官方 {replayEstimate.referenceDistanceKm?.toFixed(2) ?? "--"} km</small></div> : <div className="seismic-replay-inference waiting"><span><CircleGauge size={15} />{autoHypocenterEstimation ? "等待至少 4 个模拟 P 波触发站" : "自动震源推算已关闭"}</span><small>{autoHypocenterEstimation ? "测站按理论到时逐一响应，满足条件后自动生成震源。" : "可在右上角设置中重新开启。"}</small></div>}
                 </div>
               </div>
