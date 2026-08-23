@@ -36,6 +36,7 @@ import {
   niedSoundIndex,
   niedStationDisplayColor,
   isLiveEewActive,
+  isRelatedEewReport,
   isReplayPropagationActive,
   shouldDisplayRegionalWarning,
   shouldDisplayLiveWavefront,
@@ -151,6 +152,41 @@ describe("seismic client calculations", () => {
     expect(shouldDisplayLiveWavefront({ ...report, final: true, relay: "Catalogue" }, originTime + 20_000, false)).toBe(true);
     expect(shouldDisplayRegionalWarning({ ...report, final: true }, false, true, originTime + 20_000)).toBe(false);
     expect(shouldDisplayRegionalWarning({ ...report, final: true }, true, true, originTime + 20_000)).toBe(true);
+  });
+
+  it("does not merge near-simultaneous known earthquakes across continents", () => {
+    const japan: LiveEew = {
+      id: "USGS:japan-event",
+      source: "USGS",
+      title: "机构地震报告",
+      serial: 1,
+      announcedAt: "2026-08-24T04:52:21.000Z",
+      originTime: "2026-08-24T04:52:11.000Z",
+      place: "33 km SSW of Honcho, Japan",
+      latitude: 35.4,
+      longitude: 139.2,
+      depthKm: 38,
+      magnitude: 6,
+      maxIntensity: "MMI 4.4",
+      final: true,
+      warning: false,
+      cancelled: false,
+      assumption: false,
+      relay: "Catalogue",
+      hypocenterKnown: true,
+    };
+    const california = {
+      ...japan,
+      id: "USGS:california-event",
+      announcedAt: "2026-08-24T04:53:12.000Z",
+      originTime: "2026-08-24T04:53:01.000Z",
+      place: "10 km SW of Templeton, CA",
+      latitude: 35.5,
+      longitude: -120.8,
+    };
+
+    expect(isRelatedEewReport(japan, california)).toBe(false);
+    expect(isRelatedEewReport(japan, { ...california, hypocenterKnown: false })).toBe(true);
   });
 
   it("closes replay propagation when the visible clock reaches 300 seconds", () => {

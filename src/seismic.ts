@@ -573,6 +573,26 @@ export function isSameEewEvent(a: LiveEew, b: LiveEew) {
   return haversineKm(a, b) <= 100;
 }
 
+/**
+ * Links reports that belong on the same warning/replay timeline.
+ *
+ * Located reports must describe the same nearby hypocenter. A source may send
+ * an initial "hypocenter unknown" prompt before coordinates arrive, so that
+ * one narrow case is allowed to match by source and origin time only. Keeping
+ * the exception here prevents unrelated, near-simultaneous catalogue events
+ * from being merged across continents.
+ */
+export function isRelatedEewReport(seed: LiveEew, report: LiveEew) {
+  if (isSameEewEvent(seed, report)) return true;
+  if (seed.source !== report.source) return false;
+  if (seed.hypocenterKnown !== false && report.hypocenterKnown !== false) return false;
+  const seedOrigin = Date.parse(seed.originTime);
+  const reportOrigin = Date.parse(report.originTime);
+  return Number.isFinite(seedOrigin)
+    && Number.isFinite(reportOrigin)
+    && Math.abs(seedOrigin - reportOrigin) <= 120_000;
+}
+
 export function matchOfficialHypocenter(
   event: LiveEew,
   records: OfficialHypocenterRecord[],

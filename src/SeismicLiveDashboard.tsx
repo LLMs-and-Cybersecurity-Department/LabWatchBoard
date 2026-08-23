@@ -83,6 +83,7 @@ import {
   intensityRomanLabel,
   intensityColor,
   isLiveEewActive,
+  isRelatedEewReport,
   isSameEewEvent,
   LIVE_EEW_SOURCE_ORDER,
   makeKmaStations,
@@ -4368,16 +4369,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     const current = groups[0];
     if (!current) return { displayEvent: null, impactEvent: null, waveEvent: null, terminated: false, updatedAt: 0 };
     const seed = current.group.latestReport;
-    const seedOrigin = Date.parse(seed.originTime);
-    const relatedReports = regionalReports.filter((report) => {
-      if (isSameEewEvent(seed, report)) return true;
-      const reportOrigin = Date.parse(report.originTime);
-      return seed.source === report.source
-        && Number.isFinite(seedOrigin)
-        && Number.isFinite(reportOrigin)
-        && Math.abs(seedOrigin - reportOrigin) <= 120_000
-        && (seed.hypocenterKnown === false || report.hypocenterKnown === false);
-    });
+    const relatedReports = regionalReports.filter((report) => isRelatedEewReport(seed, report));
     const reports = [...new Map(relatedReports.map((report) => [eewReportKey(report), report])).values()].sort((left, right) => (
       Date.parse(right.announcedAt) - Date.parse(left.announcedAt)
       || right.serial - left.serial
@@ -4436,15 +4428,8 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   }, [historyEvents, institutionEewReports, latestEvent, regionalHistory, selectedEewKey]);
   const selectedReplayReports = useMemo(() => {
     if (!selectedEvent) return [];
-    const selectedOrigin = Date.parse(selectedEvent.originTime);
-    const reports = [...regionalHistory, ...institutionEewReports, selectedEvent].filter((report) => {
-      if (isSameEewEvent(selectedEvent, report)) return true;
-      const reportOrigin = Date.parse(report.originTime);
-      return report.source === selectedEvent.source
-        && Number.isFinite(selectedOrigin)
-        && Number.isFinite(reportOrigin)
-        && Math.abs(selectedOrigin - reportOrigin) <= 120_000;
-    });
+    const reports = [...regionalHistory, ...institutionEewReports, selectedEvent]
+      .filter((report) => isRelatedEewReport(selectedEvent, report));
     return [...new Map(reports.map((report) => [eewReportKey(report), report])).values()]
       .sort((left, right) => (
         Date.parse(left.announcedAt) - Date.parse(right.announcedAt)
