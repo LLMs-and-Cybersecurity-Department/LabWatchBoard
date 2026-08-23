@@ -6,6 +6,7 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const PALERT_GRAPHQL_URL = "https://palert.earth.sinica.edu.tw/graphql/";
 const PALERT_STATIONS_URL = "https://palert.earth.sinica.edu.tw/stations";
 const PALERT_REALTIME_URL = "https://palert.earth.sinica.edu.tw/realtime";
+const PALERT_DATABASE_URL = "https://palert.earth.sinica.edu.tw/database";
 const PALERT_TERMS_URL = "https://palert.earth.sinica.edu.tw/help";
 const CACHE_PATH = process.env.PALERT_CACHE_PATH ?? path.join(ROOT, ".runtime", "palert-stations.json");
 const CACHE_TTL_MS = Number(process.env.PALERT_CACHE_TTL_MS ?? 10 * 60 * 1000);
@@ -13,12 +14,29 @@ const REALTIME_CACHE_TTL_MS = Number(process.env.PALERT_REALTIME_CACHE_TTL_MS ??
 const REQUEST_TIMEOUT_MS = Number(process.env.PALERT_TIMEOUT_MS ?? 20_000);
 const STATION_QUERY = "query ($staFilter: staList_filter_choices) { stationList(staFilter: $staFilter) { staInfos timestamp version } }";
 const REALTIME_PGA_QUERY = "query ($recordTime: Float, $type: Int, $token: String) { realtimePGA(recordTime: $recordTime, type: $type, token: $token) { dataVals timestamp } }";
+const EVENT_LIST_QUERY = "query ($date: [Date!], $depth: [Float!], $ml: [Float!], $dateTime: DateTime, $needHaspga: Boolean!) { eventList(QueryEvent: { depth: $depth, date: $date, ml: $ml, dateTime: $dateTime }, needHaspga: $needHaspga) { DateUTC Depth Latitude Longitude ML hasPGA @include(if: $needHaspga) } }";
+const EVENT_STATIONS_QUERY = "query ($staCode: String, $event: DateTime) { PGAList(event: $event, staCode: $staCode) { az event dist staCode pga pgv } }";
+const EVENT_FILE_QUERY = "query ($event: DateTime, $fileType: eventFile_choices) { eventFiles(fileType: $fileType, event: $event) { data name } }";
+const EVENT_FILE_TYPES = new Map([
+  ["station-list", { upstream: "staList", contentType: "text/plain; charset=utf-8" }],
+  ["contour", { upstream: "contour", contentType: "image/png" }],
+  ["polar", { upstream: "polar", contentType: "image/png" }],
+  ["azimuth-scatter", { upstream: "scatter1", contentType: "image/jpeg" }],
+  ["animation-1x", { upstream: "gif1", contentType: "image/gif" }],
+  ["animation-2x", { upstream: "gif2", contentType: "image/gif" }],
+  ["animation-3x", { upstream: "gif3", contentType: "image/gif" }],
+  ["distance-scatter", { upstream: "scatter2", contentType: "image/jpeg" }],
+  ["pga-plot", { upstream: "pgaPlot", contentType: "image/jpeg" }],
+]);
 
 let cachedSnapshot = null;
 let cacheLoaded = false;
 let refreshPromise = null;
 let realtimeSnapshot = null;
 let realtimeRefreshPromise = null;
+let eventListSnapshot = null;
+const eventStationCache = new Map();
+const eventFileCache = new Map();
 
 function finite(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -74,6 +92,76 @@ export function normalizePalertRealtime(payload) {
     timestamp: String(frame?.timestamp ?? "").trim() || null,
     dataVals,
   };
+}
+
+export function normalizePalertEvents(payload) {
+  const rows = payload?.data?.eventList ?? payload?.eventList ?? payload;
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((row) => {
+    const date = String(row?.DateUTC ?? "").trim();
+    const latitude = finite(row?.Latitude);
+    const longitude = finite(row?.Longitude);
+    const depthKm = finite(row?.Depth);
+    const magnitude = finite(row?.ML);
+    if (!date || !Number.isFinite(Date.parse(`${date}Z`)) || latitude === null || longitude === null || magnitude === null) return [];
+    return [{
+      id: date.replace(/[^0-9]/g, "").slice(0, 14),
+      date,
+      latitude,
+      longitude,
+      depthKm,
+      magnitude,
+      hasPga: Boolean(row?.hasPGA),
+      sourceUrl: `${PALERT_DATABASE_URL}/download/${date.replace(/[^0-9]/g, "").slice(0, 14)}`,
+    }];
+  }).sort((left, right) => Date.parse(`${right.date}Z`) - Date.parse(`${left.date}Z`));
+}
+
+export function normalizePalertEventStations(payload) {
+  const rows = payload?.data?.PGAList ?? payload?.PGAList ?? payload;
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((row) => {
+    const stationCode = String(row?.staCode ?? "").trim();
+    const pgaGal = finite(row?.pga);
+    const pgvCms = finite(row?.pgv);
+    const azimuth = finite(row?.az);
+    const distanceKm = finite(row?.dist);
+    if (!stationCode) return [];
+    return [{ stationCode, pgaGal, pgvCms, azimuth, distanceKm }];
+  });
+}
+
+function normalizeEvent(value) {
+  const event = String(value ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(event) || !Number.isFinite(Date.parse(`${event}Z`))) {
+    throw new Error("P-Alert 事件时间格式无效");
+  }
+  return event;
+}
+
+async function postGraphql(query, variables, referer, fetchImpl = fetch) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetchImpl(PALERT_GRAPHQL_URL, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        Origin: "https://palert.earth.sinica.edu.tw",
+        Referer: referer,
+        "User-Agent": "Mozilla/5.0 (compatible; ecmwf-pBoard/1.0)",
+      },
+      body: JSON.stringify({ query, variables }),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    if (payload?.errors?.length) throw new Error(String(payload.errors[0]?.message ?? "P-Alert GraphQL 查询失败"));
+    return payload;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function loadCache() {
@@ -260,4 +348,81 @@ export async function getPalertRealtime(options = {}) {
     dataVals: realtimeSnapshot?.dataVals ?? {},
     error,
   };
+}
+
+export async function getPalertEvents(options = {}) {
+  const now = options.now ?? Date.now();
+  const days = Math.max(7, Math.min(365, Number(options.days ?? 120) || 120));
+  const cacheKey = `${days}`;
+  if (eventListSnapshot?.cacheKey === cacheKey && now - eventListSnapshot.fetchedAtMs < 5 * 60 * 1000) {
+    return { ...eventListSnapshot.payload, cache: "HIT" };
+  }
+  const end = new Date(now);
+  const start = new Date(now - days * 24 * 60 * 60 * 1000);
+  const dateOnly = (value) => value.toISOString().slice(0, 10);
+  const payload = await postGraphql(EVENT_LIST_QUERY, {
+    date: [dateOnly(start), dateOnly(end)],
+    needHaspga: true,
+  }, PALERT_DATABASE_URL, options.fetchImpl);
+  const events = normalizePalertEvents(payload);
+  const result = {
+    provider: "中央研究院地球科学研究所 P-Alert",
+    sourceUrl: PALERT_DATABASE_URL,
+    fetchedAt: new Date(now).toISOString(),
+    days,
+    events,
+  };
+  eventListSnapshot = { cacheKey, fetchedAtMs: now, payload: result };
+  return { ...result, cache: "MISS" };
+}
+
+export async function getPalertEventStations(options = {}) {
+  const event = normalizeEvent(options.event);
+  const now = options.now ?? Date.now();
+  const cached = eventStationCache.get(event);
+  if (cached && now - cached.fetchedAtMs < 30 * 60 * 1000) return { ...cached.payload, cache: "HIT" };
+  const eventId = event.replace(/[^0-9]/g, "");
+  const payload = await postGraphql(EVENT_STATIONS_QUERY, { event, staCode: null }, `${PALERT_DATABASE_URL}/download/${eventId}`, options.fetchImpl);
+  const stations = normalizePalertEventStations(payload);
+  if (!stations.length) throw new Error("P-Alert 官方事件未返回测站表");
+  const result = {
+    provider: "中央研究院地球科学研究所 P-Alert",
+    sourceUrl: `${PALERT_DATABASE_URL}/download/${eventId}`,
+    fetchedAt: new Date(now).toISOString(),
+    event,
+    stationCount: stations.length,
+    stations,
+  };
+  eventStationCache.set(event, { fetchedAtMs: now, payload: result });
+  if (eventStationCache.size > 12) eventStationCache.delete(eventStationCache.keys().next().value);
+  return { ...result, cache: "MISS" };
+}
+
+export async function getPalertEventFile(options = {}) {
+  const event = normalizeEvent(options.event);
+  const type = String(options.type ?? "");
+  const definition = EVENT_FILE_TYPES.get(type);
+  if (!definition) throw new Error("不支持的 P-Alert 事件产品");
+  const cacheKey = `${event}:${type}`;
+  const now = options.now ?? Date.now();
+  const cached = eventFileCache.get(cacheKey);
+  if (cached && now - cached.fetchedAtMs < 5 * 60 * 1000) return { ...cached.payload, cache: "HIT" };
+  const eventId = event.replace(/[^0-9]/g, "");
+  const payload = await postGraphql(EVENT_FILE_QUERY, { event, fileType: definition.upstream }, `${PALERT_DATABASE_URL}/download/${eventId}`, options.fetchImpl);
+  const file = payload?.data?.eventFiles?.[0];
+  const encoded = String(file?.data ?? "").trim();
+  if (!encoded) throw new Error("P-Alert 官方事件产品暂无资料");
+  const result = {
+    provider: "中央研究院地球科学研究所 P-Alert",
+    sourceUrl: `${PALERT_DATABASE_URL}/download/${eventId}`,
+    fetchedAt: new Date(now).toISOString(),
+    event,
+    type,
+    filename: String(file?.name ?? `${type}.bin`).replace(/[^a-zA-Z0-9._-]/g, "_"),
+    contentType: definition.contentType,
+    data: Buffer.from(encoded, "base64"),
+  };
+  eventFileCache.set(cacheKey, { fetchedAtMs: now, payload: result });
+  while (eventFileCache.size > 2) eventFileCache.delete(eventFileCache.keys().next().value);
+  return { ...result, cache: "MISS" };
 }

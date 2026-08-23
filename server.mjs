@@ -30,7 +30,13 @@ import { getEewRelaySnapshot } from "./server/eewRelay.mjs";
 import { getExternalWarningSnapshot } from "./server/externalWarnings.mjs";
 import { getJmaTsunamiHistorySnapshot, getJmaTsunamiSnapshot } from "./server/jmaTsunami.mjs";
 import { getJshisFault, getJshisLocation, JshisError } from "./server/jshis.mjs";
-import { getPalertRealtime, getPalertSnapshot } from "./server/palert.mjs";
+import {
+  getPalertEventFile,
+  getPalertEvents,
+  getPalertEventStations,
+  getPalertRealtime,
+  getPalertSnapshot,
+} from "./server/palert.mjs";
 import { getSnetIntensitySnapshot, startSnetIntensityMonitor } from "./server/snet.mjs";
 import { FdsnDataError, getFdsnWaveform, getGlobalStationSnapshot } from "./server/fdsn.mjs";
 import { CameraRelayError, resolveYoutubeCamera } from "./server/camera.mjs";
@@ -731,6 +737,33 @@ const server = createServer(async (request, response) => {
       }
       return;
     }
+    if (requestUrl.pathname === "/api/seismic/palert/event-file") {
+      if (!new Set(["GET", "HEAD"]).has(request.method ?? "GET")) {
+        sendJson(response, 405, { error: "P-Alert 事件产品仅支持 GET/HEAD" });
+        return;
+      }
+      try {
+        const result = await getPalertEventFile({
+          event: requestUrl.searchParams.get("event"),
+          type: requestUrl.searchParams.get("type"),
+        });
+        setSecurityHeaders(response);
+        response.writeHead(200, {
+          "Content-Type": result.contentType,
+          "Cache-Control": "private, max-age=300",
+          "Content-Length": String(result.data.length),
+          "Content-Disposition": `inline; filename="${result.filename}"`,
+          "X-PAlert-Cache": result.cache,
+        });
+        response.end(request.method === "HEAD" ? undefined : result.data);
+      } catch (error) {
+        sendJson(response, 502, {
+          error: "P-Alert 事件产品获取失败",
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return;
+    }
     if (requestUrl.pathname.startsWith("/api/seismic/")) {
       if (!new Set(["GET", "HEAD"]).has(request.method ?? "GET")) {
         sendJson(response, 405, { error: "地震台网接口仅支持 GET/HEAD" });
@@ -755,8 +788,12 @@ const server = createServer(async (request, response) => {
                     ? () => getCencIntensitySnapshot({ id: requestUrl.searchParams.get("id") })
                   : requestUrl.pathname === "/api/seismic/palert"
                     ? getPalertSnapshot
-                    : requestUrl.pathname === "/api/seismic/palert/realtime"
+                  : requestUrl.pathname === "/api/seismic/palert/realtime"
                       ? getPalertRealtime
+                    : requestUrl.pathname === "/api/seismic/palert/events"
+                      ? () => getPalertEvents({ days: requestUrl.searchParams.get("days") })
+                    : requestUrl.pathname === "/api/seismic/palert/event-stations"
+                      ? () => getPalertEventStations({ event: requestUrl.searchParams.get("event") })
                     : requestUrl.pathname === "/api/seismic/ocean-stations"
                       ? getOceanStations
                       : requestUrl.pathname === "/api/seismic/snet-intensity"
