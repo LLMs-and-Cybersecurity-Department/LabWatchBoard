@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   eewSoundAssetForTransition,
+  eewSoundAssetsForTransition,
   eewSoundCueKey,
   eewSoundEventKey,
   isNewerEewSoundReport,
@@ -18,7 +19,9 @@ import {
 describe("seismic sound cue mapping", () => {
   it("maps initial, receive-only, update, final and cancel EEW reports", () => {
     expect(eewSoundAssetForTransition({ serial: 1, warning: false, final: false, cancelled: false, magnitude: 4.2 }, null, 5)).toBe("srev-caution");
-    expect(eewSoundAssetForTransition({ serial: 1, warning: false, final: false, cancelled: false, magnitude: 5.8 }, null, 5)).toBe("general-ews");
+    expect(eewSoundAssetForTransition({ serial: 1, warning: false, final: false, cancelled: false, magnitude: 5.8 }, null, 5)).toBe("srev-issue");
+    expect(eewSoundAssetForTransition({ serial: 1, warning: true, final: false, cancelled: false, magnitude: 5.8 }, null, 5)).toBe("srev-issue");
+    expect(eewSoundAssetsForTransition({ serial: 1, warning: true, final: false, cancelled: false, magnitude: 5.8 }, null, 5)).toEqual(["srev-issue", "srev-warn"]);
     expect(eewSoundAssetForTransition({ serial: 2, warning: false, final: false, cancelled: false, magnitude: 5.8 }, { serial: 1, warning: false, final: false, cancelled: false, magnitude: 5.8 }, 5)).toBe("srev-update");
     expect(eewSoundAssetForTransition({ serial: 3, warning: false, final: true, cancelled: false, magnitude: 5.8 }, { serial: 2, warning: false, final: false, cancelled: false, magnitude: 5.8 }, 5)).toBe("srev-final");
     expect(eewSoundAssetForTransition({ serial: 4, warning: false, final: true, cancelled: true, magnitude: 5.8 }, { serial: 3, warning: false, final: true, cancelled: false, magnitude: 5.8 }, 5)).toBe("srev-cancel");

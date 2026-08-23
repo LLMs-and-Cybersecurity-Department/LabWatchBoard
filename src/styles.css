@@ -7058,6 +7058,34 @@ body.seismic-monitor-moving * {
 .seismic-replay-step input { width: 100%; accent-color: #f59e0b; }
 .seismic-replay-step strong { color: #f6b554; text-align: right; font-variant-numeric: tabular-nums; }
 
+.seismic-replay-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.seismic-replay-options .seismic-replay-step { margin: -6px 0 0; }
+
+.seismic-replay-movie-toggle {
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  column-gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid #354145;
+  border-radius: 4px;
+  background: #0d1315;
+  color: #dce6e8;
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.seismic-replay-movie-toggle input { margin: 0; accent-color: #f59e0b; }
+.seismic-replay-movie-toggle em { grid-column: 2; color: #f6b554; font-size: 7px; font-style: normal; }
+
 .seismic-replay-controls {
   display: grid;
   grid-template-columns: 38px 38px 38px auto 38px 38px;

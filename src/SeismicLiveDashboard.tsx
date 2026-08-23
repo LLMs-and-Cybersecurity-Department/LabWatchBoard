@@ -101,6 +101,7 @@ import {
   selectAutoLocatedGlobalEvent,
   selectAutoLocatedGlobalEvents,
   isReplayPropagationActive,
+  shouldDisplayRegionalWarning,
   shouldDisplayLiveWavefront,
   JMA_SHINDO_LEGEND,
   MMI_LEGEND,
@@ -171,7 +172,7 @@ import {
   type EarthquakeSourceId,
 } from "./earthquake";
 import {
-  eewSoundAssetForTransition,
+  eewSoundAssetsForTransition,
   eewSoundCueKey,
   eewSoundEventKey,
   isNewerEewSoundReport,
@@ -192,6 +193,12 @@ import {
   replayProductStageVisibility,
   type ReplayProductStage,
 } from "./seismicReplayPresentation";
+import {
+  DEFAULT_REPLAY_PRE_ROLL_SECONDS,
+  formatReplayClock,
+  normalizeReplayPreRollSeconds,
+  replayMovieCameraRadiusKm,
+} from "./seismicReplayCamera";
 import { usePersistentState } from "./usePersistentState";
 import type { Station } from "./types";
 import { FdsnWaveformPanel } from "./FdsnWaveformPanel";
@@ -267,6 +274,8 @@ type MapFocusTarget = {
   zoom: number;
   exact?: boolean;
   radiusKm?: number;
+  animate?: boolean;
+  durationSeconds?: number;
 };
 type OceanResponseMode = "idle" | "measured" | "local" | "replay";
 type JmaRegionProperties = ImpactRegionProperties;
@@ -1145,8 +1154,8 @@ function SeismicMapFocus({ target }: { target: MapFocusTarget | null }) {
         [Math.max(-89.9, target.latitude - latitudeDelta), Math.max(-180, target.longitude - longitudeDelta)],
         [Math.min(89.9, target.latitude + latitudeDelta), Math.min(180, target.longitude + longitudeDelta)],
       ], {
-        animate: true,
-        duration: 0.8,
+        animate: target.animate !== false,
+        duration: target.durationSeconds ?? 0.8,
         padding: [54, 54],
         maxZoom: 13,
       });
@@ -2814,7 +2823,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [triggers, setTriggers] = useState<TriggerObservation[]>([]);
   const [niedDetection, setNiedDetection] = useState(() => blankDetection("NIED"));
   const [kmaDetection, setKmaDetection] = useState(() => blankDetection("KMA-PEWS"));
-  const [replaySeconds, setReplaySeconds] = useState(0);
+  const [replaySeconds, setReplaySeconds] = useState(-DEFAULT_REPLAY_PRE_ROLL_SECONDS);
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayProductPresentation, setReplayProductPresentation] = useState<{
     sessionKey: string;
@@ -2826,11 +2835,13 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     event: LiveEew;
     until: number;
   } | null>(null);
-  const replayModeActive = replayPlaying || replaySeconds > 0;
+  const replayModeActive = bottomTab === "replay";
   const replayModeActiveRef = useRef(replayModeActive);
   replayModeActiveRef.current = replayModeActive;
   const [replaySpeed, setReplaySpeed] = usePersistentState<ReplaySpeed>("seismic-replay-speed", 60);
   const [replayStepMinutes, setReplayStepMinutes] = usePersistentState("seismic-replay-step-minutes", 1);
+  const [replayPreRollSeconds, setReplayPreRollSeconds] = usePersistentState("seismic-replay-pre-roll-seconds", DEFAULT_REPLAY_PRE_ROLL_SECONDS);
+  const [replayMovieModeEnabled, setReplayMovieModeEnabled] = usePersistentState("seismic-replay-movie-mode-enabled", true);
   const [clock, setClock] = useState(Date.now());
   const [mapFocus, setMapFocus] = useState<MapFocusTarget | null>(null);
   const mapFocusSequence = useRef(0);
@@ -2854,6 +2865,14 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     sessionKey: string;
     lastSeconds: number;
     playedReportKeys: Set<string>;
+    playedPresentationKeys: Set<string>;
+    issuePlayed: boolean;
+    warningPlayed: boolean;
+  } | null>(null);
+  const replayLocalImpactSoundState = useRef<{
+    sessionKey: string;
+    signature: string;
+    playedAt: number;
   } | null>(null);
   const intenseSoundSession = useRef<string | null>(null);
   const replayClockRef = useRef<number | null>(null);
@@ -2881,11 +2900,17 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     enteredAt: 0,
     knownKeys: [] as string[],
   });
+  const replayMovieCameraState = useRef<{
+    sessionKey: string;
+    secondBucket: number;
+    radiusKm: number;
+  } | null>(null);
   const globalRefreshSeconds = normalizeEarthquakeRefreshSeconds(storedGlobalRefreshSeconds);
   const normalizedReplaySpeed: ReplaySpeed = replaySpeed === 1 || replaySpeed === 10 || replaySpeed === 60 || replaySpeed === 300
     ? replaySpeed
     : 60;
   const normalizedReplayStepMinutes = Math.max(1, Math.min(60, Math.round(Number(replayStepMinutes) || 1)));
+  const normalizedReplayPreRollSeconds = normalizeReplayPreRollSeconds(replayPreRollSeconds);
   const autoMagnitudeThreshold = Math.max(1, Math.min(9, Number(autoLocateMagnitude) || 5));
   const receiveMagnitudeThreshold = Math.max(1, Math.min(9, Number(receiveMagnitude) || 1));
   const normalizedSidePanelWidth = clampPanelDimension(Number(sidePanelWidth), 300, 620);
@@ -3102,14 +3127,14 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
 
   const clearReplayPresentation = useCallback(() => {
     setReplayPlaying(false);
-    setReplaySeconds(0);
+    setReplaySeconds(-normalizedReplayPreRollSeconds);
     setReplayProductPresentation(null);
     setReplayLiveNotice(null);
     replayEewSoundState.current = null;
     setSelectedPreviewUntil(0);
     setWarningOverlayTab("latest");
     restoreReplayExposurePanel();
-  }, [restoreReplayExposurePanel]);
+  }, [normalizedReplayPreRollSeconds, restoreReplayExposurePanel]);
 
   const getNiedAudio = useCallback(() => {
     if (!niedAudioRef.current) niedAudioRef.current = new Audio();
@@ -3154,7 +3179,6 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
           niedAudioBuffersRef.current.set(assetId, decodedBuffer);
           buffer = decodedBuffer;
         }
-        try { niedAudioSourceRef.current?.stop(); } catch { /* already stopped */ }
         const source = context.createBufferSource();
         const gain = context.createGain();
         source.buffer = buffer;
@@ -3253,7 +3277,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       const soundKey = eewSoundEventKey(normalized);
       const previous = liveEewSoundReports.current.get(soundKey) ?? null;
       if (isNewerEewSoundReport(normalized, previous)) {
-        const assetId = eewSoundAssetForTransition(normalized, previous, autoMagnitudeThreshold);
+        const soundAssets = eewSoundAssetsForTransition(normalized, previous, autoMagnitudeThreshold);
         liveEewSoundReports.current.set(soundKey, normalized);
         const announcedAt = Date.parse(normalized.announcedAt);
         const isFresh = Number.isFinite(announcedAt) && Math.abs(Date.now() - announcedAt) <= 120_000;
@@ -3264,16 +3288,18 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
             until: Date.now() + 5_000,
           });
         }
-        if (seismicAlertSoundEnabled && assetId && (previous !== null || isFresh)) {
-          const cueKey = eewSoundCueKey(normalized, assetId);
-          if (!liveEewSoundCues.current.has(cueKey)) {
+        if (seismicAlertSoundEnabled && !replayModeActiveRef.current && soundAssets.length && (previous !== null || isFresh)) {
+          soundAssets.forEach((soundAsset, index) => {
+            const cueKey = eewSoundCueKey(normalized, soundAsset);
+            if (liveEewSoundCues.current.has(cueKey)) return;
             liveEewSoundCues.current.add(cueKey);
             if (liveEewSoundCues.current.size > 512) {
               const staleKeys = [...liveEewSoundCues.current].slice(0, 128);
               staleKeys.forEach((key) => liveEewSoundCues.current.delete(key));
             }
-            void playSoundAsset(assetId);
-          }
+            if (index === 0) void playSoundAsset(soundAsset);
+            else window.setTimeout(() => void playSoundAsset(soundAsset), index * 900);
+          });
         }
       }
     }
@@ -3933,8 +3959,8 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   }, [clock]);
 
   useEffect(() => {
-    if (warningOverlayTab === "selected" && selectedPreviewUntil > 0 && clock >= selectedPreviewUntil) setWarningOverlayTab("latest");
-  }, [clock, selectedPreviewUntil, warningOverlayTab]);
+    if (!replayModeActive && warningOverlayTab === "selected" && selectedPreviewUntil > 0 && clock >= selectedPreviewUntil) setWarningOverlayTab("latest");
+  }, [clock, replayModeActive, selectedPreviewUntil, warningOverlayTab]);
 
   useEffect(() => {
     if (!replayPlaying || replayProductPresentation) {
@@ -4018,13 +4044,15 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
 
   useEffect(() => {
     setReplayPlaying(false);
-    setReplaySeconds(0);
+    setReplaySeconds(-normalizedReplayPreRollSeconds);
     setReplayProductPresentation(null);
     setReplayLiveNotice(null);
     replayEewSoundState.current = null;
     replayDurationRef.current = 300;
+    replayMovieCameraState.current = null;
+    replayLocalImpactSoundState.current = null;
     restoreReplayExposurePanel();
-  }, [restoreReplayExposurePanel, selectedEewKey]);
+  }, [normalizedReplayPreRollSeconds, restoreReplayExposurePanel, selectedEewKey]);
 
   const niedNeighbors = useMemo(() => buildStationNeighborMap(catalogue?.stations ?? []), [catalogue]);
   const kmaNeighbors = useMemo(() => buildStationNeighborMap(kmaStations, 30, 64), [kmaStations]);
@@ -4141,11 +4169,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const persistentRegionalEvent = latestRegionalState.displayEvent;
   const persistentRegionalImpactEvent = latestRegionalState.impactEvent;
   const visiblePersistentRegionalEvent = persistentRegionalEvent
-    && (keepLatestWarningVisible || isLiveEewActive(persistentRegionalEvent, clock))
+    && shouldDisplayRegionalWarning(persistentRegionalEvent, keepLatestWarningVisible, latestRegionalState.terminated, clock)
     ? persistentRegionalEvent
     : null;
   const visiblePersistentRegionalImpactEvent = persistentRegionalImpactEvent
-    && (keepLatestWarningVisible || isLiveEewActive(persistentRegionalImpactEvent, clock))
+    && shouldDisplayRegionalWarning(persistentRegionalImpactEvent, keepLatestWarningVisible, latestRegionalState.terminated, clock)
     ? persistentRegionalImpactEvent
     : null;
   const historyEvents = useMemo(
@@ -4170,7 +4198,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       .filter((event) => isLiveEewActive(event, clock))
       .sort((a, b) => Date.parse(b.announcedAt) - Date.parse(a.announcedAt));
   }, [clock, eews, receivedInstitutionEewReports, regionalHistory]);
-  const latestEvent = activeEews[0] ?? null;
+  const latestEvent = activeEews.find((event) => (
+    keepLatestWarningVisible
+    || !PERSISTENT_REGIONAL_EEW_SOURCES.has(event.source)
+    || shouldDisplayLiveWavefront(event, clock)
+  )) ?? null;
   const selectedEvent = useMemo(() => {
     const selected = selectedEewKey
       ? [...regionalHistory, ...institutionEewReports].find((event) => eewReportKey(event) === selectedEewKey)
@@ -4211,7 +4243,6 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     const offsetSeconds = replayEewReportOffsetSeconds(report);
     return offsetSeconds === null ? [] : [{ report, offsetSeconds }];
   }), [selectedReplayReports]);
-  replayReportOffsetsRef.current = selectedReplayReportTimeline.map(({ offsetSeconds }) => offsetSeconds);
   const selectedReplayInstitutionRecord = useMemo(() => {
     if (!selectedEvent) return null;
     const matched = matchOfficialHypocenter(selectedEvent, institutionReports);
@@ -4231,13 +4262,28 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     if (!selectedReplayInstitutionRecord
       || (!isShakeMapQueryable(selectedReplayInstitutionRecord) && !isPagerQueryable(selectedReplayInstitutionRecord))) return null;
     const productReport = institutionReportToLiveEew(selectedReplayInstitutionRecord);
-    return productReport
-      ? selectedReplayReportTimeline.find(({ report }) => eewReportKey(report) === eewReportKey(productReport)) ?? null
-      : null;
-  }, [selectedReplayInstitutionRecord, selectedReplayReportTimeline]);
+    if (!productReport) return null;
+    const originTime = Date.parse(productReport.originTime);
+    const productIssuedAt = [replayUsgsShakeMap?.issuedAt, replayUsgsPager?.issuedAt]
+      .map((value) => Date.parse(value ?? ""))
+      .filter(Number.isFinite)
+      .sort((left, right) => left - right)[0];
+    if (Number.isFinite(originTime) && Number.isFinite(productIssuedAt)) {
+      return {
+        report: productReport,
+        offsetSeconds: Math.max(0, (productIssuedAt - originTime) / 1000),
+      };
+    }
+    return selectedReplayReportTimeline.find(({ report }) => eewReportKey(report) === eewReportKey(productReport)) ?? null;
+  }, [replayUsgsPager?.issuedAt, replayUsgsShakeMap?.issuedAt, selectedReplayInstitutionRecord, selectedReplayReportTimeline]);
+  replayReportOffsetsRef.current = [...new Set([
+    ...selectedReplayReportTimeline.map(({ offsetSeconds }) => offsetSeconds),
+    ...(selectedReplayPresentationEntry ? [selectedReplayPresentationEntry.offsetSeconds] : []),
+  ])].sort((left, right) => left - right);
   const selectedReplayReportDurationSeconds = Math.max(
     300,
     ...selectedReplayReportTimeline.map(({ offsetSeconds }) => Math.ceil(offsetSeconds) + 3),
+    selectedReplayPresentationEntry ? Math.ceil(selectedReplayPresentationEntry.offsetSeconds) + 3 : 0,
   );
   const selectedInstitutionRecord = useMemo(() => {
     if (!selectedEvent) return null;
@@ -4268,8 +4314,8 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   );
   useEffect(() => {
     replayDurationRef.current = replayDurationSeconds;
-    setReplaySeconds((value) => Math.min(value, replayDurationSeconds));
-  }, [replayDurationSeconds]);
+    setReplaySeconds((value) => Math.max(-normalizedReplayPreRollSeconds, Math.min(value, replayDurationSeconds)));
+  }, [normalizedReplayPreRollSeconds, replayDurationSeconds]);
   const movieAutoTracking = movieModeEnabled && movieCameraMode === "auto" && autoLocateGlobalEarthquakes;
   const eligibleGlobalEvents = useMemo(
     () => selectAutoLocatedGlobalEvents(activeEews, autoMagnitudeThreshold, clock),
@@ -4495,7 +4541,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   }, [catalogue, cencReport, cwaStations, globalFdsnStations, kmaStations, oceanCatalogue, waveformFdsnStations]);
   const selectedStation = allSelectableStations.find((station) => station.id === selectedStationId)
     ?? (selectedGlobalStation?.id === selectedStationId ? selectedGlobalStation : null);
-  const replayEvent = selectedReplayPropagationEvent && (replayPlaying || replaySeconds > 0)
+  const replayEvent = selectedReplayPropagationEvent && replayModeActive
     ? selectedReplayPropagationEvent
     : null;
   const replaySessionKey = selectedEvent ? eewSoundEventKey(selectedEvent) : "";
@@ -4508,7 +4554,32 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     replayProductPresentationActive ? replayProductPresentation?.stage ?? null : null,
   );
   const replayPropagationActive = Boolean(replayEvent && isReplayPropagationActive(replaySeconds));
-  const replaySeismicSeconds = Math.min(replaySeconds, 300);
+  const replaySeismicSeconds = Math.max(0, Math.min(replaySeconds, 300));
+  useEffect(() => {
+    if (!replayEvent || !replayMovieModeEnabled) {
+      replayMovieCameraState.current = null;
+      return;
+    }
+    const sessionKey = `${replaySessionKey}:${replayEvent.latitude}:${replayEvent.longitude}`;
+    const secondBucket = replaySeconds < 0 ? -1 : Math.floor(replaySeconds);
+    const radiusKm = replayMovieCameraRadiusKm(replaySeconds, replayEvent.depthKm);
+    const previous = replayMovieCameraState.current;
+    const sameSession = previous?.sessionKey === sessionKey;
+    if (sameSession
+      && previous.secondBucket === secondBucket
+      && Math.abs(previous.radiusKm - radiusKm) < Math.max(1.5, previous.radiusKm * 0.04)) return;
+    replayMovieCameraState.current = { sessionKey, secondBucket, radiusKm };
+    commitMapFocus({
+      id: `replay-movie:${sessionKey}:${secondBucket}`,
+      latitude: replayEvent.latitude,
+      longitude: replayEvent.longitude,
+      zoom: 6,
+      exact: true,
+      radiusKm,
+      animate: sameSession && replaySeconds >= 0,
+      durationSeconds: sameSession ? 0.9 : 0,
+    });
+  }, [commitMapFocus, replayEvent, replayMovieModeEnabled, replaySeconds, replaySessionKey]);
   const regionalLiveWaveEvent = latestRegionalState.waveEvent
     && shouldDisplayLiveWavefront(latestRegionalState.waveEvent, clock)
     ? latestRegionalState.waveEvent
@@ -4752,6 +4823,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       replayEewSoundState.current = null;
       return;
     }
+    const presentationKey = selectedReplayPresentationEntry
+      ? `${eewReportKey(selectedReplayPresentationEntry.report)}:${selectedReplayPresentationEntry.offsetSeconds.toFixed(2)}`
+      : null;
     let state = replayEewSoundState.current;
     if (!state || state.sessionKey !== replaySessionKey) {
       state = {
@@ -4762,6 +4836,16 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
             .filter(({ offsetSeconds }) => offsetSeconds < replaySeconds - 0.01)
             .map(({ report }) => eewReportKey(report)),
         ),
+        playedPresentationKeys: new Set(
+          presentationKey && selectedReplayPresentationEntry
+            && selectedReplayPresentationEntry.offsetSeconds < replaySeconds - 0.01
+            ? [presentationKey]
+            : [],
+        ),
+        issuePlayed: replaySeconds > 0.01,
+        warningPlayed: selectedReplayReportTimeline.some(({ report, offsetSeconds }) => (
+          report.warning && offsetSeconds < replaySeconds - 0.01
+        )),
       };
       replayEewSoundState.current = state;
     }
@@ -4771,6 +4855,16 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
         .filter(({ offsetSeconds }) => offsetSeconds <= replaySeconds + 0.01)
         .map(({ report }) => eewReportKey(report)));
       state.playedReportKeys = new Set([...state.playedReportKeys].filter((key) => visibleReportKeys.has(key)));
+      state.playedPresentationKeys = new Set(
+        presentationKey && selectedReplayPresentationEntry
+          && selectedReplayPresentationEntry.offsetSeconds <= replaySeconds + 0.01
+          ? [presentationKey]
+          : [],
+      );
+      state.issuePlayed = replaySeconds > 0.01;
+      state.warningPlayed = selectedReplayReportTimeline.some(({ report, offsetSeconds }) => (
+        report.warning && offsetSeconds <= replaySeconds + 0.01
+      ));
       setReplayProductPresentation(null);
     }
     const previousSeconds = state.lastSeconds;
@@ -4780,39 +4874,54 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       for (const { report, offsetSeconds } of selectedReplayReportTimeline) {
         if (offsetSeconds <= replaySeconds + 0.01) state.playedReportKeys.add(eewReportKey(report));
       }
+      if (presentationKey && selectedReplayPresentationEntry
+        && selectedReplayPresentationEntry.offsetSeconds <= replaySeconds + 0.01) {
+        state.playedPresentationKeys.add(presentationKey);
+      }
       return;
     }
 
+    const soundAssets: SeismicSoundAssetId[] = [];
+    if (!state.issuePlayed && previousSeconds <= 0.01 && replaySeconds >= -0.01) {
+      state.issuePlayed = true;
+      soundAssets.push("srev-issue");
+    }
     const crossedReports = selectedReplayReportTimeline.filter(({ report, offsetSeconds }) => (
       !state.playedReportKeys.has(eewReportKey(report))
       && offsetSeconds >= previousSeconds - 0.01
       && offsetSeconds <= replaySeconds + 0.01
     ));
-    if (!crossedReports.length) return;
-
-    let soundAsset: SeismicSoundAssetId | null = null;
     let presentationReport: LiveEew | null = null;
     let presentationOffsetSeconds: number | null = null;
     let presentationHasOfficialImpact = false;
     for (const { report, offsetSeconds } of crossedReports) {
       const reportIndex = selectedReplayReportTimeline.findIndex((entry) => eewReportKey(entry.report) === eewReportKey(report));
       const previousReport = reportIndex > 0 ? selectedReplayReportTimeline[reportIndex - 1].report : null;
-      const startsProductPresentation = Boolean(
-        selectedReplayPresentationEntry
-          && eewReportKey(selectedReplayPresentationEntry.report) === eewReportKey(report),
-      );
       state.playedReportKeys.add(eewReportKey(report));
-      if (startsProductPresentation) {
-        presentationReport = report;
-        presentationOffsetSeconds = offsetSeconds;
-        presentationHasOfficialImpact = Boolean(report.affectedAreas?.length);
-        soundAsset = presentationHasOfficialImpact
-          ? "srev-detail"
-          : replayEewSoundAssetForTransition(report, previousReport);
-        break;
-      } else {
-        soundAsset = replayEewSoundAssetForTransition(report, previousReport);
+      const transitionAsset = replayEewSoundAssetForTransition(report, previousReport);
+      if (transitionAsset && !(transitionAsset === "srev-issue" && state.issuePlayed)) {
+        soundAssets.push(transitionAsset);
+        if (transitionAsset === "srev-issue") state.issuePlayed = true;
       }
+      if (report.warning && !state.warningPlayed) {
+        state.warningPlayed = true;
+        soundAssets.push("srev-warn");
+      }
+    }
+
+    const presentationCrossed = Boolean(
+      presentationKey
+      && selectedReplayPresentationEntry
+      && !state.playedPresentationKeys.has(presentationKey)
+      && selectedReplayPresentationEntry.offsetSeconds <= replaySeconds + 0.01,
+    );
+    if (presentationCrossed && presentationKey && selectedReplayPresentationEntry) {
+      state.playedPresentationKeys.add(presentationKey);
+      presentationReport = selectedReplayPresentationEntry.report;
+      presentationOffsetSeconds = selectedReplayPresentationEntry.offsetSeconds;
+      presentationHasOfficialImpact = Boolean(presentationReport.affectedAreas?.length);
+      if (presentationHasOfficialImpact) soundAssets.push("srev-detail");
+      state.playedReportKeys.add(eewReportKey(presentationReport));
     }
 
     if (presentationReport && presentationOffsetSeconds !== null) {
@@ -4840,7 +4949,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
         });
       }
     }
-    if (seismicAlertSoundEnabled && soundAsset) void playSoundAsset(soundAsset);
+    if (seismicAlertSoundEnabled) {
+      [...new Set(soundAssets)].forEach((assetId, index) => {
+        if (index === 0) void playSoundAsset(assetId);
+        else window.setTimeout(() => void playSoundAsset(assetId), index * 900);
+      });
+    }
   }, [playSoundAsset, replayEvent, replayPlaying, replaySeconds, replaySessionKey, replayUsgsPager, replayUsgsPagerError, replayUsgsPagerLoading, replayUsgsShakeMap, replayUsgsShakeMapError, replayUsgsShakeMapLoading, seismicAlertSoundEnabled, selectedReplayInstitutionRecord, selectedReplayPresentationEntry, selectedReplayReportTimeline]);
 
   const motionSoundSessionKey = replayEvent ? replayNiedSoundSessionKey : "live";
@@ -4894,7 +5008,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     setSelectedGlobalStation(isGlobalStation(station) ? station : null);
     setStationSelectionReason(reason);
     setPanelTab("station");
-    focusMap(`station:${station.id}`, station.latitude, station.longitude, isCencStation(station) ? 9 : isGlobalStation(station) ? Math.max(6, mapViewportZoomRef.current) : 7);
+    if (!(reason === "waveform-auto" && replayModeActiveRef.current)) {
+      focusMap(`station:${station.id}`, station.latitude, station.longitude, isCencStation(station) ? 9 : isGlobalStation(station) ? Math.max(6, mapViewportZoomRef.current) : 7);
+    }
   }, [focusMap, setPanelTab]);
 
   useEffect(() => {
@@ -5251,7 +5367,10 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       ? mmiIntensityColor(selectedRank ?? 0)
       : jmaShindoColor(selectedRank ?? 0);
   const selectedOrigin = selectedEvent ? Date.parse(selectedEvent.originTime) : 0;
-  const previewEvent = warningOverlayTab === "selected" && selectedEvent && clock < selectedPreviewUntil ? selectedEvent : null;
+  const effectiveWarningOverlayTab: WarningOverlayTab = replayEvent ? "selected" : warningOverlayTab;
+  const previewEvent = replayEvent
+    ? selectedEvent
+    : warningOverlayTab === "selected" && selectedEvent && clock < selectedPreviewUntil ? selectedEvent : null;
   const replayMapEvent = useMemo(() => replayEvent
     ? { ...replayEvent, affectedAreas: undefined }
     : null, [replayEvent]);
@@ -5327,6 +5446,35 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   }), [currentAffectedLayers, persistentRegionalOfficialRegions]);
   const localAdministrativeRegionCount = affectedLayers.local.features
     .filter((feature) => !feature.properties.contour).length;
+  const localImpactSoundSignature = affectedLayers.local.features
+    .filter((feature) => !feature.properties.contour && feature.properties.arrived)
+    .map((feature) => `${feature.properties.code ?? feature.properties.name}:${Math.floor(Number(feature.properties.currentRank) || 0)}`)
+    .sort()
+    .join("|");
+  useEffect(() => {
+    if (replayProductPresentationActive) return;
+    const event = replayEvent ?? liveWavefrontEvent;
+    if (!event) {
+      replayLocalImpactSoundState.current = null;
+      return;
+    }
+    const sessionKey = `${replayEvent ? "replay" : "live"}:${eewSoundEventKey(event)}`;
+    const previous = replayLocalImpactSoundState.current;
+    const now = Date.now();
+    if (!previous || previous.sessionKey !== sessionKey) {
+      replayLocalImpactSoundState.current = { sessionKey, signature: localImpactSoundSignature, playedAt: 0 };
+      if (localImpactSoundSignature && seismicAlertSoundEnabled && (!replayEvent || replayPlaying)) {
+        replayLocalImpactSoundState.current.playedAt = now;
+        void playSoundAsset("srev-update");
+      }
+      return;
+    }
+    if (!localImpactSoundSignature || localImpactSoundSignature === previous.signature) return;
+    previous.signature = localImpactSoundSignature;
+    if (!seismicAlertSoundEnabled || replayEvent && !replayPlaying || now - previous.playedAt < 2_000) return;
+    previous.playedAt = now;
+    void playSoundAsset("srev-update");
+  }, [liveWavefrontEvent, localImpactSoundSignature, playSoundAsset, replayEvent, replayPlaying, replayProductPresentationActive, seismicAlertSoundEnabled]);
   const activeTsunamiRegions = useMemo<TsunamiRegionCollection>(() => {
     if (!tsunamiRegions || !displayedJmaTsunami?.active) return { type: "FeatureCollection", features: [] };
     const activeAreas = new Map(displayedJmaTsunami.areas.map((area) => [area.name, area]));
@@ -5446,7 +5594,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const oceanResponseActive = displayedOceanMode === "measured"
     ? Boolean(selectedSnetEvent?.active && activeOceanCount)
     : Boolean(activeOceanCount);
-  const overlayEvent = warningOverlayTab === "selected"
+  const overlayEvent = effectiveWarningOverlayTab === "selected"
     ? selectedEvent ?? visiblePersistentRegionalEvent ?? autoGlobalEvent ?? latestEvent
     : visiblePersistentRegionalEvent ?? autoGlobalEvent ?? latestEvent;
   const latestDisplayEvent = visiblePersistentRegionalEvent ?? latestEvent;
@@ -5616,13 +5764,24 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     if (!selectedEvent || !selectedReplayPropagationEvent) return;
     if (!replayPlaying) {
       void primeReplayAudio();
-      focusMap(
-        `replay:${eewReportKey(selectedEvent)}`,
-        selectedReplayPropagationEvent.latitude,
-        selectedReplayPropagationEvent.longitude,
-        5,
-        true,
-      );
+      setWarningOverlayTab("selected");
+      setSelectedPreviewUntil(0);
+      if (replaySeconds >= replayDurationSeconds - 0.01) {
+        setReplaySeconds(-normalizedReplayPreRollSeconds);
+        replayEewSoundState.current = null;
+        setReplayProductPresentation(null);
+      }
+      if (!replayMovieModeEnabled) {
+        commitMapFocus({
+          id: `replay:${eewReportKey(selectedEvent)}`,
+          latitude: selectedReplayPropagationEvent.latitude,
+          longitude: selectedReplayPropagationEvent.longitude,
+          zoom: 6,
+          exact: true,
+          radiusKm: 50,
+          animate: false,
+        });
+      }
     }
     setReplayPlaying((value) => !value);
   };
@@ -5669,21 +5828,21 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     </section> : null,
     warning: <section className="seismic-map-warning-overlay">
       <nav aria-label="地图预警摘要">
-        <button className={warningOverlayTab === "latest" ? "active" : ""} onClick={() => setWarningOverlayTab("latest")}><Siren size={13} />最新预警</button>
-        <button className={warningOverlayTab === "selected" ? "active" : ""} onClick={() => { setWarningOverlayTab("selected"); setSelectedPreviewUntil(Date.now() + 20_000); }} disabled={!selectedEvent}><MapPin size={13} />当前选择</button>
+        <button className={effectiveWarningOverlayTab === "latest" ? "active" : ""} disabled={Boolean(replayEvent)} onClick={() => setWarningOverlayTab("latest")}><Siren size={13} />最新预警</button>
+        <button className={effectiveWarningOverlayTab === "selected" ? "active" : ""} onClick={() => { setWarningOverlayTab("selected"); setSelectedPreviewUntil(Date.now() + 20_000); }} disabled={!selectedEvent}><MapPin size={13} />{replayEvent ? "回放报告" : "当前选择"}</button>
         <span className={`earthquake-live-dot ${wolfxState === "error" && fanState === "error" ? "error" : ""}`} />
       </nav>
-      {overlayEvent ? <button className="seismic-warning-summary" onClick={() => chooseEvent(overlayEvent, warningOverlayTab === "selected")}>
+      {overlayEvent ? <button className="seismic-warning-summary" onClick={() => chooseEvent(overlayEvent, effectiveWarningOverlayTab === "selected")}>
         <span><b>{overlayEvent.source}</b><strong>{overlayEvent.place}</strong><em>{liveEventStatusLabel(overlayEvent)}</em></span>
         <span><small>M {overlayEvent.magnitude?.toFixed(1) ?? "--"}</small><small>最大 {overlayEvent.maxIntensity}</small><small>第 {overlayEvent.serial} 报{overlayEvent.final ? " · 最终" : ""}</small></span>
         <time>{formatTime(overlayEvent.announcedAt)}</time>
       </button> : <div className="seismic-warning-waiting"><Radio size={16} />正在监视区域 EEW 与全球机构报告</div>}
     </section>,
     nied: <button className={`seismic-detection-card ${showShakeDetectionGrid ? replayEvent ? replayDetected ? `detected replay ${mapDetectionSeverity}` : "replay" : niedDetection.detected ? `detected ${mapDetectionSeverity}` : "" : ""}`} onClick={() => replayEvent ? focusReplayDetection() : focusStrongestDetection("NIED")} disabled={!activeNiedCount}>
-      <span><i />{replayEvent ? "NIED 回放模拟" : "NIED 实时"}</span><strong>{!showShakeDetectionGrid ? "已隐藏" : replayEvent ? `震度 ${jmaShindoLabel(visibleReplaySimulation?.maxRank ?? 0)}` : niedDetection.currentMaxLabel}</strong><small>{!showShakeDetectionGrid ? "检知框与传播响应已关闭" : replayEvent ? replayDetected ? `${mapDetectionStationIds.length} 站 · 已形成检知框` : `${mapDetectionStationIds.length} 站响应` : niedDetection.detected ? `${niedDetection.activeStationIds.length} 站 · ${niedDetection.clusterCount} 簇` : "摇晃检知待机"}</small><time>{replayEvent ? `T+${replaySeconds.toFixed(2)} s` : niedFrame ? formatTime(niedFrame.dataTime) : "等待帧"}</time>
+      <span><i />{replayEvent ? "NIED 回放模拟" : "NIED 实时"}</span><strong>{!showShakeDetectionGrid ? "已隐藏" : replayEvent ? `震度 ${jmaShindoLabel(visibleReplaySimulation?.maxRank ?? 0)}` : niedDetection.currentMaxLabel}</strong><small>{!showShakeDetectionGrid ? "检知框与传播响应已关闭" : replayEvent ? replayDetected ? `${mapDetectionStationIds.length} 站 · 已形成检知框` : `${mapDetectionStationIds.length} 站响应` : niedDetection.detected ? `${niedDetection.activeStationIds.length} 站 · ${niedDetection.clusterCount} 簇` : "摇晃检知待机"}</small><time>{replayEvent ? formatReplayClock(replaySeconds) : niedFrame ? formatTime(niedFrame.dataTime) : "等待帧"}</time>
     </button>,
     kma: <button className={`seismic-detection-card ${activeKmaCount ? "detected" : ""}`} onClick={() => focusStrongestDetection("KMA-PEWS")} disabled={!activeKmaCount}>
-      <span><i />KMA-PEWS</span><strong>{!showShakeDetectionGrid ? "已隐藏" : replayEvent ? `烈度 ${intensityRomanLabel(visibleKmaReplaySimulation?.maxRank ?? 0)}` : kmaDetection.currentMaxLabel}</strong><small>{!showShakeDetectionGrid ? "检知框与传播响应已关闭" : replayEvent ? `${activeKmaCount} 站 · 回放模拟` : kmaDetection.detected ? `${kmaDetection.activeStationIds.length} 站 · ${kmaDetection.clusterCount} 簇` : "实时摇晃检知待机"}</small><time>{replayEvent ? `T+${replaySeconds.toFixed(2)} s` : kmaDetection.updatedAt ? formatTime(kmaDetection.updatedAt) : "建立 60 秒基线"}</time>
+      <span><i />KMA-PEWS</span><strong>{!showShakeDetectionGrid ? "已隐藏" : replayEvent ? `烈度 ${intensityRomanLabel(visibleKmaReplaySimulation?.maxRank ?? 0)}` : kmaDetection.currentMaxLabel}</strong><small>{!showShakeDetectionGrid ? "检知框与传播响应已关闭" : replayEvent ? `${activeKmaCount} 站 · 回放模拟` : kmaDetection.detected ? `${kmaDetection.activeStationIds.length} 站 · ${kmaDetection.clusterCount} 簇` : "实时摇晃检知待机"}</small><time>{replayEvent ? formatReplayClock(replaySeconds) : kmaDetection.updatedAt ? formatTime(kmaDetection.updatedAt) : "建立 60 秒基线"}</time>
     </button>,
     jma: <button className={`seismic-detection-card ${jmaRealtimeWarning ? "detected red" : jmaRealtimeIntensity ? "detected yellow" : ""}`} onClick={() => (jmaRealtimeWarning ?? jmaRealtimeIntensity) && chooseEvent(jmaRealtimeWarning ?? jmaRealtimeIntensity!)} disabled={!jmaRealtimeWarning && !jmaRealtimeIntensity}>
       <span><i />JMA 震度速报</span><strong>{jmaRealtimeWarning ? `预警震度 ${jmaRealtimeWarning.maxIntensity}` : jmaRealtimeIntensity ? `实测震度 ${jmaRealtimeIntensity.maxIntensity}` : "无速报"}</strong><small>{jmaRealtimeWarning ? `${jmaRealtimeWarning.affectedAreas?.length ?? 0} 区 · 第 ${jmaRealtimeWarning.serial} 报` : jmaRealtimeIntensity ? `${jmaRealtimeIntensity.affectedAreas?.length ?? 0} 区 · 官方受灾区域已上色` : jmaIntensityState === "online" ? "震度速报通道在线" : "震度速报通道连接中"}</small><time>{(jmaRealtimeWarning ?? jmaRealtimeIntensity) ? formatTime((jmaRealtimeWarning ?? jmaRealtimeIntensity)!.announcedAt) : "等待 JMA 官方报文"}</time>
@@ -6150,7 +6309,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 </output>
                 <div className="seismic-s-wave-meta"><strong>{userExpectedIntensity}</strong><small>震中距 {userSurfaceDistanceKm.toFixed(0)} km</small></div>
                 <div className="seismic-s-wave-stripes" aria-hidden="true" />
-                <div className="seismic-s-wave-marquee"><span>{sWaveArrived ? "S 波已抵达定位点，请注意强烈摇晃并远离坠落物。" : `距离 S 波到达还有 ${formatSArrivalCountdown(sWaveRemainingSeconds)}。`} 理论速度 3.5 km/s · {replayEvent ? `回放 T+${replaySeconds.toFixed(1)} s` : "实时传播定位"} · {wavefrontEvent?.place}</span></div>
+                <div className="seismic-s-wave-marquee"><span>{sWaveArrived ? "S 波已抵达定位点，请注意强烈摇晃并远离坠落物。" : `距离 S 波到达还有 ${formatSArrivalCountdown(sWaveRemainingSeconds)}。`} 理论速度 3.5 km/s · {replayEvent ? `回放 ${formatReplayClock(replaySeconds, false)}` : "实时传播定位"} · {wavefrontEvent?.place}</span></div>
               </section>}
               <SeismicIntensityLegend />
               {showWniCameras && <a className={`seismic-wni-camera-map-status ${wniCameraState}`} href={WNI_CAMERA_MAP_URL} target="_blank" rel="noreferrer" title="打开 WNI 官方全国摄像头地图">
@@ -6268,14 +6427,14 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                   </> : isOceanStation(selectedStation) ? <>
                     <header className="seismic-station-heading"><span style={{ background: intensityColor(Math.max(0, selectedRank ?? 0)) }} /><div><strong>{selectedStation.network} {selectedStation.stationCode}</strong><small>NIED 海底地震观测网</small></div><b>{displayedOceanMode === "measured" ? `实测反算震度 ${jmaShindoLabel(selectedRank ?? 0)} · ${(selectedRank ?? 0).toFixed(2)}` : oceanMode === "replay" ? `模拟震度 ${jmaShindoLabel(selectedRank ?? 0)} · ${(selectedRank ?? 0).toFixed(2)}` : oceanMode === "local" ? `预测震度 ${jmaShindoLabel(selectedRank ?? 0)} · ${(selectedRank ?? 0).toFixed(2)}` : `${selectedStation.depthM.toFixed(0)} m`}</b></header>
                     <div className="seismic-gauge-grid"><article><Gauge size={18} /><span>{displayedOceanMode === "measured" ? "MSIL 色值反算" : oceanMode === "replay" ? "回放强度" : "本地预测"}</span><strong>{(selectedRank ?? 0).toFixed(2)}</strong><meter min="-3" max="7" value={selectedRank ?? 0} /></article><article><Activity size={18} /><span>PGA 经验换算</span><strong>{motion.pgaGal.toFixed(2)} gal</strong><meter min="0" max="1000" value={motion.pgaGal} /></article><article><Waves size={18} /><span>PGV 经验换算</span><strong>{motion.pgvCms.toFixed(2)} cm/s</strong><meter min="0" max="100" value={motion.pgvCms} /></article></div>
-                    <dl className="earthquake-detail-list"><div><dt>坐标</dt><dd>{selectedStation.latitude.toFixed(4)}, {selectedStation.longitude.toFixed(4)}</dd></div><div><dt>海底深度</dt><dd>{selectedStation.depthM.toFixed(0)} m</dd></div><div><dt>当前样本</dt><dd>{displayedOceanMode === "measured" ? snetMeasuredFrame ? `${formatTime(snetMeasuredFrame.timestamp)} MSIL 观测帧` : "等待 MSIL 帧" : oceanMode === "replay" ? `T+${replaySeconds.toFixed(2)} s 回放` : oceanMode === "local" ? `T+${oceanResponseElapsed.toFixed(2)} s 本地预测` : "等待有效事件"}</dd></div><div><dt>数据性质</dt><dd>{displayedOceanMode === "measured" ? "海しる强震动观测瓦片色值反算" : "事件驱动确定性传播计算"}</dd></div></dl>
+                    <dl className="earthquake-detail-list"><div><dt>坐标</dt><dd>{selectedStation.latitude.toFixed(4)}, {selectedStation.longitude.toFixed(4)}</dd></div><div><dt>海底深度</dt><dd>{selectedStation.depthM.toFixed(0)} m</dd></div><div><dt>当前样本</dt><dd>{displayedOceanMode === "measured" ? snetMeasuredFrame ? `${formatTime(snetMeasuredFrame.timestamp)} MSIL 观测帧` : "等待 MSIL 帧" : oceanMode === "replay" ? `${formatReplayClock(replaySeconds)} 回放` : oceanMode === "local" ? `T+${oceanResponseElapsed.toFixed(2)} s 本地预测` : "等待有效事件"}</dd></div><div><dt>数据性质</dt><dd>{displayedOceanMode === "measured" ? "海しる强震动观测瓦片色值反算" : "事件驱动确定性传播计算"}</dd></div></dl>
                     <a className="seismic-station-link" href={selectedStation.waveformUrl} target="_blank" rel="noreferrer">打开官方延迟波形<ExternalLink size={13} /></a>
                     <p className="seismic-data-label">{displayedOceanMode === "measured" ? "这是 MSIL 每分钟观测瓦片的色标反算值，与截图所用方法一致；它不是 NIED 发布的官方震度公告，也不是原始波形计算结果。" : "地图变色和滚动值来自当前 EEW 或回放事件的确定性传播计算，不是 NIED 官方实时观测。"}</p>
                     {isJshisPositionSupported(selectedStation.latitude, selectedStation.longitude) && <button className="seismic-station-jshis-button" onClick={() => setJshisTarget({ latitude: selectedStation.latitude, longitude: selectedStation.longitude, label: `${selectedStation.network} ${selectedStation.stationCode}` })}><Layers3 size={14} />J-SHIS 位置风险 / 地盘 / 滑坡 / 断层</button>}
                   </> : <>
                     <header className="seismic-station-heading"><span style={{ background: selectedDisplayColor }} /><div><strong>{selectedStation.stationName}</strong><small>{selectedStation.network} · {selectedStation.stationCode}</small></div><b>{isNiedStation(selectedStation) ? `震度 ${jmaShindoLabel(selectedRank ?? 0)}` : `烈度 ${intensityRomanLabel(selectedRank ?? 0)}`}</b></header>
                     <div className="seismic-gauge-grid"><article><Gauge size={18} /><span>{isNiedStation(selectedStation) ? "震度" : "烈度"}</span><strong>{isNiedStation(selectedStation) ? `${jmaShindoLabel(selectedRank ?? 0)} · ${(selectedRank ?? 0).toFixed(1)}` : `${intensityRomanLabel(selectedRank ?? 0)} · ${(selectedRank ?? 0).toFixed(1)}`}</strong><meter min="0" max={isKmaStation(selectedStation) ? 12 : 7} value={selectedRank ?? 0} /></article><article><Activity size={18} /><span>PGA 经验估算</span><strong>{motion.pgaGal.toFixed(2)} gal</strong><meter min="0" max="1000" value={motion.pgaGal} /></article><article><Waves size={18} /><span>PGV 经验估算</span><strong>{motion.pgvCms.toFixed(2)} cm/s</strong><meter min="0" max="100" value={motion.pgvCms} /></article></div>
-                    <dl className="earthquake-detail-list"><div><dt>坐标</dt><dd>{selectedStation.latitude.toFixed(4)}, {selectedStation.longitude.toFixed(4)}</dd></div><div><dt>最新采样</dt><dd>{replayEvent ? `T+${replaySeconds.toFixed(2)} s` : rollingHistory.length ? formatTime(rollingHistory[rollingHistory.length - 1].timestamp) : "等待数据"}</dd></div><div><dt>采样类型</dt><dd>{isNiedStation(selectedStation) ? replayEvent ? "历史事件确定性回放模拟" : "NIED 离散实时强度" : replayEvent ? "历史事件确定性回放模拟" : "KMA-PEWS 官方逐秒 MMI"}</dd></div></dl>
+                    <dl className="earthquake-detail-list"><div><dt>坐标</dt><dd>{selectedStation.latitude.toFixed(4)}, {selectedStation.longitude.toFixed(4)}</dd></div><div><dt>最新采样</dt><dd>{replayEvent ? formatReplayClock(replaySeconds) : rollingHistory.length ? formatTime(rollingHistory[rollingHistory.length - 1].timestamp) : "等待数据"}</dd></div><div><dt>采样类型</dt><dd>{isNiedStation(selectedStation) ? replayEvent ? "历史事件确定性回放模拟" : "NIED 离散实时强度" : replayEvent ? "历史事件确定性回放模拟" : "KMA-PEWS 官方逐秒 MMI"}</dd></div></dl>
                     <p className="seismic-data-label">{replayEvent ? "当前值来自历史事件的传播回放，不是 NIED 实测；PGA/PGV 仍为经验换算。" : "PGA/PGV 为根据震度换算的经验估算，不是测站原始加速度计数据。"}</p>
                     {isJshisPositionSupported(selectedStation.latitude, selectedStation.longitude) && <button className="seismic-station-jshis-button" onClick={() => setJshisTarget({ latitude: selectedStation.latitude, longitude: selectedStation.longitude, label: `${selectedStation.network} ${selectedStation.stationCode} · ${selectedStation.stationName}` })}><Layers3 size={14} />J-SHIS 位置风险 / 地盘 / 滑坡 / 断层</button>}
                   </>
@@ -6360,8 +6519,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               <header className="seismic-lower-heading"><div><strong>地震波传播与测站响应回放</strong><span>{selectedEvent ? `${selectedEvent.source} ${selectedEvent.place}` : "请从预警历史选择事件"}</span></div><div><span>发震时刻</span><strong>{selectedEvent ? formatTime(selectedEvent.originTime) : "--"}</strong></div><b className="experimental">确定性模拟 · 非实测</b></header>
               <div className="seismic-bottom-replay-grid">
                 <div>
-                  <div className="seismic-replay-clock"><span>T+{replaySeconds.toFixed(replaySeconds < 300 ? 2 : 0)} s / {Math.round(replayDurationSeconds / 60)} min</span><strong>{selectedEvent ? formatTime(selectedOrigin + replaySeconds * 1000) : "--"}</strong></div>
-                  <input className="seismic-replay-slider" type="range" min="0" max={replayDurationSeconds} step="0.25" value={replaySeconds} disabled={!selectedEvent} onChange={(event) => setReplaySeconds(Number(event.target.value))} />
+                  <div className="seismic-replay-clock"><span>{formatReplayClock(replaySeconds, Math.abs(replaySeconds) < 300)} / {Math.round(replayDurationSeconds / 60)} min</span><strong>{selectedEvent ? formatTime(selectedOrigin + replaySeconds * 1000) : "--"}</strong></div>
+                  <input className="seismic-replay-slider" type="range" min={-normalizedReplayPreRollSeconds} max={replayDurationSeconds} step="0.25" value={replaySeconds} disabled={!selectedEvent} onChange={(event) => setReplaySeconds(Number(event.target.value))} />
+                  <div className="seismic-replay-options">
+                    <label className="seismic-replay-step"><span>录屏预备</span><input aria-label="回放录屏预备秒数" type="range" min="1" max="10" step="1" value={normalizedReplayPreRollSeconds} onChange={(event) => { const seconds = normalizeReplayPreRollSeconds(event.target.value); setReplayPreRollSeconds(seconds); if (!replayPlaying && replaySeconds <= 0) setReplaySeconds(-seconds); }} /><strong>T−{normalizedReplayPreRollSeconds} s</strong></label>
+                    <label className="seismic-replay-movie-toggle"><input type="checkbox" checked={replayMovieModeEnabled} onChange={(event) => setReplayMovieModeEnabled(event.target.checked)} /><span>回放电影模式</span><em>{replayMovieModeEnabled ? "S 形跟随 P 波" : "固定镜头"}</em></label>
+                  </div>
                   <label className="seismic-replay-step"><span>T 步进</span><input aria-label="回放 T 步进分钟" type="range" min="1" max="60" step="1" value={normalizedReplayStepMinutes} onChange={(event) => setReplayStepMinutes(Number(event.target.value))} /><strong>{normalizedReplayStepMinutes} min</strong></label>
                   <div className="seismic-replay-controls"><button title="回到起点" onClick={clearReplayPresentation}><SkipBack size={16} /></button><button className="primary" title={replayPlaying ? "暂停" : "播放"} disabled={!selectedEvent} onClick={toggleReplay}>{replayPlaying ? <Pause size={18} /> : <Play size={18} />}</button><button title={`前进 ${normalizedReplayStepMinutes} 分钟`} onClick={() => setReplaySeconds((value) => Math.min(replayDurationSeconds, value + normalizedReplayStepMinutes * 60))}><FastForward size={16} /></button><label className="seismic-replay-speed"><span>倍速</span><select aria-label="历史回放速度" value={normalizedReplaySpeed} onChange={(event) => setReplaySpeed(Number(event.target.value) as ReplaySpeed)}><option value={1}>1x</option><option value={10}>10x</option><option value={60}>60x</option><option value={300}>300x</option></select></label><button title="查看右侧测站滚动" disabled={!selectedEvent} onClick={() => { setPanelTab("station"); focusReplayDetection(); }}><Activity size={16} /></button><button title="重置" onClick={clearReplayPresentation}><RotateCcw size={16} /></button></div>
                 </div>

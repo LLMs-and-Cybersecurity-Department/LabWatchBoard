@@ -177,9 +177,8 @@ export function eewSoundAssetForTransition(
     if (Number.isFinite(magnitude) && magnitude < Math.max(1, Number(autoLocateMagnitude) || 1)) {
       return "srev-caution";
     }
-    if (next.warning) return "srev-warn";
-    if (next.relay === "Authorized") return "srev-issue";
-    return "general-ews";
+    if (next.hypocenterKnown === false) return "srev-prompt";
+    return "srev-issue";
   }
   if (next.warning && !previous.warning) return "srev-warn";
   if (next.final && !previous.final) return "srev-final";
@@ -187,6 +186,19 @@ export function eewSoundAssetForTransition(
     return "srev-update";
   }
   return null;
+}
+
+export function eewSoundAssetsForTransition(
+  next: EewSoundState,
+  previous: EewSoundState | null,
+  autoLocateMagnitude: number,
+) {
+  const primary = eewSoundAssetForTransition(next, previous, autoLocateMagnitude);
+  const sounds: SeismicSoundAssetId[] = primary ? [primary] : [];
+  if (next.warning && !previous?.warning && primary !== "srev-caution" && primary !== "srev-warn") {
+    sounds.push("srev-warn");
+  }
+  return sounds;
 }
 
 /**

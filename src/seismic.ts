@@ -692,6 +692,15 @@ export function shouldDisplayLiveWavefront(
   return elapsedMs >= 0 && elapsedMs < 300_000;
 }
 
+export function shouldDisplayRegionalWarning(
+  event: LiveEew,
+  keepLatestWarningVisible: boolean,
+  terminated: boolean,
+  now = Date.now(),
+) {
+  return keepLatestWarningVisible || (!terminated && shouldDisplayLiveWavefront(event, now));
+}
+
 export function isReplayPropagationActive(elapsedSeconds: number) {
   if (!Number.isFinite(elapsedSeconds) || elapsedSeconds <= 0) return false;
   // The replay clock is rendered to hundredths. Close propagation as soon as

@@ -37,6 +37,7 @@ import {
   niedStationDisplayColor,
   isLiveEewActive,
   isReplayPropagationActive,
+  shouldDisplayRegionalWarning,
   shouldDisplayLiveWavefront,
   normalizeFanEewEnvelope,
   normalizeCencIntensityDetail,
@@ -119,6 +120,8 @@ describe("seismic client calculations", () => {
     expect(shouldDisplayLiveWavefront({ ...report, observedIntensity: true }, originTime + 20_000)).toBe(false);
     expect(shouldDisplayLiveWavefront({ ...report, cancelled: true }, originTime + 20_000)).toBe(false);
     expect(shouldDisplayLiveWavefront({ ...report, final: true, relay: "Catalogue" }, originTime + 20_000, false)).toBe(true);
+    expect(shouldDisplayRegionalWarning({ ...report, final: true }, false, true, originTime + 20_000)).toBe(false);
+    expect(shouldDisplayRegionalWarning({ ...report, final: true }, true, true, originTime + 20_000)).toBe(true);
   });
 
   it("closes replay propagation when the visible clock reaches 300 seconds", () => {
