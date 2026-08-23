@@ -228,6 +228,34 @@ export type PalertStation = {
   startAt: string | null;
 };
 
+export type CanvasHitCandidate<T> = {
+  x: number;
+  y: number;
+  radius: number;
+  value: T;
+};
+
+/** Finds the closest visible Canvas marker inside a forgiving click target. */
+export function findNearestCanvasHit<T>(
+  candidates: readonly CanvasHitCandidate<T>[],
+  x: number,
+  y: number,
+  minimumRadius = 8,
+) {
+  let nearest: CanvasHitCandidate<T> | null = null;
+  let nearestDistanceSquared = Number.POSITIVE_INFINITY;
+  for (const candidate of candidates) {
+    const hitRadius = Math.max(minimumRadius, candidate.radius + 5);
+    const deltaX = candidate.x - x;
+    const deltaY = candidate.y - y;
+    const distanceSquared = deltaX * deltaX + deltaY * deltaY;
+    if (distanceSquared > hitRadius * hitRadius || distanceSquared >= nearestDistanceSquared) continue;
+    nearest = candidate;
+    nearestDistanceSquared = distanceSquared;
+  }
+  return nearest;
+}
+
 export type PalertSnapshot = {
   provider: string;
   sourceUrl: string;

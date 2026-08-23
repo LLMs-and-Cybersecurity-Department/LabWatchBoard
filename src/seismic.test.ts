@@ -59,6 +59,7 @@ import {
   simulateReplayStationResponse,
   seismicWaveArrivalSeconds,
   filterEewHistoryEventsBySource,
+  findNearestCanvasHit,
   geodesicCircleCoordinates,
   updateKmaPewsDetection,
   updateNiedShakeDetection,
@@ -72,6 +73,18 @@ import {
 } from "./seismic";
 
 describe("seismic client calculations", () => {
+  it("selects the nearest small Canvas station without capturing empty map clicks", () => {
+    const candidates = [
+      { x: 20, y: 20, radius: 2, value: "W001" },
+      { x: 31, y: 20, radius: 4, value: "W002" },
+    ];
+
+    expect(findNearestCanvasHit(candidates, 14, 20)?.value).toBe("W001");
+    expect(findNearestCanvasHit(candidates, 27, 20)?.value).toBe("W002");
+    expect(findNearestCanvasHit(candidates, 40, 20)?.value).toBe("W002");
+    expect(findNearestCanvasHit(candidates, 100, 100)).toBeNull();
+  });
+
   it("matches the kanameishi JMA and China intensity equations", () => {
     const event = {
       latitude: 35.45,

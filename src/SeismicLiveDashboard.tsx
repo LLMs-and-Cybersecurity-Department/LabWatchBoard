@@ -76,6 +76,7 @@ import {
   fetchPalertEvents,
   fetchPalertEventStations,
   fetchSnetIntensity,
+  findNearestCanvasHit,
   haversineKm,
   inferHypocenter,
   geodesicCircleCoordinates,
@@ -134,6 +135,7 @@ import {
   type CencIntensityReport,
   type CencIntensityStation,
   type CencIntensitySummary,
+  type CanvasHitCandidate,
   type HypocenterEstimate,
   type KmaStation,
   type JmaSeismicSiteCatalogue,
@@ -1797,6 +1799,7 @@ const GnssStationMarkers = memo(function GnssStationMarkers(props: { stations: r
 });
 
 type StationCanvasPoint = {
+  hitId?: string;
   latitude: number;
   longitude: number;
   color: string;
@@ -1813,18 +1816,22 @@ type StationDisplayStyle = {
   opacity: number;
 };
 
-/** Draws large, non-interactive station sets in one canvas instead of one SVG
- * node per station. The Leaflet pane owns geographic movement; the canvas is
- * re-anchored only after the viewport settles or the station data changes. */
+/** Draws large station sets in one canvas instead of one SVG node per station.
+ * Interactive layers keep a compact screen-space hit index, while the Leaflet
+ * pane remains responsible for geographic movement. */
 const StationCanvasLayer = memo(function StationCanvasLayer(props: {
   paneName: string;
   points: StationCanvasPoint[];
+  onSelectPoint?: (point: StationCanvasPoint) => void;
 }) {
   const map = useMap();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pointsRef = useRef(props.points);
+  const onSelectPointRef = useRef(props.onSelectPoint);
+  const hitCandidatesRef = useRef<Array<CanvasHitCandidate<StationCanvasPoint>>>([]);
   const redrawRef = useRef<() => void>(() => undefined);
   pointsRef.current = props.points;
+  onSelectPointRef.current = props.onSelectPoint;
 
   useEffect(() => {
     const pane = map.getPane(props.paneName);
@@ -1833,7 +1840,7 @@ const StationCanvasLayer = memo(function StationCanvasLayer(props: {
     canvas.className = "seismic-station-canvas";
     canvas.setAttribute("aria-hidden", "true");
     canvas.style.position = "absolute";
-    canvas.style.pointerEvents = "none";
+    canvas.style.pointerEvents = onSelectPointRef.current ? "auto" : "none";
     pane.appendChild(canvas);
     canvasRef.current = canvas;
     let animationFrame = 0;
@@ -1856,9 +1863,11 @@ const StationCanvasLayer = memo(function StationCanvasLayer(props: {
       context.clearRect(0, 0, size.x, size.y);
 
       const batches = new Map<string, { point: StationCanvasPoint; centers: Array<[number, number]> }>();
+      const hitCandidates: Array<CanvasHitCandidate<StationCanvasPoint>> = [];
       for (const point of pointsRef.current) {
         const position = map.latLngToContainerPoint([point.latitude, point.longitude]);
         if (position.x < -10 || position.y < -10 || position.x > size.x + 10 || position.y > size.y + 10) continue;
+        if (onSelectPointRef.current) hitCandidates.push({ x: position.x, y: position.y, radius: point.radius, value: point });
         const key = `${point.shape ?? "circle"}|${point.color}|${point.radius}|${point.opacity ?? 1}|${point.strokeColor ?? ""}|${point.strokeWidth ?? 0}`;
         const batch = batches.get(key) ?? { point, centers: [] };
         batch.centers.push([position.x, position.y]);
@@ -1886,17 +1895,29 @@ const StationCanvasLayer = memo(function StationCanvasLayer(props: {
           context.stroke();
         }
       }
+      hitCandidatesRef.current = hitCandidates;
       context.globalAlpha = 1;
+    };
+    const handleClick = (event: MouseEvent) => {
+      const onSelectPoint = onSelectPointRef.current;
+      if (!onSelectPoint) return;
+      const bounds = canvas.getBoundingClientRect();
+      const match = findNearestCanvasHit(hitCandidatesRef.current, event.clientX - bounds.left, event.clientY - bounds.top);
+      if (!match) return;
+      event.stopPropagation();
+      onSelectPoint(match.value);
     };
     const scheduleDraw = () => {
       if (animationFrame) window.cancelAnimationFrame(animationFrame);
       animationFrame = window.requestAnimationFrame(draw);
     };
     redrawRef.current = scheduleDraw;
+    canvas.addEventListener("click", handleClick);
     map.on("moveend zoomend resize viewreset", scheduleDraw);
     scheduleDraw();
     return () => {
       map.off("moveend zoomend resize viewreset", scheduleDraw);
+      canvas.removeEventListener("click", handleClick);
       if (animationFrame) window.cancelAnimationFrame(animationFrame);
       redrawRef.current = () => undefined;
       canvasRef.current = null;
@@ -2000,8 +2021,10 @@ const PalertStationLayer = memo(function PalertStationLayer(props: {
   metric: PalertDisplayMetric;
   style: StationDisplayStyle;
   show: boolean;
+  onSelectStation: (station: SelectableStation) => void;
 }) {
   const points = useMemo<StationCanvasPoint[]>(() => props.stations.map((station) => ({
+    hitId: station.id,
     latitude: station.latitude,
     longitude: station.longitude,
     color: props.metric === "pgv" ? palertPgvColor(props.values[station.stationCode]) : palertPgaColor(props.values[station.stationCode]),
@@ -2011,7 +2034,12 @@ const PalertStationLayer = memo(function PalertStationLayer(props: {
     strokeColor: props.values[station.stationCode] === undefined ? "#535a58" : "#e7efec",
     strokeWidth: 0.65,
   })), [props.metric, props.stations, props.style, props.values]);
-  return <Pane name="seismic-station-base-palert" style={{ zIndex: 458 }}>{props.show ? <StationCanvasLayer paneName="seismic-station-base-palert" points={points} /> : null}</Pane>;
+  const stationById = useMemo(() => new Map(props.stations.map((station) => [station.id, station])), [props.stations]);
+  const selectPoint = useCallback((point: StationCanvasPoint) => {
+    const station = point.hitId ? stationById.get(point.hitId) : null;
+    if (station) props.onSelectStation(station);
+  }, [props.onSelectStation, stationById]);
+  return <Pane name="seismic-station-base-palert" style={{ zIndex: 458 }}>{props.show ? <StationCanvasLayer paneName="seismic-station-base-palert" points={points} onSelectPoint={selectPoint} /> : null}</Pane>;
 });
 
 const NiedStationBaseLayer = memo(function NiedStationBaseLayer(props: { stations: SeismicStation[]; show: boolean; style: NiedStationStyle }) {
@@ -2661,7 +2689,7 @@ const SeismicMap = memo(function SeismicMap(props: {
       </Pane>
       <CwaStationBaseLayer stations={props.cwaStations} maxMarkers={baseStationBudget} show={!props.replayMode && props.showCwa && layerComplexity >= 2 && baseLayerStage >= 1} onSelectStation={props.onSelectStation} />
       <GnssStationLayer stations={props.gnssStations} show={props.showGnss && layerComplexity >= 4} selectMode={props.interactionMode === "select"} />
-      <PalertStationLayer stations={props.palertStations} values={props.palertValues} metric={props.palertMetric} style={props.stationStyle} show={props.showPalert && layerComplexity >= 2} />
+      <PalertStationLayer stations={props.palertStations} values={props.palertValues} metric={props.palertMetric} style={props.stationStyle} show={props.showPalert && layerComplexity >= 2} onSelectStation={props.onSelectStation} />
       <GlobalStationBaseLayer stations={props.globalStations} maxMarkers={baseStationBudget} style={props.stationStyle} show={!props.replayMode && props.showGlobal && layerComplexity >= 3 && baseLayerStage >= 2} onSelectStation={props.onSelectStation} />
       <WaveformStationBaseLayer stations={props.waveformStations} maxMarkers={baseStationBudget} verifiedStationIds={props.verifiedWaveformStationIds} style={props.stationStyle} show={!props.replayMode && props.showWaveform && layerComplexity >= 3 && baseLayerStage >= 2} onSelectStation={props.onSelectStation} />
       <OceanStationBaseLayer stations={props.oceanStations} showSnet={props.showOcean && layerComplexity >= 3 && baseLayerStage >= 3} showOther={props.showOtherOcean && layerComplexity >= 4 && baseLayerStage >= 3} onSelectStation={props.onSelectStation} />
