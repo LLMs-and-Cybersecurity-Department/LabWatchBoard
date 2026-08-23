@@ -255,6 +255,47 @@ export type PalertRealtimeFrame = {
   error: string | null;
 };
 
+export type PalertEvent = {
+  id: string;
+  date: string;
+  latitude: number;
+  longitude: number;
+  depthKm: number | null;
+  magnitude: number;
+  hasPga: boolean;
+  sourceUrl: string;
+};
+
+export type PalertEventCatalogue = {
+  provider: string;
+  sourceUrl: string;
+  fetchedAt: string;
+  days: number;
+  cache: "MISS" | "HIT";
+  events: PalertEvent[];
+};
+
+export type PalertEventStation = {
+  stationCode: string;
+  pgaGal: number | null;
+  pgvCms: number | null;
+  azimuth: number | null;
+  distanceKm: number | null;
+};
+
+export type PalertEventStationSnapshot = {
+  provider: string;
+  sourceUrl: string;
+  fetchedAt: string;
+  event: string;
+  stationCount: number;
+  cache: "MISS" | "HIT";
+  stations: PalertEventStation[];
+};
+
+export type PalertDisplayMetric = "pga" | "pgv";
+export type SeismicStationShape = "circle" | "triangle";
+
 export type EewRelaySourceStatus = {
   state: "online" | "stale" | "error";
   latencyMs: number | null;
@@ -945,6 +986,18 @@ export function fetchPalertRealtime(signal?: AbortSignal) {
   return fetchJson<PalertRealtimeFrame>("/api/seismic/palert/realtime", signal);
 }
 
+export function fetchPalertEvents(days = 120, signal?: AbortSignal) {
+  return fetchJson<PalertEventCatalogue>(`/api/seismic/palert/events?days=${encodeURIComponent(days)}`, signal);
+}
+
+export function fetchPalertEventStations(event: string, signal?: AbortSignal) {
+  return fetchJson<PalertEventStationSnapshot>(`/api/seismic/palert/event-stations?event=${encodeURIComponent(event)}`, signal);
+}
+
+export function palertEventFileUrl(event: string, type: string) {
+  return `/api/seismic/palert/event-file?event=${encodeURIComponent(event)}&type=${encodeURIComponent(type)}`;
+}
+
 export function fetchEewRelay(signal?: AbortSignal) {
   return fetchJson<EewRelaySnapshot>("/api/seismic/eew", signal);
 }
@@ -1107,6 +1160,19 @@ export const PALERT_PGA_LEGEND = [
   { minimum: 800, label: "800", color: "rgb(153, 41, 165)" },
 ] as const;
 
+export const PALERT_PGV_LEGEND = [
+  { minimum: Number.NEGATIVE_INFINITY, label: "<0.2", color: "rgb(255, 255, 255)" },
+  { minimum: 0.2, label: "0.2", color: "rgb(200, 255, 211)" },
+  { minimum: 0.7, label: "0.7", color: "rgb(28, 255, 28)" },
+  { minimum: 1.9, label: "1.9", color: "rgb(255, 255, 0)" },
+  { minimum: 5.7, label: "5.7", color: "rgb(255, 170, 0)" },
+  { minimum: 15, label: "15", color: "rgb(255, 90, 0)" },
+  { minimum: 30, label: "30", color: "rgb(209, 54, 15)" },
+  { minimum: 50, label: "50", color: "rgb(161, 52, 35)" },
+  { minimum: 80, label: "80", color: "rgb(153, 12, 51)" },
+  { minimum: 140, label: "140", color: "rgb(153, 41, 165)" },
+] as const;
+
 export function palertPgaColor(pgaGal: number | null | undefined) {
   if (pgaGal === null || pgaGal === undefined || !Number.isFinite(pgaGal) || pgaGal < 0) return "#050706";
   for (let index = PALERT_PGA_LEGEND.length - 1; index >= 0; index -= 1) {
@@ -1114,6 +1180,15 @@ export function palertPgaColor(pgaGal: number | null | undefined) {
     if (pgaGal >= item.minimum) return item.color;
   }
   return PALERT_PGA_LEGEND[0].color;
+}
+
+export function palertPgvColor(pgvCms: number | null | undefined) {
+  if (pgvCms === null || pgvCms === undefined || !Number.isFinite(pgvCms) || pgvCms < 0) return "#050706";
+  for (let index = PALERT_PGV_LEGEND.length - 1; index >= 0; index -= 1) {
+    const item = PALERT_PGV_LEGEND[index];
+    if (pgvCms >= item.minimum) return item.color;
+  }
+  return PALERT_PGV_LEGEND[0].color;
 }
 
 export function shouldShowStationValueIcon(scale: "intensity" | "shindo", rank: number, includeLowest: boolean) {

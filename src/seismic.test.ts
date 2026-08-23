@@ -46,6 +46,7 @@ import {
   normalizeWolfxEew,
   parseKmaTimestamp,
   palertPgaColor,
+  palertPgvColor,
   prepareReplayStationResponse,
   replayNiedSoundIndex,
   selectAutoLocatedGlobalEvent,
@@ -101,6 +102,15 @@ describe("seismic client calculations", () => {
     expect(palertPgaColor(8)).toBe("rgb(255, 255, 0)");
     expect(palertPgaColor(250)).toBe("rgb(161, 52, 35)");
     expect(palertPgaColor(800)).toBe("rgb(153, 41, 165)");
+  });
+
+  it("uses the official P-Alert PGV threshold colors", () => {
+    expect(palertPgvColor(null)).toBe("#050706");
+    expect(palertPgvColor(0.1)).toBe("rgb(255, 255, 255)");
+    expect(palertPgvColor(0.2)).toBe("rgb(200, 255, 211)");
+    expect(palertPgvColor(1.9)).toBe("rgb(255, 255, 0)");
+    expect(palertPgvColor(50)).toBe("rgb(161, 52, 35)");
+    expect(palertPgvColor(140)).toBe("rgb(153, 41, 165)");
   });
 
   it("hides the lowest station value icons unless the menu option is enabled", () => {

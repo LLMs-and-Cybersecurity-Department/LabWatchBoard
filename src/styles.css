@@ -4313,6 +4313,37 @@ button,
   color: #f6b554;
 }
 
+.seismic-station-style-setting {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid #314044;
+  border-radius: 4px;
+  background: rgba(17, 27, 29, 0.72);
+}
+
+.seismic-station-style-setting > header,
+.seismic-station-style-setting > label {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  color: #b8c6c2;
+  font-size: 8px;
+}
+
+.seismic-station-style-setting > header {
+  display: flex;
+  justify-content: space-between;
+  color: #dce7e4;
+}
+
+.seismic-station-style-setting > header span,
+.seismic-station-style-setting output { color: #f6b554; }
+.seismic-station-style-setting input[type="range"] { width: 100%; accent-color: #f59e0b; }
+.seismic-station-style-setting select { min-width: 0; height: 25px; border: 1px solid #3a484c; background: #11191b; color: #dce7e4; }
+.seismic-station-style-setting > .toggle-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+
 .seismic-settings-source-block {
   display: grid;
   gap: 6px;
@@ -6029,7 +6060,7 @@ body.seismic-monitor-moving * {
 
 .seismic-panel-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   border-bottom: 1px solid var(--line);
   background: #101719;
 }
@@ -6062,6 +6093,135 @@ body.seismic-monitor-moving * {
   min-height: 0;
   padding: 12px;
   overflow: auto;
+}
+
+.palert-event-toolbar,
+.palert-event-stations > header,
+.palert-product-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.palert-event-toolbar {
+  margin: 9px 0;
+  padding: 7px;
+  border: 1px solid #2d3a3e;
+  border-radius: 4px;
+  background: #11191b;
+}
+
+.palert-event-toolbar label { display: flex; align-items: center; gap: 6px; color: #98aaa6; font-size: 8px; }
+.palert-event-toolbar select { min-height: 27px; border: 1px solid #3b494d; background: #0d1517; color: #e5eeec; }
+.palert-event-toolbar button { min-height: 27px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; font-size: 8px; }
+.palert-event-toolbar button.active { border-color: #22c55e; color: #86efac; }
+
+.palert-event-list {
+  display: grid;
+  gap: 5px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.palert-event-list > article {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px;
+  border: 1px solid #2e3b3f;
+  border-radius: 4px;
+  background: #101719;
+}
+
+.palert-event-list > article.active { border-color: #f59e0b; box-shadow: inset 2px 0 #f59e0b; }
+.palert-event-main { min-width: 0; display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 5px; align-items: center; padding: 7px; border: 0; background: transparent; text-align: left; }
+.palert-event-main time { color: #9aaba7; font-size: 7px; }
+.palert-event-main strong { color: #f6b554; font-size: 9px; }
+.palert-event-main span { overflow: hidden; color: #c6d1cf; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.palert-event-list > article > div { display: flex; align-items: center; gap: 3px; padding-right: 5px; }
+.palert-event-list > article > div button { width: 24px; height: 24px; display: grid; place-items: center; padding: 0; color: #f6b554; }
+
+.palert-event-stations { margin-top: 9px; border: 1px solid #344347; border-radius: 5px; overflow: hidden; }
+.palert-event-stations > header { padding: 7px 8px; background: #151f21; }
+.palert-event-stations > header > div { min-width: 0; display: grid; gap: 2px; }
+.palert-event-stations > header strong { color: #f2f6f5; font-size: 9px; }
+.palert-event-stations > header span { color: #8fa09d; font-size: 7px; }
+.palert-event-stations > header button { display: inline-flex; align-items: center; gap: 4px; padding: 5px 7px; color: #f6b554; font-size: 7px; white-space: nowrap; }
+.palert-event-stations > div { max-height: 180px; overflow: auto; }
+.palert-event-stations > div > button { width: 100%; display: grid; grid-template-columns: 58px minmax(0, 1fr) 64px; gap: 6px; padding: 6px 8px; border: 0; border-top: 1px solid #253135; border-radius: 0; background: #101719; text-align: left; }
+.palert-event-stations > div > button:hover { background: #172226; }
+.palert-event-stations > div > button strong { color: #7dd3fc; font-size: 8px; }
+.palert-event-stations > div > button span { color: #f6b554; font-size: 8px; text-align: right; }
+.palert-event-stations > div > button small { color: #81918e; font-size: 7px; text-align: right; }
+
+.palert-product-dialog {
+  width: min(1180px, calc(100vw - 24px));
+  max-width: none;
+}
+
+.palert-product-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid #2d393d;
+  background: #0d1416;
+}
+
+.palert-product-tabs button {
+  min-height: 28px;
+  padding: 0 9px;
+  border-color: #334246;
+  color: #a7b7b3;
+  font-size: 8px;
+}
+
+.palert-product-tabs button.active {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  color: #f6b554;
+}
+
+.palert-product-viewer {
+  min-height: 420px;
+  max-height: calc(100vh - 210px);
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    #070b0c;
+  background-size: 24px 24px;
+}
+
+.palert-product-viewer > img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 210px);
+  object-fit: contain;
+  image-rendering: auto;
+}
+
+.palert-product-viewer > img[hidden] {
+  display: none;
+}
+
+.palert-product-footer {
+  min-height: 38px;
+  padding: 7px 10px;
+  border-top: 1px solid #2d393d;
+  color: #8fa09d;
+  background: #0f1719;
+  font-size: 8px;
+}
+
+.palert-product-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #7dd3fc;
 }
 
 .seismic-pager-exposure-summary {

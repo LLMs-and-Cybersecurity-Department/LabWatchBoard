@@ -42,7 +42,7 @@ import {
 } from "lucide-react";
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { icon as createLeafletIcon, type Circle as LeafletCircleLayer, type Icon as LeafletIcon } from "leaflet";
-import { Circle, CircleMarker, GeoJSON as LeafletGeoJSON, MapContainer, Marker, Pane, Popup, Rectangle, ScaleControl, TileLayer, Tooltip as LeafletTooltip, useMap, useMapEvents, ZoomControl } from "react-leaflet";
+import { Circle, CircleMarker, GeoJSON as LeafletGeoJSON, ImageOverlay, MapContainer, Marker, Pane, Popup, Rectangle, ScaleControl, TileLayer, Tooltip as LeafletTooltip, useMap, useMapEvents, ZoomControl } from "react-leaflet";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { feature as topojsonFeature } from "topojson-client";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
@@ -73,6 +73,8 @@ import {
   fetchOceanStations,
   fetchPalertRealtime,
   fetchPalertStations,
+  fetchPalertEvents,
+  fetchPalertEventStations,
   fetchSnetIntensity,
   haversineKm,
   inferHypocenter,
@@ -117,7 +119,10 @@ import {
   meetsEewMagnitudeThreshold,
   mmiIntensityColor,
   PALERT_PGA_LEGEND,
+  PALERT_PGV_LEGEND,
+  palertEventFileUrl,
   palertPgaColor,
+  palertPgvColor,
   simulatePreparedReplayStationResponse,
   updateKmaPewsDetection,
   updateNiedShakeDetection,
@@ -143,6 +148,11 @@ import {
   type PalertStation,
   type PalertRealtimeFrame,
   type PalertSnapshot,
+  type PalertDisplayMetric,
+  type PalertEvent,
+  type PalertEventCatalogue,
+  type PalertEventStationSnapshot,
+  type SeismicStationShape,
   type SnetIntensityEvent,
   type SnetIntensitySnapshot,
   type SeismicStation,
@@ -259,7 +269,7 @@ type SeismicLiveDashboardProps = {
   userStation: Station;
 };
 
-type PanelTab = "station" | "intensity" | "snet" | "exposure";
+type PanelTab = "station" | "intensity" | "snet" | "palert" | "exposure";
 type BottomTab = "inference" | "replay" | "warnings" | "reports";
 type WarningOverlayTab = "latest" | "selected";
 type SeismicMapTheme = "dark" | "light";
@@ -1108,6 +1118,84 @@ function PagerExposurePanel({ pager, loading, error }: {
   </>;
 }
 
+type PalertProductType = "contour" | "polar" | "azimuth-scatter" | "distance-scatter" | "pga-plot" | "animation-1x" | "animation-2x" | "animation-3x";
+
+const PALERT_PRODUCT_OPTIONS: Array<{ type: PalertProductType; label: string }> = [
+  { type: "contour", label: "PGA 分布图" },
+  { type: "pga-plot", label: "走时波形图" },
+  { type: "polar", label: "极座标图" },
+  { type: "azimuth-scatter", label: "方位-距离散布" },
+  { type: "distance-scatter", label: "距离-PGA 散布" },
+  { type: "animation-1x", label: "PGA 动画 1×" },
+  { type: "animation-2x", label: "PGA 动画 2×" },
+  { type: "animation-3x", label: "PGA 动画 3×" },
+];
+
+function PalertProductDialog({ event, initialType, onClose }: {
+  event: PalertEvent;
+  initialType: PalertProductType;
+  onClose: () => void;
+}) {
+  const [type, setType] = useState<PalertProductType>(initialType);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const product = PALERT_PRODUCT_OPTIONS.find((candidate) => candidate.type === type) ?? PALERT_PRODUCT_OPTIONS[0];
+  const url = palertEventFileUrl(event.date, type);
+  useEffect(() => {
+    setLoading(true);
+    setError("");
+  }, [url]);
+  return <div className="mechanism-dialog-backdrop" role="presentation" onMouseDown={(mouseEvent) => mouseEvent.target === mouseEvent.currentTarget && onClose()}>
+    <section className="mechanism-dialog palert-product-dialog" role="dialog" aria-modal="true" aria-label={`P-Alert ${product.label}`}>
+      <header><div><span>P-ALERT 官方事件产品</span><h2>{formatTime(`${event.date}Z`)} · ML {event.magnitude.toFixed(1)}</h2></div><button aria-label="关闭 P-Alert 事件产品" onClick={onClose}><X size={17} /></button></header>
+      <nav className="palert-product-tabs" aria-label="P-Alert 绘图和动画">{PALERT_PRODUCT_OPTIONS.map((option) => <button key={option.type} className={option.type === type ? "active" : ""} onClick={() => setType(option.type)}>{option.label}</button>)}</nav>
+      <div className="palert-product-viewer">
+        {loading && !error && <div className="seismic-empty"><Loader2 className="spin" size={26} /><strong>正在按需读取 {product.label}</strong><span>大图和 GIF 不参与实时轮询。</span></div>}
+        {error && <div className="seismic-empty"><AlertTriangle size={26} /><strong>该官方产品暂不可用</strong><span>{error}</span></div>}
+        <img src={url} alt={`P-Alert ${product.label}`} hidden={loading || Boolean(error)} onLoad={() => setLoading(false)} onError={() => { setLoading(false); setError("中研院当前未返回该产品，稍后可重试。"); }} />
+      </div>
+      <footer className="palert-product-footer"><span>震中 {event.latitude.toFixed(4)}, {event.longitude.toFixed(4)} · 深度 {event.depthKm?.toFixed(1) ?? "--"} km</span><a href={event.sourceUrl} target="_blank" rel="noreferrer">打开官方事件页<ExternalLink size={12} /></a></footer>
+    </section>
+  </div>;
+}
+
+function PalertEventPanel({ catalogue, loading, error, selectedEvent, stationSnapshot, metric, onMetricChange, onSelectEvent, onShowRealtime, onOpenProduct, onFocusStation }: {
+  catalogue: PalertEventCatalogue | null;
+  loading: boolean;
+  error: string;
+  selectedEvent: PalertEvent | null;
+  stationSnapshot: PalertEventStationSnapshot | null;
+  metric: PalertDisplayMetric;
+  onMetricChange: (metric: PalertDisplayMetric) => void;
+  onSelectEvent: (event: PalertEvent) => void;
+  onShowRealtime: () => void;
+  onOpenProduct: (event: PalertEvent, type: PalertProductType) => void;
+  onFocusStation: (stationCode: string) => void;
+}) {
+  const rows = useMemo(() => [...(stationSnapshot?.stations ?? [])].sort((left, right) => (
+    (metric === "pgv" ? right.pgvCms : right.pgaGal) ?? -1
+  ) - ((metric === "pgv" ? left.pgvCms : left.pgaGal) ?? -1)), [metric, stationSnapshot]);
+  return <>
+    <header className="seismic-section-heading"><div><strong>P-Alert 事件数据库</strong><span>中研院官方事件、测站 PGA/PGV、绘图与动画</span></div><b className={error ? "experimental" : "online"}>{loading ? "加载中" : `${catalogue?.events.length ?? 0} 事件`}</b></header>
+    <div className="palert-event-toolbar">
+      <label>测站资料<select value={metric} onChange={(event) => onMetricChange(event.target.value as PalertDisplayMetric)}><option value="pga">PGA (gal)</option><option value="pgv" disabled={!selectedEvent}>PGV (cm/s)</option></select></label>
+      <button className={!selectedEvent ? "active" : ""} onClick={onShowRealtime}><Radio size={13} />实时帧</button>
+    </div>
+    {error && <p className="seismic-source-error">P-Alert 数据库：{error}</p>}
+    {loading && !catalogue ? <div className="seismic-empty"><Loader2 className="spin" size={26} /><strong>正在读取 P-Alert 事件目录</strong></div> : <div className="palert-event-list">
+      {catalogue?.events.map((event) => <article key={event.id} className={selectedEvent?.id === event.id ? "active" : ""}>
+        <button className="palert-event-main" onClick={() => onSelectEvent(event)}><time>{formatTime(`${event.date}Z`)}</time><strong>ML {event.magnitude.toFixed(1)}</strong><span>{event.latitude.toFixed(3)}, {event.longitude.toFixed(3)} · 深 {event.depthKm?.toFixed(1) ?? "--"} km</span></button>
+        <div><button title="载入官方测站表和地图" aria-label={`载入 ${event.date} P-Alert 测站表`} onClick={() => onSelectEvent(event)}><Database size={12} /></button><button title="PGA 分布与各类绘图" aria-label={`查看 ${event.date} P-Alert 绘图`} onClick={() => onOpenProduct(event, "contour")}><BarChart3 size={12} /></button><button title="PGA 传播动画" aria-label={`查看 ${event.date} P-Alert PGA 动画`} onClick={() => onOpenProduct(event, "animation-1x")}><Video size={12} /></button></div>
+      </article>)}
+    </div>}
+    {selectedEvent && <section className="palert-event-stations">
+      <header><div><strong>{formatTime(`${selectedEvent.date}Z`)} · ML {selectedEvent.magnitude.toFixed(1)}</strong><span>{stationSnapshot ? `${stationSnapshot.stationCount} 个实测站` : "正在读取测站表"}</span></div><button onClick={() => onOpenProduct(selectedEvent, "contour")}><MapIcon size={13} />官方等值线</button></header>
+      {stationSnapshot ? <div>{rows.slice(0, 36).map((row) => <button key={row.stationCode} onClick={() => onFocusStation(row.stationCode)}><strong>{row.stationCode}</strong><span>{metric === "pgv" ? `${row.pgvCms?.toFixed(5) ?? "--"} cm/s` : `${row.pgaGal?.toFixed(2) ?? "--"} gal`}</span><small>{row.distanceKm?.toFixed(2) ?? "--"} km</small></button>)}</div> : <div className="seismic-snet-waiting"><Loader2 className="spin" size={17} /><span>读取官方 PGA/PGV 表格…</span></div>}
+    </section>}
+    <p className="seismic-data-label">目录、表格、等值线和动画均来自 P-Alert 官方 database GraphQL；大图和 GIF 只在点击后加载。选择历史事件会替换台湾测站色值，点击“实时帧”恢复秒级渐进显示。</p>
+  </>;
+}
+
 function blankDetection(network: ShakeDetectionStatus["network"]): ShakeDetectionStatus {
   return {
     network,
@@ -1142,12 +1230,13 @@ function SourceIndicator({ label, state, latency }: { label: string; state: Sour
   );
 }
 
-function SeismicIntensityLegend() {
+function SeismicIntensityLegend({ palertMetric }: { palertMetric: PalertDisplayMetric }) {
+  const palertLegend = palertMetric === "pgv" ? PALERT_PGV_LEGEND : PALERT_PGA_LEGEND;
   return (
     <section className="seismic-intensity-legend" aria-label="烈度与震度等级颜色表">
       <div><strong>烈度 MMI</strong><span>{MMI_LEGEND.map((item) => <i key={item.label} title={`烈度 ${item.label}`} style={{ background: mmiIntensityColor(item.rank) }}>{item.label}</i>)}</span></div>
       <div><strong>震度 JMA</strong><span>{JMA_SHINDO_LEGEND.map((item) => <i key={item.label} title={`震度 ${item.label}`} style={{ background: jmaShindoColor(item.rank) }}>{item.label}</i>)}</span></div>
-      <div className="palert-pga"><strong>PGA (gal)</strong><span>{PALERT_PGA_LEGEND.map((item) => <i key={item.label} title={`P-Alert PGA ${item.label} gal`} style={{ background: item.color }}>{item.label}</i>)}</span></div>
+      <div className="palert-pga"><strong>{palertMetric === "pgv" ? "PGV (cm/s)" : "PGA (gal)"}</strong><span>{palertLegend.map((item) => <i key={item.label} title={`P-Alert ${palertMetric.toUpperCase()} ${item.label}`} style={{ background: item.color }}>{item.label}</i>)}</span></div>
     </section>
   );
 }
@@ -1715,6 +1804,12 @@ type StationCanvasPoint = {
   strokeWidth?: number;
 };
 
+type StationDisplayStyle = {
+  size: number;
+  shape: SeismicStationShape;
+  opacity: number;
+};
+
 /** Draws large, non-interactive station sets in one canvas instead of one SVG
  * node per station. The Leaflet pane owns geographic movement; the canvas is
  * re-anchored only after the viewport settles or the station data changes. */
@@ -1810,19 +1905,19 @@ const StationCanvasLayer = memo(function StationCanvasLayer(props: {
   return null;
 });
 
-const GlobalStationBaseLayer = memo(function GlobalStationBaseLayer(props: { stations: GlobalSeismicStation[]; maxMarkers?: number; show: boolean; onSelectStation: (station: SelectableStation) => void }) {
+const GlobalStationBaseLayer = memo(function GlobalStationBaseLayer(props: { stations: GlobalSeismicStation[]; maxMarkers?: number; show: boolean; style: StationDisplayStyle; onSelectStation: (station: SelectableStation) => void }) {
   const points = useMemo<StationCanvasPoint[]>(() => sampleStationMarkers(props.stations, props.maxMarkers ?? 600).map((station) => ({
     latitude: station.latitude,
     longitude: station.longitude,
     color: FDSN_PROVIDER_COLORS[station.providerId] ?? "#38bdf8",
-    radius: 2.2,
-    shape: "triangle",
-    opacity: 0.7,
-  })), [props.maxMarkers, props.stations]);
+    radius: props.style.size,
+    shape: props.style.shape,
+    opacity: props.style.opacity,
+  })), [props.maxMarkers, props.stations, props.style]);
   return <Pane name="seismic-station-base-global" style={{ zIndex: 458 }}>{props.show && <StationCanvasLayer paneName="seismic-station-base-global" points={points} />}</Pane>;
 });
 
-const WaveformStationBaseLayer = memo(function WaveformStationBaseLayer(props: { stations: GlobalSeismicStation[]; maxMarkers?: number; verifiedStationIds: string[]; show: boolean; onSelectStation: (station: SelectableStation) => void }) {
+const WaveformStationBaseLayer = memo(function WaveformStationBaseLayer(props: { stations: GlobalSeismicStation[]; maxMarkers?: number; verifiedStationIds: string[]; show: boolean; style: StationDisplayStyle; onSelectStation: (station: SelectableStation) => void }) {
   const points = useMemo<StationCanvasPoint[]>(() => {
     const verified = new Set(props.verifiedStationIds);
     const sampled = sampleStationMarkers(props.stations, props.maxMarkers ?? 600);
@@ -1832,13 +1927,13 @@ const WaveformStationBaseLayer = memo(function WaveformStationBaseLayer(props: {
       latitude: station.latitude,
       longitude: station.longitude,
       color: FDSN_WAVEFORM_INACTIVE_COLOR,
-      radius: verified.has(station.id) ? 4.4 : 3.2,
-      shape: "triangle",
-      opacity: verified.has(station.id) ? 0.96 : 0.78,
+      radius: props.style.size * (verified.has(station.id) ? 1.45 : 1.08),
+      shape: props.style.shape,
+      opacity: verified.has(station.id) ? Math.min(1, props.style.opacity + 0.18) : props.style.opacity,
       strokeColor: verified.has(station.id) ? "#ffffff" : "#fbcfe8",
       strokeWidth: verified.has(station.id) ? 1.5 : 0.7,
     }));
-  }, [props.maxMarkers, props.stations, props.verifiedStationIds]);
+  }, [props.maxMarkers, props.stations, props.style, props.verifiedStationIds]);
   return <Pane name="seismic-station-base-waveform" className="seismic-waveform-station-pane" style={{ zIndex: 466 }}>{props.show && <StationCanvasLayer paneName="seismic-station-base-waveform" points={points} />}</Pane>;
 });
 
@@ -1898,19 +1993,21 @@ const GnssResponseMarkers = memo(function GnssResponseMarkers(props: {
 
 const PalertStationLayer = memo(function PalertStationLayer(props: {
   stations: PalertStation[];
-  pgaValues: Record<string, number>;
+  values: Record<string, number>;
+  metric: PalertDisplayMetric;
+  style: StationDisplayStyle;
   show: boolean;
 }) {
   const points = useMemo<StationCanvasPoint[]>(() => props.stations.map((station) => ({
     latitude: station.latitude,
     longitude: station.longitude,
-    color: palertPgaColor(props.pgaValues[station.stationCode]),
-    radius: 3.5,
-    shape: "triangle",
-    opacity: 0.92,
-    strokeColor: props.pgaValues[station.stationCode] === undefined ? "#535a58" : "#e7efec",
+    color: props.metric === "pgv" ? palertPgvColor(props.values[station.stationCode]) : palertPgaColor(props.values[station.stationCode]),
+    radius: props.style.size,
+    shape: props.style.shape,
+    opacity: props.style.opacity,
+    strokeColor: props.values[station.stationCode] === undefined ? "#535a58" : "#e7efec",
     strokeWidth: 0.65,
-  })), [props.pgaValues, props.stations]);
+  })), [props.metric, props.stations, props.style, props.values]);
   return <Pane name="seismic-station-base-palert" style={{ zIndex: 458 }}>{props.show ? <StationCanvasLayer paneName="seismic-station-base-palert" points={points} /> : null}</Pane>;
 });
 
@@ -2021,7 +2118,11 @@ const SeismicMap = memo(function SeismicMap(props: {
   gnssStations: readonly GnssStation[];
   verifiedWaveformStationIds: string[];
   palertStations: PalertStation[];
-  palertPgaValues: Record<string, number>;
+  palertValues: Record<string, number>;
+  palertMetric: PalertDisplayMetric;
+  palertContourUrl: string | null;
+  palertContourOpacity: number;
+  stationStyle: StationDisplayStyle;
   cencReport: CencIntensityReport | null;
   cwaOfficialLayer: CwaIntensityLayer | null;
   niedFrame: NiedRealtimeFrame | null;
@@ -2323,13 +2424,13 @@ const SeismicMap = memo(function SeismicMap(props: {
       // Keep only three geometry styles. Using the raw fractional rank here
       // created hundreds of Canvas batches and effectively one draw call per
       // station during large-event replay.
-      radius: rank >= 7 ? 5.2 : rank >= 4 ? 4.8 : 4.4,
-      shape: "triangle",
-      opacity: 0.9,
+      radius: props.stationStyle.size * (rank >= 7 ? 1.55 : rank >= 4 ? 1.4 : 1.25),
+      shape: props.stationStyle.shape,
+      opacity: Math.min(1, props.stationStyle.opacity + 0.14),
       strokeColor: "#ffffff",
       strokeWidth: 0.8,
     };
-  }), [props.globalRanks, respondingGlobalStations, responseBudget]);
+  }), [props.globalRanks, props.stationStyle, respondingGlobalStations, responseBudget]);
   const cwaResponsePoints = useMemo<StationCanvasPoint[]>(() => sampleStableStationMarkers(props.cwaStations
     .filter((station) => cwaArrivedStationSet.has(station.id))
     , Math.max(12, responseBudget * 2)).map((station) => {
@@ -2544,11 +2645,21 @@ const SeismicMap = memo(function SeismicMap(props: {
         </CircleMarker>}
       </Pane>
       <PagerCityMapLayer visible={props.showPagerCities && (props.forcePagerCities || layerComplexity >= 5)} cities={props.pagerCities} />
+      <Pane name="seismic-palert-contour" style={{ zIndex: 342, pointerEvents: "none" }}>
+        {props.palertContourUrl && props.showPalert && <ImageOverlay
+          key={props.palertContourUrl}
+          url={props.palertContourUrl}
+          bounds={[[21.89666, 120.03612], [25.29756, 122.0067]]}
+          opacity={props.palertContourOpacity}
+          interactive={false}
+          crossOrigin
+        />}
+      </Pane>
       <CwaStationBaseLayer stations={props.cwaStations} maxMarkers={baseStationBudget} show={!props.replayMode && props.showCwa && layerComplexity >= 2 && baseLayerStage >= 1} onSelectStation={props.onSelectStation} />
       <GnssStationLayer stations={props.gnssStations} show={props.showGnss && layerComplexity >= 4} selectMode={props.interactionMode === "select"} />
-      <PalertStationLayer stations={props.palertStations} pgaValues={props.palertPgaValues} show={props.showPalert && layerComplexity >= 2} />
-      <GlobalStationBaseLayer stations={props.globalStations} maxMarkers={baseStationBudget} show={!props.replayMode && props.showGlobal && layerComplexity >= 3 && baseLayerStage >= 2} onSelectStation={props.onSelectStation} />
-      <WaveformStationBaseLayer stations={props.waveformStations} maxMarkers={baseStationBudget} verifiedStationIds={props.verifiedWaveformStationIds} show={!props.replayMode && props.showWaveform && layerComplexity >= 3 && baseLayerStage >= 2} onSelectStation={props.onSelectStation} />
+      <PalertStationLayer stations={props.palertStations} values={props.palertValues} metric={props.palertMetric} style={props.stationStyle} show={props.showPalert && layerComplexity >= 2} />
+      <GlobalStationBaseLayer stations={props.globalStations} maxMarkers={baseStationBudget} style={props.stationStyle} show={!props.replayMode && props.showGlobal && layerComplexity >= 3 && baseLayerStage >= 2} onSelectStation={props.onSelectStation} />
+      <WaveformStationBaseLayer stations={props.waveformStations} maxMarkers={baseStationBudget} verifiedStationIds={props.verifiedWaveformStationIds} style={props.stationStyle} show={!props.replayMode && props.showWaveform && layerComplexity >= 3 && baseLayerStage >= 2} onSelectStation={props.onSelectStation} />
       <OceanStationBaseLayer stations={props.oceanStations} showSnet={props.showOcean && layerComplexity >= 3 && baseLayerStage >= 3} showOther={props.showOtherOcean && layerComplexity >= 4 && baseLayerStage >= 3} onSelectStation={props.onSelectStation} />
       <KmaStationBaseLayer stations={props.kmaStations} show={props.showKma && layerComplexity >= 4 && baseLayerStage >= 4} onSelectStation={props.onSelectStation} />
       <NiedStationBaseLayer stations={props.niedStations} show={props.showNied} />
@@ -2693,6 +2804,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [showCwaStations, setShowCwaStations] = usePersistentState("seismic-show-cwa-cwasn", true);
   const [showGnssStations, setShowGnssStations] = usePersistentState("seismic-show-china-gnss", false);
   const [showPalertStations, setShowPalertStations] = usePersistentState("seismic-show-palert", true);
+  const [stationMarkerSize, setStationMarkerSize] = usePersistentState("seismic-station-marker-size", 3);
+  const [stationMarkerShape, setStationMarkerShape] = usePersistentState<SeismicStationShape>("seismic-station-marker-shape", "triangle");
+  const [stationMarkerOpacity, setStationMarkerOpacity] = usePersistentState("seismic-station-marker-opacity", 0.72);
+  const [palertDisplayMetric, setPalertDisplayMetric] = usePersistentState<PalertDisplayMetric>("seismic-palert-display-metric", "pga");
+  const [showPalertContour, setShowPalertContour] = usePersistentState("seismic-show-palert-contour", true);
+  const [palertContourOpacity, setPalertContourOpacity] = usePersistentState("seismic-palert-contour-opacity", 0.5);
   const [showLowestIntensityIcons, setShowLowestIntensityIcons] = usePersistentState("seismic-show-lowest-intensity-icons", false);
   const [showWniCameras, setShowWniCameras] = usePersistentState("seismic-show-wni-cameras", true);
   const [showGlobalFaults, setShowGlobalFaults] = usePersistentState("seismic-show-global-faults", false);
@@ -2760,6 +2877,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [cwaStationError, setCwaStationError] = useState("");
   const [palertSnapshot, setPalertSnapshot] = useState<PalertSnapshot | null>(null);
   const [palertRealtime, setPalertRealtime] = useState<PalertRealtimeFrame | null>(null);
+  const [palertEvents, setPalertEvents] = useState<PalertEventCatalogue | null>(null);
+  const [palertEventsLoading, setPalertEventsLoading] = useState(false);
+  const [palertEventsError, setPalertEventsError] = useState("");
+  const [selectedPalertEvent, setSelectedPalertEvent] = useState<PalertEvent | null>(null);
+  const [palertEventStations, setPalertEventStations] = useState<PalertEventStationSnapshot | null>(null);
+  const [palertProduct, setPalertProduct] = useState<{ event: PalertEvent; type: PalertProductType } | null>(null);
   const [palertState, setPalertState] = useState<SourceState>("connecting");
   const [palertError, setPalertError] = useState("");
   const [wniCameras, setWniCameras] = useState<WniCamera[]>([]);
@@ -2948,6 +3071,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const normalizedMonitorDock = normalizeMonitorDock(monitorDock);
   const normalizedMonitorWidgetDocks = normalizeMonitorWidgetDocks(monitorWidgetDocks, normalizedMonitorDock);
   const normalizedMonitorScale = clampMonitorScale(Number(monitorScale));
+  const normalizedPalertContourOpacity = Math.max(0, Math.min(1, Number(palertContourOpacity) || 0));
+  const stationDisplayStyle = useMemo<StationDisplayStyle>(() => ({
+    size: Math.max(1, Math.min(8, Number(stationMarkerSize) || 3)),
+    shape: stationMarkerShape === "circle" ? "circle" : "triangle",
+    opacity: Math.max(0, Math.min(1, Number(stationMarkerOpacity) || 0)),
+  }), [stationMarkerOpacity, stationMarkerShape, stationMarkerSize]);
   const monitorDragging = draggingMonitorWidget !== null;
   const enabledEewSourceSet = useMemo(
     () => new Set(LIVE_EEW_SOURCE_ORDER.filter((source) => enabledEewSources.includes(source))),
@@ -3101,7 +3230,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   useEffect(() => {
     const legacyPanel = String(panelTab);
     if (legacyPanel === "inference" || legacyPanel === "replay") setBottomTab(legacyPanel);
-    if (legacyPanel !== "station" && legacyPanel !== "intensity" && legacyPanel !== "snet" && legacyPanel !== "exposure") setPanelTab("station");
+    if (legacyPanel !== "station" && legacyPanel !== "intensity" && legacyPanel !== "snet" && legacyPanel !== "palert" && legacyPanel !== "exposure") setPanelTab("station");
     if (!["inference", "replay", "warnings", "reports"].includes(String(bottomTab))) setBottomTab("warnings");
     if (warningSourceFilter !== "ALL" && !LIVE_EEW_SOURCE_ORDER.includes(warningSourceFilter as LiveEewSource)) setWarningSourceFilter("ALL");
   }, [bottomTab, panelTab, setBottomTab, setPanelTab, setWarningSourceFilter, warningSourceFilter]);
@@ -3620,6 +3749,41 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       controller?.abort();
     };
   }, [showPalertStations]);
+
+  useEffect(() => {
+    if (panelTab !== "palert" || palertEvents || palertEventsLoading) return;
+    const controller = new AbortController();
+    setPalertEventsLoading(true);
+    setPalertEventsError("");
+    void fetchPalertEvents(120, controller.signal).then((snapshot) => {
+      setPalertEvents(snapshot);
+    }).catch((error) => {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setPalertEventsError(error instanceof Error ? error.message : String(error));
+    }).finally(() => setPalertEventsLoading(false));
+    return () => controller.abort();
+  }, [palertEvents, panelTab]);
+
+  useEffect(() => {
+    if (!selectedPalertEvent) {
+      setPalertEventStations(null);
+      return;
+    }
+    const controller = new AbortController();
+    setPalertEventsError("");
+    setPalertEventStations(null);
+    void fetchPalertEventStations(selectedPalertEvent.date, controller.signal).then((snapshot) => {
+      setPalertEventStations(snapshot);
+    }).catch((error) => {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setPalertEventsError(error instanceof Error ? error.message : String(error));
+    });
+    return () => controller.abort();
+  }, [selectedPalertEvent]);
+
+  useEffect(() => {
+    if (!selectedPalertEvent && palertDisplayMetric === "pgv") setPalertDisplayMetric("pga");
+  }, [palertDisplayMetric, selectedPalertEvent, setPalertDisplayMetric]);
 
   useEffect(() => {
     if (!showGlobalFaults || globalFaults) return;
@@ -5082,6 +5246,37 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     }
   }, [focusMap, setPanelTab]);
 
+  const choosePalertEvent = useCallback((event: PalertEvent) => {
+    setSelectedPalertEvent(event);
+    setShowPalertStations(true);
+    setPanelTab("palert");
+    commitMapFocus({ id: `palert:${event.id}`, latitude: event.latitude, longitude: event.longitude, zoom: 7, exact: true });
+  }, [commitMapFocus, setPanelTab, setShowPalertStations]);
+
+  const showPalertRealtime = useCallback(() => {
+    setSelectedPalertEvent(null);
+    setPalertEventStations(null);
+    setPalertDisplayMetric("pga");
+    setShowPalertStations(true);
+  }, [setPalertDisplayMetric, setShowPalertStations]);
+
+  const focusPalertStationCode = useCallback((stationCode: string) => {
+    const station = palertSnapshot?.stations.find((candidate) => candidate.stationCode === stationCode);
+    if (station) focusStation(station);
+  }, [focusStation, palertSnapshot]);
+
+  const palertEventValues = useMemo<Record<string, number>>(() => Object.fromEntries((palertEventStations?.stations ?? []).flatMap((station) => {
+    const value = palertDisplayMetric === "pgv" ? station.pgvCms : station.pgaGal;
+    return value === null ? [] : [[station.stationCode, value]];
+  })), [palertDisplayMetric, palertEventStations]);
+  const displayedPalertValues = selectedPalertEvent ? palertEventValues : palertRealtime?.dataVals ?? EMPTY_RANKS;
+  const selectedPalertEventStation = selectedStation && isPalertStation(selectedStation)
+    ? palertEventStations?.stations.find((station) => station.stationCode === selectedStation.stationCode) ?? null
+    : null;
+  const palertContourUrl = selectedPalertEvent && showPalertContour
+    ? palertEventFileUrl(selectedPalertEvent.date, "contour")
+    : null;
+
   useEffect(() => {
     setVerifiedWaveformStations([]);
     setWaveformProbeState(eventStationKey ? "probing" : "idle");
@@ -5167,7 +5362,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
 
   const selectedRank = useMemo(() => {
     if (!selectedStation) return null;
-    if (isPalertStation(selectedStation)) return palertRealtime?.dataVals[selectedStation.stationCode] ?? 0;
+    if (isPalertStation(selectedStation)) return displayedPalertValues[selectedStation.stationCode] ?? 0;
     if (isCwaStation(selectedStation)) return visibleCwaSimulation?.ranks[selectedStation.id] ?? 0;
     if (isGlobalStation(selectedStation)) return visibleGlobalSimulation?.ranks[selectedStation.id] ?? 0;
     if (isNiedStation(selectedStation)) return showShakeDetectionGrid
@@ -5178,7 +5373,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       : 0;
     if (isCencStation(selectedStation)) return selectedStation.intensity;
     return displayedOceanRanks[selectedStation.id] ?? 0;
-  }, [displayedOceanRanks, kmaValues, niedFrame, palertRealtime, selectedStation, showShakeDetectionGrid, visibleCwaSimulation, visibleGlobalSimulation, visibleKmaReplaySimulation, visibleReplaySimulation]);
+  }, [displayedOceanRanks, displayedPalertValues, kmaValues, niedFrame, selectedStation, showShakeDetectionGrid, visibleCwaSimulation, visibleGlobalSimulation, visibleKmaReplaySimulation, visibleReplaySimulation]);
 
   useEffect(() => { setHistory([]); }, [selectedStationId]);
 
@@ -5433,7 +5628,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const selectedIsGlobalFdsn = Boolean(selectedStation && isGlobalStation(selectedStation) && !isCwaStation(selectedStation));
   const selectedUsesMmi = Boolean(selectedStation && (isKmaStation(selectedStation) || isCencStation(selectedStation)));
   const selectedDisplayColor = selectedIsPalert
-    ? palertPgaColor(selectedRank)
+    ? palertDisplayMetric === "pgv" ? palertPgvColor(selectedRank) : palertPgaColor(selectedRank)
     : selectedIsGlobalFdsn
     ? fdsnWaveformStationColor(selectedRank ?? 0)
     : selectedUsesMmi
@@ -6208,7 +6403,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
           </section>
           <section className="control-section seismic-legal-note">
             <div className="section-title"><span><AlertTriangle /></span><strong>数据级别</strong></div>
-            <p>NIED 帧经 Yahoo 公开边缘端点读取；S-net 实测历史来自 MSIL 观测瓦片色值反算。JMA 海啸状态由 P2P 地震信息转发的气象厅 code 552 报文驱动，海岸预报线来自 JMA 官方 GIS；CWA API 金钥只在本机服务端读取官方 E-A0014 海啸资讯与 E-A0015 / E-A0016 震后地震报告，不冒充秒级 EEW。CWA 实时预警若出现则来自已标明 relay 的区域转发源。全球台站来自 FDSN Station，CWASN 位置来自 CWA GDMS；P-Alert 的站点目录与 PGA 秒级帧均直接读取中研院官方 GraphQL 并遵守其资料使用说明。WNI 摄像头图层读取 Weathernews 官方公开目录，缩略图和详情均直接指向官方站点。全球断裂带来自 GEM GAF-DB（CC BY-SA 4.0），是地质背景参考，不代表实时风险。所有本地推算和传播回放均不作为官方预警。</p>
+            <p>NIED 帧经 Yahoo 公开边缘端点读取；S-net 实测历史来自 MSIL 观测瓦片色值反算。JMA 海啸状态由 P2P 地震信息转发的气象厅 code 552 报文驱动，海岸预报线来自 JMA 官方 GIS；CWA API 金钥只在本机服务端读取官方 E-A0014 海啸资讯与 E-A0015 / E-A0016 震后地震报告，不冒充秒级 EEW。CWA 实时预警若出现则来自已标明 relay 的区域转发源。全球台站来自 FDSN Station，CWASN 位置来自 CWA GDMS；P-Alert 的站点目录、PGA 秒级帧、事件测站表、绘图与动画均直接读取中研院官方 GraphQL，并把大图和 GIF 限制为点击后加载。WNI 摄像头图层读取 Weathernews 官方公开目录，缩略图和详情均直接指向官方站点。全球断裂带来自 GEM GAF-DB（CC BY-SA 4.0），是地质背景参考，不代表实时风险。所有本地推算和传播回放均不作为官方预警。</p>
           </section>
         </div>
       </aside>
@@ -6241,6 +6436,15 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               <label className="seismic-layer-complexity"><span><strong>图层复杂度</strong><output>{normalizedMapLayerComplexity}/6</output></span><input type="range" min="1" max="6" step="1" value={normalizedMapLayerComplexity} aria-label="地图图层复杂度 1 到 6" onChange={(event) => setMapLayerComplexity(Number(event.target.value))} /><small>1 仅事件与核心响应；6 显示完整测站、标签、产品和背景层。</small></label>
               <label className="seismic-layer-complexity seismic-monitor-scale-setting"><span><strong>监视组件大小</strong><output>{Math.round(normalizedMonitorScale * 100)}%</output></span><input type="range" min="65" max="160" step="5" value={Math.round(normalizedMonitorScale * 100)} aria-label="监视组件大小百分比" onChange={(event) => setMonitorScale(Number(event.target.value) / 100)} /><small>仅改变地图上监视卡片的等比例尺寸；悬停卡片 1 秒后可拖放。</small></label>
               <button className="seismic-settings-reset-scale" onClick={() => setMonitorScale(1)}>恢复组件大小为 100%</button>
+              <section className="seismic-station-style-setting">
+                <header><strong>全球 / P-Alert 测站显示</strong><span>{stationDisplayStyle.shape === "triangle" ? "三角形" : "圆形"} · {Math.round(stationDisplayStyle.opacity * 100)}%</span></header>
+                <label><span>大小</span><input type="range" min="1" max="8" step="0.5" value={stationDisplayStyle.size} aria-label="全球测站图标大小" onChange={(event) => setStationMarkerSize(Number(event.target.value))} /><output>{stationDisplayStyle.size.toFixed(1)}</output></label>
+                <label><span>形状</span><select aria-label="全球测站图标形状" value={stationDisplayStyle.shape} onChange={(event) => setStationMarkerShape(event.target.value as SeismicStationShape)}><option value="triangle">三角形</option><option value="circle">圆形</option></select></label>
+                <label><span>不透明度</span><input type="range" min="0" max="1" step="0.05" value={stationDisplayStyle.opacity} aria-label="全球测站图标不透明度" onChange={(event) => setStationMarkerOpacity(Number(event.target.value))} /><output>{stationDisplayStyle.opacity.toFixed(2)}</output></label>
+                <label><span>P-Alert 资料</span><select aria-label="P-Alert 测站显示资料" value={palertDisplayMetric} onChange={(event) => setPalertDisplayMetric(event.target.value as PalertDisplayMetric)}><option value="pga">PGA</option><option value="pgv" disabled={!selectedPalertEvent}>PGV（选择历史事件后）</option></select></label>
+                <label className="toggle-row"><input type="checkbox" checked={showPalertContour} onChange={(event) => setShowPalertContour(event.target.checked)} />PGA 官方等值线图 <em>{selectedPalertEvent ? "事件图层" : "先选择事件"}</em></label>
+                <label><span>等值线不透明度</span><input type="range" min="0" max="1" step="0.05" value={normalizedPalertContourOpacity} disabled={!showPalertContour} aria-label="P-Alert PGA 等值线不透明度" onChange={(event) => setPalertContourOpacity(Number(event.target.value))} /><output>{normalizedPalertContourOpacity.toFixed(2)}</output></label>
+              </section>
               <div className="seismic-settings-source-block"><div className="seismic-settings-source-heading"><strong>接收源</strong><button onClick={() => setEnabledEewSources([...LIVE_EEW_SOURCE_ORDER])}>全选</button><button onClick={() => setEnabledEewSources([])}>清空</button></div><div className="seismic-settings-source-grid">{LIVE_EEW_SOURCE_ORDER.map((source) => <label key={source}><input type="checkbox" checked={enabledEewSourceSet.has(source)} onChange={(event) => setEnabledEewSources((current) => event.target.checked ? [...new Set([...current, source])] : current.filter((item) => item !== source))} /><span>{source}</span></label>)}</div><small>关闭的源不会进入实时历史、自动定位或音效；历史记录不会被删除。</small></div>
             </div>}
           </div>
@@ -6294,7 +6498,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 gnssStations={GNSS_STATIONS}
                 verifiedWaveformStationIds={verifiedWaveformStationIds}
                 palertStations={palertSnapshot?.stations ?? []}
-                palertPgaValues={palertRealtime?.dataVals ?? EMPTY_RANKS}
+                palertValues={displayedPalertValues}
+                palertMetric={palertDisplayMetric}
+                palertContourUrl={palertContourUrl}
+                palertContourOpacity={normalizedPalertContourOpacity}
+                stationStyle={stationDisplayStyle}
                 cencReport={showCenc ? cencReport : null}
                 cwaOfficialLayer={cwaOfficialLayer}
                 niedFrame={mapDetectionStationIds.length ? niedFrame : null}
@@ -6395,7 +6603,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 <div className="seismic-s-wave-stripes" aria-hidden="true" />
                 <div className="seismic-s-wave-marquee"><span>{sWaveArrived ? "S 波已抵达定位点，请注意强烈摇晃并远离坠落物。" : `距离 S 波到达还有 ${formatSArrivalCountdown(sWaveRemainingSeconds)}。`} 理论速度 3.5 km/s · {replayEvent ? `回放 ${formatReplayClock(replaySeconds, false)}` : "实时传播定位"} · {wavefrontEvent?.place}</span></div>
               </section>}
-              <SeismicIntensityLegend />
+              <SeismicIntensityLegend palertMetric={palertDisplayMetric} />
               {showWniCameras && <a className={`seismic-wni-camera-map-status ${wniCameraState}`} href={WNI_CAMERA_MAP_URL} target="_blank" rel="noreferrer" title="打开 WNI 官方全国摄像头地图">
                 <Video size={15} />
                 <span><strong>WNI现场摄像头</strong><small>{wniCameraState === "online" ? `当前视野 ${visibleWniCameras.length} / 全国 ${wniCameras.length}` : wniCameraState === "stale" ? `显示缓存 ${visibleWniCameras.length} 个点位` : wniCameraState === "error" ? "目录连接失败" : "正在载入全国点位"}</small></span>
@@ -6484,17 +6692,18 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               <button className={panelTab === "station" ? "active" : ""} title="测站数据" onClick={() => setPanelTab("station")}><Antenna size={15} /><span>测站详情</span></button>
               <button className={panelTab === "intensity" ? "active" : ""} title="CENC 仪器烈度" onClick={() => setPanelTab("intensity")}><Database size={15} /><span>CENC 烈度</span></button>
               <button className={panelTab === "snet" ? "active" : ""} title="S-net 震度情报" onClick={() => setPanelTab("snet")}><Waves size={15} /><span>S-net 震度</span></button>
+              <button className={panelTab === "palert" ? "active" : ""} title="P-Alert 事件与产品" onClick={() => setPanelTab("palert")}><Radio size={15} /><span>P-Alert</span></button>
               <button className={panelTab === "exposure" ? "active" : ""} title="USGS PAGER 人口暴露" onClick={() => setPanelTab("exposure")}><BarChart3 size={15} /><span>人口暴露</span></button>
             </nav>
             <div className="seismic-panel-body">
               {panelTab === "station" && (
                 selectedStation ? (
                   isPalertStation(selectedStation) ? <>
-                    <header className="seismic-station-heading"><span style={{ background: palertPgaColor(selectedRank) }} /><div><strong>{selectedStation.stationName}</strong><small>P-Alert · {selectedStation.stationCode}</small></div><b>{palertRealtime?.dataVals[selectedStation.stationCode] === undefined ? "当前帧无数据" : `PGA ${(selectedRank ?? 0).toFixed(6)} gal`}</b></header>
-                    <div className="seismic-gauge-grid"><article><Gauge size={18} /><span>官方实时 PGA</span><strong>{palertRealtime?.dataVals[selectedStation.stationCode] === undefined ? "--" : `${(selectedRank ?? 0).toFixed(6)} gal`}</strong><meter min="0" max="800" value={Math.min(800, selectedRank ?? 0)} /></article><article><Activity size={18} /><span>实时帧</span><strong>{palertRealtime?.dataTime ? formatTime(palertRealtime.dataTime) : "等待数据"}</strong></article><article><Clock3 size={18} /><span>接口延迟</span><strong>{palertRealtime?.latencyMs === null || palertRealtime?.latencyMs === undefined ? "--" : `${palertRealtime.latencyMs} ms`}</strong></article></div>
+                    <header className="seismic-station-heading"><span style={{ background: selectedDisplayColor }} /><div><strong>{selectedStation.stationName}</strong><small>P-Alert · {selectedStation.stationCode}</small></div><b>{displayedPalertValues[selectedStation.stationCode] === undefined ? "当前资料无数据" : `${palertDisplayMetric.toUpperCase()} ${(selectedRank ?? 0).toFixed(palertDisplayMetric === "pgv" ? 5 : 6)} ${palertDisplayMetric === "pgv" ? "cm/s" : "gal"}`}</b></header>
+                    <div className="seismic-gauge-grid"><article><Gauge size={18} /><span>{selectedPalertEvent ? "官方事件实测" : "官方实时 PGA"}</span><strong>{displayedPalertValues[selectedStation.stationCode] === undefined ? "--" : `${(selectedRank ?? 0).toFixed(palertDisplayMetric === "pgv" ? 5 : 6)} ${palertDisplayMetric === "pgv" ? "cm/s" : "gal"}`}</strong><meter min="0" max={palertDisplayMetric === "pgv" ? 140 : 800} value={Math.min(palertDisplayMetric === "pgv" ? 140 : 800, selectedRank ?? 0)} /></article><article><Activity size={18} /><span>{selectedPalertEvent ? "发震时刻" : "实时帧"}</span><strong>{selectedPalertEvent ? formatTime(`${selectedPalertEvent.date}Z`) : palertRealtime?.dataTime ? formatTime(palertRealtime.dataTime) : "等待数据"}</strong></article><article><Clock3 size={18} /><span>{selectedPalertEvent ? "震中距" : "接口延迟"}</span><strong>{selectedPalertEvent ? `${selectedPalertEventStation?.distanceKm?.toFixed(2) ?? "--"} km` : palertRealtime?.latencyMs === null || palertRealtime?.latencyMs === undefined ? "--" : `${palertRealtime.latencyMs} ms`}</strong></article></div>
                     <dl className="earthquake-detail-list"><div><dt>坐标</dt><dd>{selectedStation.latitude.toFixed(5)}, {selectedStation.longitude.toFixed(5)}</dd></div><div><dt>地区</dt><dd>{selectedStation.area || "台湾"}</dd></div><div><dt>楼层 / 海拔</dt><dd>{selectedStation.floor === null ? "--" : `${selectedStation.floor} 楼`} / {selectedStation.elevationM?.toFixed(0) ?? "--"} m</dd></div><div><dt>启用时间</dt><dd>{selectedStation.startAt || "--"}</dd></div></dl>
-                    <a className="seismic-station-link" href={palertRealtime?.sourceUrl ?? "https://palert.earth.sinica.edu.tw/realtime"} target="_blank" rel="noreferrer">打开 P-Alert 官方实时地图<ExternalLink size={13} /></a>
-                    <p className="seismic-data-label">PGA 与采样时间直接来自中央研究院 P-Alert 官方 realtimePGA 秒级帧；三角形依官方 0.8–800 gal 色阶逐帧更新，不使用本地传播估算。</p>
+                    <a className="seismic-station-link" href={selectedPalertEvent?.sourceUrl ?? palertRealtime?.sourceUrl ?? "https://palert.earth.sinica.edu.tw/realtime"} target="_blank" rel="noreferrer">打开 P-Alert 官方{selectedPalertEvent ? "事件页" : "实时地图"}<ExternalLink size={13} /></a>
+                    <p className="seismic-data-label">{selectedPalertEvent ? `当前为 P-Alert 官方事件测站表：PGA ${selectedPalertEventStation?.pgaGal?.toFixed(6) ?? "--"} gal、PGV ${selectedPalertEventStation?.pgvCms?.toFixed(5) ?? "--"} cm/s、方位 ${selectedPalertEventStation?.azimuth?.toFixed(2) ?? "--"}°；不是本地估算。` : "PGA 与采样时间直接来自中央研究院 P-Alert 官方 realtimePGA 秒级帧；测站依官方 0.8–800 gal 色阶逐帧更新，不使用本地传播估算。"}</p>
                   </> : isGlobalStation(selectedStation) ? <>
                     <header className="seismic-station-heading"><span style={{ background: selectedDisplayColor }} /><div><strong>{selectedStation.stationName}</strong><small>{selectedStation.network} · {selectedStation.stationCode}</small></div><b>{isCwaStation(selectedStation) ? `CWASN · 震度 ${jmaShindoLabel(selectedRank ?? 0)}` : `FDSN · MMI ${(selectedRank ?? 0).toFixed(1)}`}</b></header>
                     {!isCwaStation(selectedStation) && oceanResponseEvent && <div className={`fdsn-waveform-discovery ${waveformProbeState}`}>
@@ -6565,6 +6774,20 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                   <p className="seismic-data-label">这里是事件驱动的确定性传播推算，不是测站实测；它与“实测历史”完全分离。</p>
                 </>}
               </>}
+
+              {panelTab === "palert" && <PalertEventPanel
+                catalogue={palertEvents}
+                loading={palertEventsLoading}
+                error={palertEventsError}
+                selectedEvent={selectedPalertEvent}
+                stationSnapshot={palertEventStations}
+                metric={palertDisplayMetric}
+                onMetricChange={setPalertDisplayMetric}
+                onSelectEvent={choosePalertEvent}
+                onShowRealtime={showPalertRealtime}
+                onOpenProduct={(event, type) => setPalertProduct({ event, type })}
+                onFocusStation={focusPalertStationCode}
+              />}
 
               {panelTab === "exposure" && <PagerExposurePanel
                 pager={replayProductVisibility.populationExposure ? replayUsgsPager : usgsPager}
@@ -6698,6 +6921,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       {mechanismEvent && <FocalMechanismDialog event={mechanismEvent} onClose={() => setMechanismEvent(null)} />}
       {pagerEvent && <UsgsPagerDialog event={pagerEvent} initialPager={usgsPager} onLoaded={setUsgsPager} onClose={() => setPagerEvent(null)} />}
       {dyfiEvent && <UsgsDyfiDialog event={dyfiEvent} onClose={() => setDyfiEvent(null)} />}
+      {palertProduct && <PalertProductDialog event={palertProduct.event} initialType={palertProduct.type} onClose={() => setPalertProduct(null)} />}
       {cwaProductEvent && <CwaProductsDialog
         event={cwaProductEvent}
         onClose={() => setCwaProductEvent(null)}
