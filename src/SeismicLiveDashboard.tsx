@@ -3086,6 +3086,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const niedAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const niedAudioBuffersRef = useRef(new Map<SeismicSoundAssetId, AudioBuffer>());
   const autoNiedSelectionSession = useRef<string | null>(null);
+  const manualStationSelection = useRef<{ eventKey: string | null; stationId: string } | null>(null);
   const autoWaveformSelection = useRef<{ eventKey: string; stationId: string; distanceKm: number } | null>(null);
   const autoNiedWaveformSelection = useRef<{ sessionKey: string; stationId: string; mode: "inside" | "nearest" } | null>(null);
   const niedWaveformProbeSession = useRef<string | null>(null);
@@ -5265,6 +5266,8 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   }, [cwaTsunami, jmaTsunamiSoundEnabled, playSoundAsset, replayEvent]);
 
   const focusStation = useCallback((station: SelectableStation, reason: StationSelectionReason = "manual") => {
+    if (reason !== "manual" && manualStationSelection.current?.eventKey === eventStationKey) return;
+    if (reason === "manual") manualStationSelection.current = { eventKey: eventStationKey, stationId: station.id };
     setSelectedStationId(station.id);
     setSelectedGlobalStation(isGlobalStation(station) ? station : null);
     setStationSelectionReason(reason);
@@ -5272,7 +5275,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     if (!(reason === "waveform-auto" && replayModeActiveRef.current)) {
       focusMap(`station:${station.id}`, station.latitude, station.longitude, isCencStation(station) ? 9 : isGlobalStation(station) ? Math.max(6, mapViewportZoomRef.current) : 7);
     }
-  }, [focusMap, setPanelTab]);
+  }, [eventStationKey, focusMap, setPanelTab]);
 
   const choosePalertEvent = useCallback((event: PalertEvent) => {
     setSelectedPalertEvent(event);
