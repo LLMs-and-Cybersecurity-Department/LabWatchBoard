@@ -21,12 +21,12 @@ export const SEISMIC_SOUND_LIBRARY = {
   "general-50s": { url: "/sound/general/50s.mp3", label: "S 波倒计时 50 秒", family: "replay" },
   "general-60s": { url: "/sound/general/60s.mp3", label: "S 波倒计时 60 秒", family: "replay" },
   "srev-cancel": { url: "/sound/srev/cancel.mp3", label: "预警解除", family: "eew" },
-  "srev-caution": { url: "/sound/srev/caution.mp3", label: "接收提示（不自动定位）", family: "eew" },
+  "srev-caution": { url: "/sound/srev/shindo0.mp3", label: "接收提示（不自动定位 · 震度 0）", family: "eew" },
   "srev-detail": { url: "/sound/srev/detail.mp3", label: "预警详情", family: "eew" },
   "srev-final": { url: "/sound/srev/final.mp3", label: "最终报文", family: "eew" },
   "srev-hypocenter": { url: "/sound/srev/hypocenter.mp3", label: "震源定位", family: "eew" },
-  "srev-issue": { url: "/sound/srev/issue.mp3", label: "预警首报", family: "eew" },
-  "srev-prompt": { url: "/sound/srev/prompt.mp3", label: "回放预警提示", family: "replay" },
+  "srev-issue": { url: "/sound/srev/issue.mp3", label: "预警首报 / 回放预警提示", family: "eew" },
+  "srev-prompt": { url: "/sound/srev/prompt.mp3", label: "震源待定 / 查找震源", family: "replay" },
   "srev-update": { url: "/sound/srev/update.mp3", label: "预警更新", family: "eew" },
   "srev-warn": { url: "/sound/srev/warn.mp3", label: "强预警", family: "eew" },
   "srev-shindo0": { url: "/sound/srev/shindo0.mp3", label: "震度 0", family: "shindo" },
@@ -69,6 +69,8 @@ export type EewSoundState = {
   cancelled: boolean;
   magnitude: number | null;
   observedIntensity?: boolean;
+  hypocenterKnown?: boolean;
+  affectedAreas?: Array<{ name?: string; rank?: number; intensity?: string }>;
   relay?: string;
 };
 
@@ -94,6 +96,13 @@ export function isRegionalEewSoundSource(event: Pick<EewSoundReportIdentity, "so
 function parseSoundTime(value: unknown) {
   const timestamp = Date.parse(String(value ?? ""));
   return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function affectedAreaSoundSignature(event: Pick<EewSoundState, "affectedAreas">) {
+  return (event.affectedAreas ?? [])
+    .map((area) => `${String(area.name ?? "").trim()}:${Number(area.rank) || 0}:${String(area.intensity ?? "").trim()}`)
+    .sort()
+    .join("|");
 }
 
 /**
@@ -128,6 +137,9 @@ export function eewSoundCueKey(
 ) {
   const eventKey = eewSoundEventKey(event);
   if (assetId === "srev-detail" || assetId === "srev-final") return `${eventKey}:${assetId}`;
+  if (assetId === "srev-update") {
+    return `${eventKey}:${assetId}:${Math.max(0, Math.round(Number(event.serial) || 0))}:${affectedAreaSoundSignature(event)}`;
+  }
   return `${eventKey}:${assetId}:${Math.max(0, Math.round(Number(event.serial) || 0))}`;
 }
 
@@ -140,6 +152,8 @@ export function isNewerEewSoundReport(next: EewSoundReportIdentity, previous: Ee
   if (next.cancelled !== previous.cancelled) return Boolean(next.cancelled);
   if (next.serial !== previous.serial) return next.serial > previous.serial;
   if (next.final !== previous.final || next.warning !== previous.warning) return true;
+  if (next.hypocenterKnown !== previous.hypocenterKnown) return true;
+  if (affectedAreaSoundSignature(next) !== affectedAreaSoundSignature(previous)) return true;
   const nextAnnounced = parseSoundTime(next.announcedAt);
   const previousAnnounced = parseSoundTime(previous.announcedAt);
   return nextAnnounced !== null && (previousAnnounced === null || nextAnnounced > previousAnnounced);
@@ -169,8 +183,47 @@ export function eewSoundAssetForTransition(
   }
   if (next.warning && !previous.warning) return "srev-warn";
   if (next.final && !previous.final) return "srev-final";
-  if (next.serial > previous.serial) return "srev-update";
+  if (next.serial > previous.serial || affectedAreaSoundSignature(next) !== affectedAreaSoundSignature(previous)) {
+    return "srev-update";
+  }
   return null;
+}
+
+/**
+ * Replay report sounds follow their historical report state instead of the
+ * current auto-location magnitude threshold. The first located report is the
+ * issue cue; ScalePrompt-style reports with no hypocenter use prompt.
+ */
+export function replayEewSoundAssetForTransition(
+  next: EewSoundState,
+  previous: EewSoundState | null,
+): SeismicSoundAssetId | null {
+  if (next.cancelled && !previous?.cancelled) return "srev-cancel";
+  if (next.observedIntensity) {
+    if (!previous?.observedIntensity) return "srev-detail";
+    return null;
+  }
+  if (next.hypocenterKnown === false) {
+    if (!previous || previous.hypocenterKnown !== false) return "srev-prompt";
+    if (next.serial > previous.serial || affectedAreaSoundSignature(next) !== affectedAreaSoundSignature(previous)) {
+      return "srev-update";
+    }
+    return null;
+  }
+  if (!previous || previous.observedIntensity || previous.hypocenterKnown === false) return "srev-issue";
+  if (next.warning && !previous.warning) return "srev-warn";
+  if (next.final && !previous.final) return "srev-final";
+  if (next.serial > previous.serial || affectedAreaSoundSignature(next) !== affectedAreaSoundSignature(previous)) {
+    return "srev-update";
+  }
+  return null;
+}
+
+export function replayEewReportOffsetSeconds(report: { originTime?: string; announcedAt?: string }) {
+  const origin = parseSoundTime(report.originTime);
+  const announced = parseSoundTime(report.announcedAt);
+  if (origin === null || announced === null) return null;
+  return Math.max(0, (announced - origin) / 1000);
 }
 
 export function tsunamiSoundAssetForTransition(

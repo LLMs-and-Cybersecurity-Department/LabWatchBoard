@@ -2787,7 +2787,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const mapFocusSequence = useRef(0);
   const niedDetector = useRef<ShakeDetectorState | undefined>(undefined);
   const kmaDetector = useRef<ShakeDetectorState | undefined>(undefined);
-  const previousNiedSoundState = useRef<{ sessionKey: string; index: number } | null>(null);
+  const previousNiedSoundState = useRef<{ sessionKey: string; index: number } | null>({ sessionKey: "live", index: -1 });
   const previousReplayNiedSoundState = useRef<{ sessionKey: string; index: number } | null>(null);
   const previousReplayTsunamiSoundState = useRef<{
     sessionKey: string;
@@ -4409,7 +4409,16 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     }),
   ), [kmaDetection.activeStationIds, kmaStations, kmaValues]);
 
-  const currentLiveNiedSoundIndex = niedSoundIndex(niedDetection.currentMaxLevel);
+  const currentLiveNiedFrameMaxLevel = useMemo(() => {
+    if (!niedFrame) return -1;
+    const frameTime = Date.parse(niedFrame.dataTime);
+    if (!Number.isFinite(frameTime) || Math.abs(clock - frameTime) > 15_000) return -1;
+    return Math.max(-1, ...Array.from(niedFrame.intensity, niedCharToLevel));
+  }, [clock, niedFrame]);
+  const currentLiveNiedSoundIndex = niedSoundIndex(Math.max(
+    niedDetection.currentMaxLevel,
+    currentLiveNiedFrameMaxLevel,
+  ));
   const replayNiedSoundSessionKey = replayEvent ? `replay:${eewReportKey(replayEvent)}` : "";
   const currentReplayNiedSoundIndex = replayNiedSoundIndex(replaySimulation);
   useEffect(() => {
@@ -4434,8 +4443,8 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       index: currentReplayNiedSoundIndex,
     };
     if (currentReplayNiedSoundIndex < 0) setNiedSoundStatus(niedSoundEnabled ? "回放等待最大震度上升" : "音效已关闭");
-    if (!previous || previous.sessionKey !== replayNiedSoundSessionKey) return;
-    const cue = niedSoundCueForRise(previous.index, currentReplayNiedSoundIndex, niedSoundEnabled);
+    const previousIndex = previous?.sessionKey === replayNiedSoundSessionKey ? previous.index : -1;
+    const cue = niedSoundCueForRise(previousIndex, currentReplayNiedSoundIndex, niedSoundEnabled);
     if (!cue || !replayPlaying) return;
     setNiedSoundStatus(`正在播放 ${cue.replace("shindo", "震度 ")}`);
     void playNiedCue(cue);
@@ -5597,7 +5606,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
             <div className="seismic-sound-custom"><label>替换所选音效<input type="file" accept="audio/*" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (!file) return; const previous = customSoundUrlsRef.current.get(soundPreviewAsset); if (previous) URL.revokeObjectURL(previous); customSoundUrlsRef.current.set(soundPreviewAsset, URL.createObjectURL(file)); niedAudioBuffersRef.current.delete(soundPreviewAsset); setCustomSoundVersion((version) => version + 1); event.currentTarget.value = ""; }} /></label>{customSoundUrlsRef.current.has(soundPreviewAsset) && <button title="恢复内置音效" onClick={() => { const previous = customSoundUrlsRef.current.get(soundPreviewAsset); if (previous) URL.revokeObjectURL(previous); customSoundUrlsRef.current.delete(soundPreviewAsset); niedAudioBuffersRef.current.delete(soundPreviewAsset); setCustomSoundVersion((version) => version + 1); }}>恢复内置</button>}</div>
             <output className={niedSoundStatus.includes("阻止") ? "error" : ""}>{niedSoundEnabled ? niedSoundStatus : "音效已关闭"}</output>
             <output className={seismicSoundStatus.includes("阻止") || seismicSoundStatus.includes("超时") ? "error" : ""}>{seismicAlertSoundEnabled ? seismicSoundStatus : "实时预警 / 回放报文音效已关闭"}</output>
-            <p className="seismic-fault-note">JMA 震度速报使用 detail（同一物理事件只播一次）；JMA/KMA/CWA/CENC 区域源的 issue/update/final/cancel 按报文状态去重播放；hypocenter 是自动定位；prompt 仅在回放启动时播放；countdown 与 0–60s 按定位点的 S 波剩余到时播放，回放和实时事件共用同一距离时钟；detail 也用于首个 P/S 响应；intense 是强震；shindo 与 tsunami 按震度、海啸等级升级播放。全球目录与授权全球源不触发区域 EEW 音效。</p>
+            <p className="seismic-fault-note">接收但不自动定位使用 shindo0；JMA 震度速报使用 detail（同一物理事件只播一次）；JMA/KMA/CWA/CENC 区域源的 issue/update/final/cancel 按报文状态去重播放，报次或受影响区域变化使用 update；issue 是历史时刻的回放首报，prompt 仅表示震源待定 / 查找震源；countdown 与 0–60s 按定位点的 S 波剩余到时播放，回放和实时事件共用同一距离时钟；intense 是强震；shindo 与 tsunami 按震度、海啸等级升级播放。全球目录与授权全球源不触发区域 EEW 音效。</p>
           </section>
           <section className="control-section seismic-legal-note">
             <div className="section-title"><span><AlertTriangle /></span><strong>数据级别</strong></div>

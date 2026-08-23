@@ -6,6 +6,8 @@ import {
   eewSoundEventKey,
   isNewerEewSoundReport,
   isRegionalEewSoundSource,
+  replayEewReportOffsetSeconds,
+  replayEewSoundAssetForTransition,
   replaySecondSoundAsset,
   replaySoundMilestone,
   sWaveCountdownMilestone,
@@ -20,6 +22,28 @@ describe("seismic sound cue mapping", () => {
     expect(eewSoundAssetForTransition({ serial: 2, warning: false, final: false, cancelled: false, magnitude: 5.8 }, { serial: 1, warning: false, final: false, cancelled: false, magnitude: 5.8 }, 5)).toBe("srev-update");
     expect(eewSoundAssetForTransition({ serial: 3, warning: false, final: true, cancelled: false, magnitude: 5.8 }, { serial: 2, warning: false, final: false, cancelled: false, magnitude: 5.8 }, 5)).toBe("srev-final");
     expect(eewSoundAssetForTransition({ serial: 4, warning: false, final: true, cancelled: true, magnitude: 5.8 }, { serial: 3, warning: false, final: true, cancelled: false, magnitude: 5.8 }, 5)).toBe("srev-cancel");
+  });
+
+  it("uses shindo0 for receive-only alerts and update for an affected-area change", () => {
+    expect(SEISMIC_SOUND_LIBRARY["srev-caution"].url).toBe("/sound/srev/shindo0.mp3");
+    const previous = { serial: 2, warning: false, final: false, cancelled: false, magnitude: 5.2, affectedAreas: [{ name: "A", rank: 3 }] };
+    const next = { ...previous, affectedAreas: [{ name: "A", rank: 3 }, { name: "B", rank: 2 }] };
+    expect(isNewerEewSoundReport({ ...next, source: "JMA", id: "evt", announcedAt: "2026-08-23T00:00:02Z" }, { ...previous, source: "JMA", id: "evt", announcedAt: "2026-08-23T00:00:02Z" })).toBe(true);
+    expect(eewSoundAssetForTransition(next, previous, 4)).toBe("srev-update");
+    expect(eewSoundCueKey({ ...next, source: "JMA", id: "evt" }, "srev-update"))
+      .not.toBe(eewSoundCueKey({ ...previous, source: "JMA", id: "evt" }, "srev-update"));
+  });
+
+  it("maps replay reports to their historical issue, prompt, update and detail cues", () => {
+    const issue = { serial: 1, warning: false, final: false, cancelled: false, magnitude: 5.2, hypocenterKnown: true };
+    const update = { ...issue, serial: 2 };
+    const prompt = { ...issue, hypocenterKnown: false };
+    const detail = { ...update, observedIntensity: true, affectedAreas: [{ name: "熊本県", rank: 4 }] };
+    expect(replayEewSoundAssetForTransition(issue, null)).toBe("srev-issue");
+    expect(replayEewSoundAssetForTransition(prompt, null)).toBe("srev-prompt");
+    expect(replayEewSoundAssetForTransition(update, issue)).toBe("srev-update");
+    expect(replayEewSoundAssetForTransition(detail, update)).toBe("srev-detail");
+    expect(replayEewReportOffsetSeconds({ originTime: "2026-08-23T00:00:00Z", announcedAt: "2026-08-23T00:00:08Z" })).toBe(8);
   });
 
   it("selects tsunami issue, update, switch and cancel files by level", () => {
