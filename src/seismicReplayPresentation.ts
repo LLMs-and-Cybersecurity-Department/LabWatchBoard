@@ -3,6 +3,19 @@ export type ReplayProductStage = "official" | "waiting-products" | "contours" | 
 export const REPLAY_OFFICIAL_HOLD_MS = 5_000;
 export const REPLAY_PRODUCT_STEP_MS = 2_000;
 export const REPLAY_PRODUCT_HOLD_MS = 5_000;
+export const REPLAY_PRODUCT_MAX_OFFSET_SECONDS = 60;
+
+export function replayProductPresentationOffsetSeconds(
+  originTime: string,
+  issuedAt: string | null | undefined,
+  maximumOffsetSeconds = REPLAY_PRODUCT_MAX_OFFSET_SECONDS,
+) {
+  const origin = Date.parse(originTime);
+  const issued = Date.parse(issuedAt ?? "");
+  if (!Number.isFinite(origin) || !Number.isFinite(issued)) return null;
+  const actualOffset = Math.max(0, (issued - origin) / 1000);
+  return Math.min(actualOffset, Math.max(1, maximumOffsetSeconds));
+}
 
 export function initialReplayProductStage(options: {
   hasOfficialImpact: boolean;

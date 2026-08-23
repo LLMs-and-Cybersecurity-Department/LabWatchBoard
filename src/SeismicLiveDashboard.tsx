@@ -191,6 +191,7 @@ import {
   nextReplayProductStage,
   replayProductStageDelayMs,
   replayProductStageVisibility,
+  replayProductPresentationOffsetSeconds,
   type ReplayProductStage,
 } from "./seismicReplayPresentation";
 import {
@@ -4263,15 +4264,18 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       || (!isShakeMapQueryable(selectedReplayInstitutionRecord) && !isPagerQueryable(selectedReplayInstitutionRecord))) return null;
     const productReport = institutionReportToLiveEew(selectedReplayInstitutionRecord);
     if (!productReport) return null;
-    const originTime = Date.parse(productReport.originTime);
     const productIssuedAt = [replayUsgsShakeMap?.issuedAt, replayUsgsPager?.issuedAt]
       .map((value) => Date.parse(value ?? ""))
       .filter(Number.isFinite)
       .sort((left, right) => left - right)[0];
-    if (Number.isFinite(originTime) && Number.isFinite(productIssuedAt)) {
+    const productOffsetSeconds = replayProductPresentationOffsetSeconds(
+      productReport.originTime,
+      Number.isFinite(productIssuedAt) ? new Date(productIssuedAt).toISOString() : null,
+    );
+    if (productOffsetSeconds !== null) {
       return {
         report: productReport,
-        offsetSeconds: Math.max(0, (productIssuedAt - originTime) / 1000),
+        offsetSeconds: productOffsetSeconds,
       };
     }
     return selectedReplayReportTimeline.find(({ report }) => eewReportKey(report) === eewReportKey(productReport)) ?? null;

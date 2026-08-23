@@ -5,6 +5,7 @@ import {
   nextReplayProductStage,
   replayProductStageDelayMs,
   replayProductStageVisibility,
+  replayProductPresentationOffsetSeconds,
 } from "./seismicReplayPresentation";
 
 describe("replay official product presentation", () => {
@@ -42,5 +43,12 @@ describe("replay official product presentation", () => {
     })).toBe("waiting-products");
     expect(nextReplayProductStage("waiting-products", { productsLoading: false, hasProducts: true })).toBe("contours");
     expect(nextReplayProductStage("waiting-products", { productsLoading: false, hasProducts: false })).toBeNull();
+  });
+
+  it("preserves prompt product timing but compresses products published after the wave window", () => {
+    const origin = "2026-08-23T13:44:53.514Z";
+    expect(replayProductPresentationOffsetSeconds(origin, "2026-08-23T13:45:13.514Z")).toBe(20);
+    expect(replayProductPresentationOffsetSeconds(origin, "2026-08-23T15:48:05.958Z")).toBe(60);
+    expect(replayProductPresentationOffsetSeconds(origin, null)).toBeNull();
   });
 });
