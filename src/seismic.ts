@@ -241,6 +241,20 @@ export type PalertSnapshot = {
   error: string | null;
 };
 
+export type PalertRealtimeFrame = {
+  provider: string;
+  sourceUrl: string;
+  termsUrl: string;
+  fetchedAt: string;
+  dataTime: string | null;
+  latencyMs: number | null;
+  state: "online" | "stale" | "error";
+  cache: "MISS" | "HIT" | "EMPTY";
+  stationCount: number;
+  dataVals: Record<string, number>;
+  error: string | null;
+};
+
 export type EewRelaySourceStatus = {
   state: "online" | "stale" | "error";
   latencyMs: number | null;
@@ -925,6 +939,10 @@ export function fetchPalertStations(signal?: AbortSignal) {
   return fetchJson<PalertSnapshot>("/api/seismic/palert", signal);
 }
 
+export function fetchPalertRealtime(signal?: AbortSignal) {
+  return fetchJson<PalertRealtimeFrame>("/api/seismic/palert/realtime", signal);
+}
+
 export function fetchEewRelay(signal?: AbortSignal) {
   return fetchJson<EewRelaySnapshot>("/api/seismic/eew", signal);
 }
@@ -1072,6 +1090,28 @@ export function mmiIntensityColor(intensity: number) {
   if (rounded === 8) return KANAMEISHI_COLORS.darkOrange;
   if (rounded === 9) return KANAMEISHI_COLORS.red;
   return KANAMEISHI_COLORS.purple;
+}
+
+export const PALERT_PGA_LEGEND = [
+  { minimum: Number.NEGATIVE_INFINITY, label: "<0.8", color: "rgb(255, 255, 255)" },
+  { minimum: 0.8, label: "0.8", color: "rgb(200, 255, 211)" },
+  { minimum: 2.5, label: "2.5", color: "rgb(28, 255, 28)" },
+  { minimum: 8, label: "8", color: "rgb(255, 255, 0)" },
+  { minimum: 25, label: "25", color: "rgb(255, 170, 0)" },
+  { minimum: 80, label: "80", color: "rgb(255, 90, 0)" },
+  { minimum: 140, label: "140", color: "rgb(209, 54, 15)" },
+  { minimum: 250, label: "250", color: "rgb(161, 52, 35)" },
+  { minimum: 440, label: "440", color: "rgb(153, 12, 51)" },
+  { minimum: 800, label: "800", color: "rgb(153, 41, 165)" },
+] as const;
+
+export function palertPgaColor(pgaGal: number | null | undefined) {
+  if (pgaGal === null || pgaGal === undefined || !Number.isFinite(pgaGal) || pgaGal < 0) return "#050706";
+  for (let index = PALERT_PGA_LEGEND.length - 1; index >= 0; index -= 1) {
+    const item = PALERT_PGA_LEGEND[index];
+    if (pgaGal >= item.minimum) return item.color;
+  }
+  return PALERT_PGA_LEGEND[0].color;
 }
 
 const NIED_RAW_COLORS = [

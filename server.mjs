@@ -30,7 +30,7 @@ import { getEewRelaySnapshot } from "./server/eewRelay.mjs";
 import { getExternalWarningSnapshot } from "./server/externalWarnings.mjs";
 import { getJmaTsunamiHistorySnapshot, getJmaTsunamiSnapshot } from "./server/jmaTsunami.mjs";
 import { getJshisFault, getJshisLocation, JshisError } from "./server/jshis.mjs";
-import { getPalertSnapshot } from "./server/palert.mjs";
+import { getPalertRealtime, getPalertSnapshot } from "./server/palert.mjs";
 import { getSnetIntensitySnapshot, startSnetIntensityMonitor } from "./server/snet.mjs";
 import { FdsnDataError, getFdsnWaveform, getGlobalStationSnapshot } from "./server/fdsn.mjs";
 import { CameraRelayError, resolveYoutubeCamera } from "./server/camera.mjs";
@@ -753,8 +753,10 @@ const server = createServer(async (request, response) => {
                     ? getJmaTsunamiHistorySnapshot
                   : requestUrl.pathname === "/api/seismic/cenc-intensity"
                     ? () => getCencIntensitySnapshot({ id: requestUrl.searchParams.get("id") })
-                    : requestUrl.pathname === "/api/seismic/palert"
-                      ? getPalertSnapshot
+                  : requestUrl.pathname === "/api/seismic/palert"
+                    ? getPalertSnapshot
+                    : requestUrl.pathname === "/api/seismic/palert/realtime"
+                      ? getPalertRealtime
                     : requestUrl.pathname === "/api/seismic/ocean-stations"
                       ? getOceanStations
                       : requestUrl.pathname === "/api/seismic/snet-intensity"

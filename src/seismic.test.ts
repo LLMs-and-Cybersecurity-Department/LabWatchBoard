@@ -44,6 +44,7 @@ import {
   normalizeCencIntensityList,
   normalizeWolfxEew,
   parseKmaTimestamp,
+  palertPgaColor,
   prepareReplayStationResponse,
   replayNiedSoundIndex,
   selectAutoLocatedGlobalEvent,
@@ -90,6 +91,15 @@ describe("seismic client calculations", () => {
     expect(jmaShindoLabel(6)).toBe("6-");
     expect(jmaShindoColor(5.5)).toBe("#ff4f00");
     expect(mmiIntensityColor(8)).toBe("#ff4f00");
+  });
+
+  it("uses the official P-Alert PGA threshold colors", () => {
+    expect(palertPgaColor(null)).toBe("#050706");
+    expect(palertPgaColor(0.2)).toBe("rgb(255, 255, 255)");
+    expect(palertPgaColor(0.8)).toBe("rgb(200, 255, 211)");
+    expect(palertPgaColor(8)).toBe("rgb(255, 255, 0)");
+    expect(palertPgaColor(250)).toBe("rgb(161, 52, 35)");
+    expect(palertPgaColor(800)).toBe("rgb(153, 41, 165)");
   });
 
   it("ends live wavefronts at final/detail reports and at the 300 second cutoff", () => {
