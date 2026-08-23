@@ -39,6 +39,7 @@ import {
   isReplayPropagationActive,
   shouldDisplayRegionalWarning,
   shouldDisplayLiveWavefront,
+  shouldShowStationValueIcon,
   normalizeFanEewEnvelope,
   normalizeCencIntensityDetail,
   normalizeCencIntensityList,
@@ -100,6 +101,14 @@ describe("seismic client calculations", () => {
     expect(palertPgaColor(8)).toBe("rgb(255, 255, 0)");
     expect(palertPgaColor(250)).toBe("rgb(161, 52, 35)");
     expect(palertPgaColor(800)).toBe("rgb(153, 41, 165)");
+  });
+
+  it("hides the lowest station value icons unless the menu option is enabled", () => {
+    expect(shouldShowStationValueIcon("shindo", 0, false)).toBe(false);
+    expect(shouldShowStationValueIcon("shindo", 0, true)).toBe(true);
+    expect(shouldShowStationValueIcon("intensity", 1, false)).toBe(false);
+    expect(shouldShowStationValueIcon("intensity", 1, true)).toBe(true);
+    expect(shouldShowStationValueIcon("intensity", 2, false)).toBe(true);
   });
 
   it("ends live wavefronts at final/detail reports and at the 300 second cutoff", () => {
@@ -1110,11 +1119,14 @@ describe("seismic client calculations", () => {
     const initial = updateNiedShakeDetection(undefined, stations, "ddddd", 1_000, neighbors);
     const isolated = updateNiedShakeDetection(initial.state, stations, "ldddd", 2_000, neighbors);
     expect(isolated.status.detected).toBe(false);
+    expect(isolated.status.weakStationIds).toEqual(["nied:0"]);
     const micro = updateNiedShakeDetection(initial.state, stations, "kkkkk", 2_000, neighbors);
     expect(micro.observations).toHaveLength(0);
+    expect(micro.status.activeStationIds).toHaveLength(5);
     const clustered = updateNiedShakeDetection(initial.state, stations, "lllll", 2_000, neighbors);
     expect(clustered.status.detected).toBe(true);
     expect(clustered.status.activeStationIds.length).toBeGreaterThanOrEqual(4);
+    expect(clustered.status.weakStationIds).toHaveLength(0);
     expect(clustered.observations).toHaveLength(5);
   });
 

@@ -104,6 +104,7 @@ import {
   isReplayPropagationActive,
   shouldDisplayRegionalWarning,
   shouldDisplayLiveWavefront,
+  shouldShowStationValueIcon,
   JMA_SHINDO_LEGEND,
   MMI_LEGEND,
   jmaShindoColor,
@@ -1112,6 +1113,7 @@ function blankDetection(network: ShakeDetectionStatus["network"]): ShakeDetectio
     network,
     detected: false,
     activeStationIds: [],
+    weakStationIds: [],
     clusterCount: 0,
     currentMaxLevel: -1,
     currentMaxLabel: "等待数据",
@@ -1648,21 +1650,6 @@ const WaveformStationResponseMarkers = memo(function WaveformStationResponseMark
   })}</>;
 });
 
-const NiedStationBaseMarkers = memo(function NiedStationBaseMarkers(props: {
-  stations: SeismicStation[];
-  onSelectStation: (station: SelectableStation) => void;
-}) {
-  return <>
-    {props.stations.map((station) => <CircleMarker
-      key={station.id}
-      center={[station.latitude, station.longitude]}
-      radius={2.1}
-      pathOptions={{ color: "#1447e6", fillColor: "#1447e6", weight: 0.45, opacity: 0.86, fillOpacity: 0.76 }}
-      eventHandlers={{ click: () => props.onSelectStation(station) }}
-    />)}
-  </>;
-});
-
 const KmaStationBaseMarkers = memo(function KmaStationBaseMarkers(props: {
   stations: KmaStation[];
   onSelectStation: (station: SelectableStation) => void;
@@ -1880,6 +1867,7 @@ const GnssResponseMarkers = memo(function GnssResponseMarkers(props: {
   mode: "live" | "replay";
   maxLabels: number;
   sessionKey: string;
+  showLowestIntensityIcons: boolean;
 }) {
   const responding = useMemo(
     () => props.stations.filter((station) => (props.ranks[station.id] ?? 0) >= 0.25),
@@ -1888,9 +1876,10 @@ const GnssResponseMarkers = memo(function GnssResponseMarkers(props: {
   const displayed = useStableStationSubset(responding, 48, `${props.sessionKey}:gnss`);
   const labeledIds = useMemo(() => new Set(
     [...displayed]
+      .filter((station) => shouldShowStationValueIcon("intensity", props.ranks[station.id] ?? 0, props.showLowestIntensityIcons))
       .slice(0, props.maxLabels)
       .map((station) => station.id),
-  ), [displayed, props.maxLabels]);
+  ), [displayed, props.maxLabels, props.ranks, props.showLowestIntensityIcons]);
   return <>{displayed.map((station) => {
     const rank = props.ranks[station.id] ?? 0;
     const color = mmiIntensityColor(rank);
@@ -1925,9 +1914,15 @@ const PalertStationLayer = memo(function PalertStationLayer(props: {
   return <Pane name="seismic-station-base-palert" style={{ zIndex: 458 }}>{props.show ? <StationCanvasLayer paneName="seismic-station-base-palert" points={points} /> : null}</Pane>;
 });
 
-const NiedStationBaseLayer = memo(function NiedStationBaseLayer(props: { stations: SeismicStation[]; show: boolean; onSelectStation: (station: SelectableStation) => void }) {
-  const stations = useMemo(() => sampleStationMarkers(props.stations, 260), [props.stations]);
-  return <Pane name="seismic-station-base-nied" style={{ zIndex: 460 }}>{props.show && <NiedStationBaseMarkers stations={stations} onSelectStation={props.onSelectStation} />}</Pane>;
+const NiedStationBaseLayer = memo(function NiedStationBaseLayer(props: { stations: SeismicStation[]; show: boolean }) {
+  const points = useMemo<StationCanvasPoint[]>(() => props.stations.map((station) => ({
+    latitude: station.latitude,
+    longitude: station.longitude,
+    color: "#1447e6",
+    radius: 2.05,
+    opacity: 0.78,
+  })), [props.stations]);
+  return <Pane name="seismic-station-base-nied" style={{ zIndex: 460 }}>{props.show && <StationCanvasLayer paneName="seismic-station-base-nied" points={points} />}</Pane>;
 });
 
 const KmaStationBaseLayer = memo(function KmaStationBaseLayer(props: { stations: KmaStation[]; show: boolean; onSelectStation: (station: SelectableStation) => void }) {
@@ -2042,6 +2037,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   showCwa: boolean;
   showGnss: boolean;
   showPalert: boolean;
+  showLowestIntensityIcons: boolean;
   selectedStation: SelectableStation | null;
   selectedEvent: LiveEew | null;
   waveEvent: LiveEew | null;
@@ -2085,6 +2081,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   highlightedWniCameraId: string | null;
   warningLocation: Station | null;
   detectionStationIds: string[];
+  weakDetectionStationIds: string[];
   detectionRanks: Record<string, number>;
   kmaDetectionStationIds: string[];
   kmaDetectionRanks: Record<string, number>;
@@ -2111,6 +2108,7 @@ const SeismicMap = memo(function SeismicMap(props: {
     return () => window.clearTimeout(timer);
   }, [baseLayerStage]);
   const detectionStationSet = useMemo(() => new Set(props.detectionStationIds), [props.detectionStationIds]);
+  const weakDetectionStationSet = useMemo(() => new Set(props.weakDetectionStationIds), [props.weakDetectionStationIds]);
   const cwaArrivedStationSet = useMemo(() => new Set(props.cwaArrivedStationIds), [props.cwaArrivedStationIds]);
   const cwaDetectedStationSet = useMemo(() => new Set(props.cwaDetectionStationIds), [props.cwaDetectionStationIds]);
   const detectedStations = useMemo(
@@ -2120,8 +2118,8 @@ const SeismicMap = memo(function SeismicMap(props: {
   const respondingNiedStations = useMemo(() => props.niedStations.filter((station) => {
     const liveRank = niedLevelRank(niedCharToLevel(props.niedFrame?.intensity[station.index]));
     const replayRank = props.replayRanks?.[station.id] ?? 0;
-    return liveRank > 0 || replayRank >= 0.25 || detectionStationSet.has(station.id) || props.selectedStation?.id === station.id;
-  }), [detectionStationSet, props.niedFrame, props.niedStations, props.replayRanks, props.selectedStation]);
+    return liveRank > 0 || replayRank >= 0.25 || detectionStationSet.has(station.id) || weakDetectionStationSet.has(station.id) || props.selectedStation?.id === station.id;
+  }), [detectionStationSet, props.niedFrame, props.niedStations, props.replayRanks, props.selectedStation, weakDetectionStationSet]);
   const stableNiedResponses = useStableStationSubset(
     respondingNiedStations,
     Math.max(6, responseBudget),
@@ -2187,11 +2185,15 @@ const SeismicMap = memo(function SeismicMap(props: {
         const rank = props.replayRanks === null
           ? niedLevelRank(niedCharToLevel(props.niedFrame?.intensity[station.index]))
           : props.replayRanks?.[station.id] ?? 0;
-        return rank >= 0.5;
+        const responding = rank > 0
+          || detectionStationSet.has(station.id)
+          || weakDetectionStationSet.has(station.id)
+          || props.selectedStation?.id === station.id;
+        return responding && shouldShowStationValueIcon("shindo", rank, props.showLowestIntensityIcons);
       })
       .slice(0, responseLabelBudget)
       .map((station) => station.id),
-  ), [displayedNiedResponses, props.niedFrame, props.replayRanks, responseLabelBudget]);
+  ), [detectionStationSet, displayedNiedResponses, props.niedFrame, props.replayRanks, props.selectedStation, props.showLowestIntensityIcons, responseLabelBudget, weakDetectionStationSet]);
   const globalResponseStationById = useMemo(
     () => new Map(props.globalResponseStations.map((station) => [station.id, station])),
     [props.globalResponseStations],
@@ -2267,27 +2269,27 @@ const SeismicMap = memo(function SeismicMap(props: {
   }, [props.selectedStation, stableOceanResponses]);
   const labeledGlobalStationIds = useMemo(() => new Set(
     [...displayedGlobalResponses]
-      .filter((station) => (props.globalRanks[station.id] ?? 0) >= 1)
+      .filter((station) => shouldShowStationValueIcon("intensity", props.globalRanks[station.id] ?? 0, props.showLowestIntensityIcons))
       .slice(0, responseLabelBudget)
       .map((station) => station.id),
-  ), [displayedGlobalResponses, props.globalRanks, responseLabelBudget]);
+  ), [displayedGlobalResponses, props.globalRanks, props.showLowestIntensityIcons, responseLabelBudget]);
   const labeledCwaStationIds = useMemo(() => new Set(
     [...displayedCwaResponses]
-      .filter((station) => (props.cwaRanks[station.id] ?? 0) >= 0.5)
+      .filter((station) => shouldShowStationValueIcon("shindo", props.cwaRanks[station.id] ?? 0, props.showLowestIntensityIcons))
       .slice(0, responseLabelBudget)
       .map((station) => station.id),
-  ), [displayedCwaResponses, props.cwaRanks, responseLabelBudget]);
+  ), [displayedCwaResponses, props.cwaRanks, props.showLowestIntensityIcons, responseLabelBudget]);
   const labeledKmaStationIds = useMemo(() => new Set(
     [...displayedKmaResponses]
       .filter((station) => {
         const rank = props.kmaReplayRanks === null
           ? Number(props.kmaValues[station.index] ?? 0)
           : Number(props.kmaReplayRanks[station.id] ?? 0);
-        return rank >= 1;
+        return shouldShowStationValueIcon("intensity", rank, props.showLowestIntensityIcons);
       })
       .slice(0, responseLabelBudget)
       .map((station) => station.id),
-  ), [displayedKmaResponses, props.kmaReplayRanks, props.kmaValues, responseLabelBudget]);
+  ), [displayedKmaResponses, props.kmaReplayRanks, props.kmaValues, props.showLowestIntensityIcons, responseLabelBudget]);
   const labeledOceanStationIds = useMemo(() => new Set(
     [...displayedOceanResponses]
       .filter((station) => props.oceanMode === "measured"
@@ -2393,8 +2395,8 @@ const SeismicMap = memo(function SeismicMap(props: {
   }>>(() => props.officialRegions.features.flatMap((feature) => {
     const center = geometryCenter(feature);
     const rank = Math.max(0, Number(feature.properties.rank ?? 0));
-    if (!center || rank < 1) return [];
     const scale: "intensity" | "shindo" = feature.properties.scale === "intensity" ? "intensity" : "shindo";
+    if (!center || !shouldShowStationValueIcon(scale, rank, props.showLowestIntensityIcons)) return [];
     return [{
       id: `${feature.properties.code ?? feature.properties.name}:${scale}:${rank}`,
       center,
@@ -2402,7 +2404,7 @@ const SeismicMap = memo(function SeismicMap(props: {
       scale,
       label: `${feature.properties.name} 官方${scale === "shindo" ? `震度 ${jmaShindoLabel(rank)}` : `烈度 ${intensityRomanLabel(rank)}`}`,
     }];
-  }).slice(0, 64), [props.officialRegions.features]);
+  }).slice(0, 64), [props.officialRegions.features, props.showLowestIntensityIcons]);
   return (
     <MapContainer center={[36.2, 133.2]} zoom={5} minZoom={2} maxZoom={13} worldCopyJump preferCanvas scrollWheelZoom zoomControl={false} className={`seismic-map seismic-map--${props.theme} seismic-map--${props.interactionMode}`}>
       <SeismicMapThemeClass theme={props.theme} />
@@ -2549,7 +2551,7 @@ const SeismicMap = memo(function SeismicMap(props: {
       <WaveformStationBaseLayer stations={props.waveformStations} maxMarkers={baseStationBudget} verifiedStationIds={props.verifiedWaveformStationIds} show={!props.replayMode && props.showWaveform && layerComplexity >= 3 && baseLayerStage >= 2} onSelectStation={props.onSelectStation} />
       <OceanStationBaseLayer stations={props.oceanStations} showSnet={props.showOcean && layerComplexity >= 3 && baseLayerStage >= 3} showOther={props.showOtherOcean && layerComplexity >= 4 && baseLayerStage >= 3} onSelectStation={props.onSelectStation} />
       <KmaStationBaseLayer stations={props.kmaStations} show={props.showKma && layerComplexity >= 4 && baseLayerStage >= 4} onSelectStation={props.onSelectStation} />
-      <NiedStationBaseLayer stations={props.niedStations} show={props.showNied && layerComplexity >= 5 && baseLayerStage >= 5} onSelectStation={props.onSelectStation} />
+      <NiedStationBaseLayer stations={props.niedStations} show={props.showNied} />
       <Pane name="seismic-waveform-response-pane" className="seismic-waveform-response-pane" style={{ zIndex: 471 }}>
         {layerComplexity >= 3 && (props.showGlobal || props.showWaveform) && <>
           <StationCanvasLayer paneName="seismic-waveform-response-pane" points={globalResponsePoints} />
@@ -2564,7 +2566,7 @@ const SeismicMap = memo(function SeismicMap(props: {
       </Pane>
       <Pane name="seismic-station-response-pane" style={{ zIndex: 470 }}>
         {layerComplexity >= 2 && props.showCwa && <StationCanvasLayer paneName="seismic-station-response-pane" points={cwaResponsePoints} />}
-        {layerComplexity >= 4 && props.showGnss && <GnssResponseMarkers stations={props.gnssStations} ranks={props.gnssRanks} mode={props.gnssMode} maxLabels={responseLabelBudget} sessionKey={props.detectionSessionKey} />}
+        {layerComplexity >= 4 && props.showGnss && <GnssResponseMarkers stations={props.gnssStations} ranks={props.gnssRanks} mode={props.gnssMode} maxLabels={responseLabelBudget} sessionKey={props.detectionSessionKey} showLowestIntensityIcons={props.showLowestIntensityIcons} />}
         {layerComplexity >= 2 && props.showCwa && displayedCwaResponses.map((station) => {
           const selected = props.selectedStation?.id === station.id;
           const rank = props.cwaRanks[station.id] ?? 0;
@@ -2582,11 +2584,13 @@ const SeismicMap = memo(function SeismicMap(props: {
           const replayRank = props.replayRanks?.[station.id];
           const rank = props.replayRanks === null ? niedLevelRank(level) : replayRank ?? 0;
           const detected = detectionStationSet.has(station.id);
-          const activeRank = detected ? props.detectionRanks[station.id] ?? rank : null;
+          const weak = weakDetectionStationSet.has(station.id);
+          const responding = detected || weak;
+          const activeRank = responding ? props.detectionRanks[station.id] ?? rank : null;
           const color = niedStationDisplayColor(props.replayRanks === null ? level : 0, activeRank);
           const selected = props.selectedStation?.id === station.id;
           return <Fragment key={`response:${station.id}`}>
-            <CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 6 : detected ? 4.4 : rank >= 1 ? 4 : 3.2} pathOptions={{ color: selected || detected ? "#ffffff" : color, fillColor: color, weight: selected ? 2.4 : detected ? 1.6 : 0.8, opacity: detected ? 1 : 0.94, fillOpacity: detected ? 1 : rank >= 1 ? 0.94 : 0.86 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
+            <CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 6 : detected ? 4.4 : weak ? 3.9 : rank >= 1 ? 4 : 3.2} pathOptions={{ color: selected || responding ? "#ffffff" : color, fillColor: color, weight: selected ? 2.4 : detected ? 1.6 : weak ? 1.2 : 0.8, opacity: responding ? 1 : 0.94, fillOpacity: responding ? 1 : rank >= 1 ? 0.94 : 0.86 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
               {selected && <Popup><strong>{station.stationName}</strong><br />{station.network} {station.stationCode}<br />{props.replayRanks === null ? `实时震度 ${niedLevelLabel(level)}` : `回放模拟震度 ${rank.toFixed(1)}`}</Popup>}
             </CircleMarker>
             {labeledStationIds.has(station.id) && <StationValueMarker latitude={station.latitude} longitude={station.longitude} rank={rank} scale="shindo" selected={selected} label={`${station.network} ${station.stationCode} 震度 ${jmaShindoLabel(rank)}`} />}
@@ -2623,7 +2627,7 @@ const SeismicMap = memo(function SeismicMap(props: {
         })}
         {layerComplexity >= 2 && props.showCenc && props.cencReport && <>
           <Marker position={[props.cencReport.latitude, props.cencReport.longitude]} icon={hypocenterMapIcon("catalogue")} zIndexOffset={1100} riseOnHover alt={`${props.cencReport.place} CENC 仪器烈度报告震中`}><Popup><strong>CENC 仪器烈度报告</strong><br />{props.cencReport.place}<br />M {props.cencReport.magnitude?.toFixed(1) ?? "--"} · {props.cencReport.stationMetrics.length} 站报告 / {props.cencReport.stations.length} 站有坐标</Popup></Marker>
-          {props.cencReport.stations.map((station) => { const selected = props.selectedStation?.id === station.id; const color = cencIntensityColor(station.intensity); return <Fragment key={station.id}><CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 7 : Math.max(3, Math.min(6, station.intensity / 1.8))} pathOptions={{ color: selected ? "#ffffff" : color, fillColor: color, weight: selected ? 2 : 0.8, fillOpacity: 0.92 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>{selected && <Popup><strong>{station.stationName} ({station.stationCode})</strong><br />仪器烈度 {intensityRomanLabel(station.intensity)} · {station.intensity.toFixed(1)}<br />PGA {station.pgaGal?.toFixed(1) ?? "--"} gal · PGV {station.pgvCms?.toFixed(1) ?? "--"} cm/s</Popup>}</CircleMarker><StationValueMarker latitude={station.latitude} longitude={station.longitude} rank={station.intensity} scale="intensity" selected={selected} label={`CENC ${station.stationCode} MMI ${intensityRomanLabel(station.intensity)}`} /></Fragment>; })}
+          {props.cencReport.stations.map((station) => { const selected = props.selectedStation?.id === station.id; const color = cencIntensityColor(station.intensity); return <Fragment key={station.id}><CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 7 : Math.max(3, Math.min(6, station.intensity / 1.8))} pathOptions={{ color: selected ? "#ffffff" : color, fillColor: color, weight: selected ? 2 : 0.8, fillOpacity: 0.92 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>{selected && <Popup><strong>{station.stationName} ({station.stationCode})</strong><br />仪器烈度 {intensityRomanLabel(station.intensity)} · {station.intensity.toFixed(1)}<br />PGA {station.pgaGal?.toFixed(1) ?? "--"} gal · PGV {station.pgvCms?.toFixed(1) ?? "--"} cm/s</Popup>}</CircleMarker>{shouldShowStationValueIcon("intensity", station.intensity, props.showLowestIntensityIcons) && <StationValueMarker latitude={station.latitude} longitude={station.longitude} rank={station.intensity} scale="intensity" selected={selected} label={`CENC ${station.stationCode} MMI ${intensityRomanLabel(station.intensity)}`} />}</Fragment>; })}
         </>}
       </Pane>
       <Pane name="seismic-station-hit-pane" className="seismic-station-hit-pane" style={{ zIndex: 469 }}>
@@ -2689,6 +2693,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [showCwaStations, setShowCwaStations] = usePersistentState("seismic-show-cwa-cwasn", true);
   const [showGnssStations, setShowGnssStations] = usePersistentState("seismic-show-china-gnss", false);
   const [showPalertStations, setShowPalertStations] = usePersistentState("seismic-show-palert", true);
+  const [showLowestIntensityIcons, setShowLowestIntensityIcons] = usePersistentState("seismic-show-lowest-intensity-icons", false);
   const [showWniCameras, setShowWniCameras] = usePersistentState("seismic-show-wni-cameras", true);
   const [showGlobalFaults, setShowGlobalFaults] = usePersistentState("seismic-show-global-faults", false);
   const [showJshisHazard, setShowJshisHazard] = usePersistentState("seismic-show-jshis-hazard", true);
@@ -6228,6 +6233,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               <label className="toggle-row"><input type="checkbox" checked={autoSelectWaveformStation} onChange={(event) => setAutoSelectWaveformStation(event.target.checked)} />自动寻找最近可用波形测站 <em>{autoSelectWaveformStation ? "开启" : "关闭"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={autoOpenWniMonitor} onChange={(event) => setAutoOpenWniMonitor(event.target.checked)} />自动打开 WNI / 实时监控 <em>{autoOpenWniMonitor ? "开启" : "关闭"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={showShakeDetectionGrid} onChange={(event) => setShowShakeDetectionGrid(event.target.checked)} />摇晃检知框与传播响应 <em>{showShakeDetectionGrid ? "显示" : "隐藏"}</em></label>
+              <label className="toggle-row"><input type="checkbox" checked={showLowestIntensityIcons} onChange={(event) => setShowLowestIntensityIcons(event.target.checked)} />显示震度0，烈度I图标 <em>{showLowestIntensityIcons ? "显示" : "隐藏"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={autoHypocenterEstimation} onChange={(event) => setAutoHypocenterEstimation(event.target.checked)} />自动震源推算 <em>{autoHypocenterEstimation ? "开启" : "关闭"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={keepLatestWarningVisible} onChange={(event) => setKeepLatestWarningVisible(event.target.checked)} />一直显示最新预警 <em>{keepLatestWarningVisible ? "保持" : "按时结束"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={showWniCameras} onChange={(event) => setShowWniCameras(event.target.checked)} />显示 WNI 摄像头图层 <em>{showWniCameras ? "显示" : "隐藏"}</em></label>
@@ -6304,6 +6310,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 showCwa={showCwaStations && !replayProductPresentationActive}
                 showGnss={showGnssStations && !replayProductPresentationActive}
                 showPalert={showPalertStations && !replayProductPresentationActive}
+                showLowestIntensityIcons={showLowestIntensityIcons}
                 selectedStation={selectedStation}
                 selectedEvent={mapEvent ?? null}
                 waveEvent={wavefrontEvent}
@@ -6348,6 +6355,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 wniCameras={visibleWniCameras}
                 highlightedWniCameraId={closestWniCamera?.camera.id ?? null}
                 detectionStationIds={mapDetectionStationIds}
+                weakDetectionStationIds={!replayEvent && showShakeDetectionGrid ? niedDetection.weakStationIds : EMPTY_STATION_IDS}
                 detectionRanks={mapDetectionRanks}
                 kmaDetectionStationIds={replayEvent
                   ? replayPropagationActive

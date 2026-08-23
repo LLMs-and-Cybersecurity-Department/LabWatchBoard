@@ -841,6 +841,8 @@ export type ShakeDetectionStatus = {
   network: "NIED" | "KMA-PEWS";
   detected: boolean;
   activeStationIds: string[];
+  /** Isolated or sub-threshold rises that have not formed a detection cluster. */
+  weakStationIds: string[];
   clusterCount: number;
   currentMaxLevel: number;
   currentMaxLabel: string;
@@ -1112,6 +1114,12 @@ export function palertPgaColor(pgaGal: number | null | undefined) {
     if (pgaGal >= item.minimum) return item.color;
   }
   return PALERT_PGA_LEGEND[0].color;
+}
+
+export function shouldShowStationValueIcon(scale: "intensity" | "shindo", rank: number, includeLowest: boolean) {
+  if (!Number.isFinite(rank)) return false;
+  if (scale === "shindo") return rank >= (includeLowest ? 0 : 0.5);
+  return rank >= (includeLowest ? 0.5 : 1.5);
 }
 
 const NIED_RAW_COLORS = [
@@ -2112,6 +2120,9 @@ export function updateNiedShakeDetection(
   });
 
   const active = state.stations.flatMap((station, index) => station.activeUntil > timestamp ? [index] : []);
+  const weak = state.stations.flatMap((station, index) => (
+    station.activeUntil <= timestamp && station.activity > 0 ? [index] : []
+  ));
   const currentMaxLevel = active.length ? Math.max(...active.map((index) => state.stations[index].activityLevel)) : -1;
   if (currentMaxLevel >= 8) state.qualifiedUntil = timestamp + 120_000;
   periodValues(state, currentMaxLevel, timestamp);
@@ -2129,6 +2140,7 @@ export function updateNiedShakeDetection(
       network: "NIED",
       detected: active.length > 0,
       activeStationIds: active.map((index) => stations[index].id),
+      weakStationIds: weak.map((index) => stations[index].id),
       clusterCount: clusters.length || (active.length ? 1 : 0),
       currentMaxLevel,
       currentMaxLabel: currentMaxLevel >= 0 ? niedLevelLabel(currentMaxLevel) : "未检知",
@@ -2210,6 +2222,7 @@ export function updateKmaPewsDetection(
       network: "KMA-PEWS",
       detected: active.length > 0,
       activeStationIds: active.map((index) => stations[index].id),
+      weakStationIds: [],
       clusterCount: clusters.length || (active.length ? 1 : 0),
       currentMaxLevel,
       currentMaxLabel: currentMmi >= 0 ? `MMI ${currentMmi.toFixed(1)}` : "未检知",
