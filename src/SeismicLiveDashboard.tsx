@@ -4255,38 +4255,42 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       : null;
   }, [institutionReports, selectedEvent]);
   const selectedReplayPresentationEntry = useMemo(() => {
-    const officialEntry = selectedReplayReportTimeline.find(({ report }) => (
+    if (selectedReplayInstitutionRecord
+      && (isShakeMapQueryable(selectedReplayInstitutionRecord) || isPagerQueryable(selectedReplayInstitutionRecord))) {
+      const productReport = institutionReportToLiveEew(selectedReplayInstitutionRecord);
+      if (productReport) {
+        const productIssuedAt = [replayUsgsShakeMap?.issuedAt, replayUsgsPager?.issuedAt]
+          .map((value) => Date.parse(value ?? ""))
+          .filter(Number.isFinite)
+          .sort((left, right) => left - right)[0];
+        const productOffsetSeconds = replayProductPresentationOffsetSeconds(
+          productReport.originTime,
+          Number.isFinite(productIssuedAt) ? new Date(productIssuedAt).toISOString() : null,
+        );
+        if (productOffsetSeconds !== null) {
+          return {
+            report: productReport,
+            offsetSeconds: productOffsetSeconds,
+          };
+        }
+      }
+    }
+    return selectedReplayReportTimeline.find(({ report }) => (
       Boolean(report.affectedAreas?.length)
       && (report.observedIntensity || report.relay === "Catalogue")
-    ));
-    if (officialEntry) return officialEntry;
-    if (!selectedReplayInstitutionRecord
-      || (!isShakeMapQueryable(selectedReplayInstitutionRecord) && !isPagerQueryable(selectedReplayInstitutionRecord))) return null;
-    const productReport = institutionReportToLiveEew(selectedReplayInstitutionRecord);
-    if (!productReport) return null;
-    const productIssuedAt = [replayUsgsShakeMap?.issuedAt, replayUsgsPager?.issuedAt]
-      .map((value) => Date.parse(value ?? ""))
-      .filter(Number.isFinite)
-      .sort((left, right) => left - right)[0];
-    const productOffsetSeconds = replayProductPresentationOffsetSeconds(
-      productReport.originTime,
-      Number.isFinite(productIssuedAt) ? new Date(productIssuedAt).toISOString() : null,
-    );
-    if (productOffsetSeconds !== null) {
-      return {
-        report: productReport,
-        offsetSeconds: productOffsetSeconds,
-      };
-    }
-    return selectedReplayReportTimeline.find(({ report }) => eewReportKey(report) === eewReportKey(productReport)) ?? null;
+    )) ?? null;
   }, [replayUsgsPager?.issuedAt, replayUsgsShakeMap?.issuedAt, selectedReplayInstitutionRecord, selectedReplayReportTimeline]);
   replayReportOffsetsRef.current = [...new Set([
-    ...selectedReplayReportTimeline.map(({ offsetSeconds }) => offsetSeconds),
+    ...selectedReplayReportTimeline.flatMap(({ report, offsetSeconds }) => (
+      report.relay === "Catalogue" && offsetSeconds > 300 ? [] : [offsetSeconds]
+    )),
     ...(selectedReplayPresentationEntry ? [selectedReplayPresentationEntry.offsetSeconds] : []),
   ])].sort((left, right) => left - right);
   const selectedReplayReportDurationSeconds = Math.max(
     300,
-    ...selectedReplayReportTimeline.map(({ offsetSeconds }) => Math.ceil(offsetSeconds) + 3),
+    ...selectedReplayReportTimeline.flatMap(({ report, offsetSeconds }) => (
+      report.relay === "Catalogue" && offsetSeconds > 300 ? [] : [Math.ceil(offsetSeconds) + 3]
+    )),
     selectedReplayPresentationEntry ? Math.ceil(selectedReplayPresentationEntry.offsetSeconds) + 3 : 0,
   );
   const selectedInstitutionRecord = useMemo(() => {
