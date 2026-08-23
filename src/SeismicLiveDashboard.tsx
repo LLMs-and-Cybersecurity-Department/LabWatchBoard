@@ -96,6 +96,7 @@ import {
   niedLevelRank,
   niedSoundCueForRise,
   niedSoundIndex,
+  niedProStationDisplayColor,
   niedStationDisplayColor,
   normalizeCencIntensityDetail,
   normalizeCencIntensityList,
@@ -282,6 +283,7 @@ type MonitorWidgetDockMap = Record<MonitorWidgetId, MonitorDock>;
 type ReplaySpeed = 1 | 10 | 60 | 300;
 type SourceState = "connecting" | "unconfigured" | "online" | "stale" | "error";
 type SnetViewMode = "measured" | "simulation";
+type NiedStationStyle = "srev" | "pro";
 type StationSelectionReason = "manual" | "nied-auto" | "waveform-auto";
 type SelectableStation = SeismicStation | KmaStation | OceanStation | CencIntensityStation | GlobalSeismicStation | PalertStation;
 type MapFocusTarget = {
@@ -2012,14 +2014,14 @@ const PalertStationLayer = memo(function PalertStationLayer(props: {
   return <Pane name="seismic-station-base-palert" style={{ zIndex: 458 }}>{props.show ? <StationCanvasLayer paneName="seismic-station-base-palert" points={points} /> : null}</Pane>;
 });
 
-const NiedStationBaseLayer = memo(function NiedStationBaseLayer(props: { stations: SeismicStation[]; show: boolean }) {
+const NiedStationBaseLayer = memo(function NiedStationBaseLayer(props: { stations: SeismicStation[]; show: boolean; style: NiedStationStyle }) {
   const points = useMemo<StationCanvasPoint[]>(() => props.stations.map((station) => ({
     latitude: station.latitude,
     longitude: station.longitude,
     color: "#1447e6",
-    radius: 2.05,
-    opacity: 0.78,
-  })), [props.stations]);
+    radius: props.style === "pro" ? 1.8 : 2.05,
+    opacity: props.style === "pro" ? 0.96 : 0.78,
+  })), [props.stations, props.style]);
   return <Pane name="seismic-station-base-nied" style={{ zIndex: 460 }}>{props.show && <StationCanvasLayer paneName="seismic-station-base-nied" points={points} />}</Pane>;
 });
 
@@ -2124,6 +2126,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   palertContourUrl: string | null;
   palertContourOpacity: number;
   stationStyle: StationDisplayStyle;
+  niedStationStyle: NiedStationStyle;
   cencReport: CencIntensityReport | null;
   cwaOfficialLayer: CwaIntensityLayer | null;
   niedFrame: NiedRealtimeFrame | null;
@@ -2663,7 +2666,7 @@ const SeismicMap = memo(function SeismicMap(props: {
       <WaveformStationBaseLayer stations={props.waveformStations} maxMarkers={baseStationBudget} verifiedStationIds={props.verifiedWaveformStationIds} style={props.stationStyle} show={!props.replayMode && props.showWaveform && layerComplexity >= 3 && baseLayerStage >= 2} onSelectStation={props.onSelectStation} />
       <OceanStationBaseLayer stations={props.oceanStations} showSnet={props.showOcean && layerComplexity >= 3 && baseLayerStage >= 3} showOther={props.showOtherOcean && layerComplexity >= 4 && baseLayerStage >= 3} onSelectStation={props.onSelectStation} />
       <KmaStationBaseLayer stations={props.kmaStations} show={props.showKma && layerComplexity >= 4 && baseLayerStage >= 4} onSelectStation={props.onSelectStation} />
-      <NiedStationBaseLayer stations={props.niedStations} show={props.showNied} />
+      <NiedStationBaseLayer stations={props.niedStations} show={props.showNied} style={props.niedStationStyle} />
       <Pane name="seismic-waveform-response-pane" className="seismic-waveform-response-pane" style={{ zIndex: 471 }}>
         {layerComplexity >= 3 && (props.showGlobal || props.showWaveform) && <>
           <StationCanvasLayer paneName="seismic-waveform-response-pane" points={globalResponsePoints} />
@@ -2699,10 +2702,20 @@ const SeismicMap = memo(function SeismicMap(props: {
           const weak = weakDetectionStationSet.has(station.id);
           const responding = detected || weak;
           const activeRank = responding ? props.detectionRanks[station.id] ?? rank : null;
-          const color = niedStationDisplayColor(props.replayRanks === null ? level : 0, activeRank);
+          const proStyle = props.niedStationStyle === "pro";
+          const proRank = responding ? activeRank ?? rank : rank > 0 ? rank : null;
+          const color = proStyle
+            ? niedProStationDisplayColor(proRank, weak)
+            : niedStationDisplayColor(props.replayRanks === null ? level : 0, activeRank);
           const selected = props.selectedStation?.id === station.id;
+          const radius = proStyle
+            ? selected ? 5.5 : detected ? 3.2 : weak ? 2.7 : rank >= 1 ? 3 : 2.4
+            : selected ? 6 : detected ? 4.4 : weak ? 3.9 : rank >= 1 ? 4 : 3.2;
+          const markerStyle = proStyle
+            ? { color: selected ? "#ffffff" : color, fillColor: color, weight: selected ? 1.8 : 0.55, opacity: 1, fillOpacity: 0.98 }
+            : { color: selected || responding ? "#ffffff" : color, fillColor: color, weight: selected ? 2.4 : detected ? 1.6 : weak ? 1.2 : 0.8, opacity: responding ? 1 : 0.94, fillOpacity: responding ? 1 : rank >= 1 ? 0.94 : 0.86 };
           return <Fragment key={`response:${station.id}`}>
-            <CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 6 : detected ? 4.4 : weak ? 3.9 : rank >= 1 ? 4 : 3.2} pathOptions={{ color: selected || responding ? "#ffffff" : color, fillColor: color, weight: selected ? 2.4 : detected ? 1.6 : weak ? 1.2 : 0.8, opacity: responding ? 1 : 0.94, fillOpacity: responding ? 1 : rank >= 1 ? 0.94 : 0.86 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
+            <CircleMarker center={[station.latitude, station.longitude]} radius={radius} pathOptions={markerStyle} eventHandlers={{ click: () => props.onSelectStation(station) }}>
               {selected && <Popup><strong>{station.stationName}</strong><br />{station.network} {station.stationCode}<br />{props.replayRanks === null ? `实时震度 ${niedLevelLabel(level)}` : `回放模拟震度 ${rank.toFixed(1)}`}</Popup>}
             </CircleMarker>
             {labeledStationIds.has(station.id) && <StationValueMarker latitude={station.latitude} longitude={station.longitude} rank={rank} scale="shindo" selected={selected} label={`${station.network} ${station.stationCode} 震度 ${jmaShindoLabel(rank)}`} />}
@@ -2791,6 +2804,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const monitorPointerCleanupRef = useRef<(() => void) | null>(null);
   const monitorDropTargetRef = useRef<MonitorDock>("left");
   const [showNied, setShowNied] = usePersistentState("seismic-show-nied", true);
+  const [storedNiedStationStyle, setNiedStationStyle] = usePersistentState<NiedStationStyle>("seismic-nied-station-style", "srev");
   const [showKma, setShowKma] = usePersistentState("seismic-show-kma", true);
   const [showOcean, setShowOcean] = usePersistentState("seismic-show-ocean", true);
   const [showOtherOcean, setShowOtherOcean] = usePersistentState("seismic-show-other-ocean", false);
@@ -3073,6 +3087,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const normalizedMonitorWidgetDocks = normalizeMonitorWidgetDocks(monitorWidgetDocks, normalizedMonitorDock);
   const normalizedMonitorScale = clampMonitorScale(Number(monitorScale));
   const normalizedPalertContourOpacity = Math.max(0, Math.min(1, Number(palertContourOpacity) || 0));
+  const niedStationStyle: NiedStationStyle = storedNiedStationStyle === "pro" ? "pro" : "srev";
   const stationDisplayStyle = useMemo<StationDisplayStyle>(() => ({
     size: Math.max(1, Math.min(8, Number(stationMarkerSize) || 3)),
     shape: stationMarkerShape === "circle" ? "circle" : "triangle",
@@ -6422,6 +6437,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               <label className="seismic-layer-complexity seismic-monitor-scale-setting"><span><strong>监视组件大小</strong><output>{Math.round(normalizedMonitorScale * 100)}%</output></span><input type="range" min="65" max="160" step="5" value={Math.round(normalizedMonitorScale * 100)} aria-label="监视组件大小百分比" onChange={(event) => setMonitorScale(Number(event.target.value) / 100)} /><small>仅改变地图上监视卡片的等比例尺寸；悬停卡片 1 秒后可拖放。</small></label>
               <button className="seismic-settings-reset-scale" onClick={() => setMonitorScale(1)}>恢复组件大小为 100%</button>
               <section className="seismic-station-style-setting">
+                <header><strong>NIED 测站风格</strong><span>{niedStationStyle === "pro" ? "NIED Pro" : "SREV"}</span></header>
+                <label><span>配色与标记</span><select aria-label="NIED 测站风格" value={niedStationStyle} onChange={(event) => setNiedStationStyle(event.target.value as NiedStationStyle)}><option value="srev">SREV</option><option value="pro">NIED Pro</option></select></label>
+                <small>NIED Pro 使用全网深蓝小点、弱响应绿色与震度等级色；两种风格均由 Canvas 批量绘制。</small>
+              </section>
+              <section className="seismic-station-style-setting">
                 <header><strong>全球 / P-Alert 测站显示</strong><span>{stationDisplayStyle.shape === "triangle" ? "三角形" : "圆形"} · {Math.round(stationDisplayStyle.opacity * 100)}%</span></header>
                 <label><span>大小</span><input type="range" min="1" max="8" step="0.5" value={stationDisplayStyle.size} aria-label="全球测站图标大小" onChange={(event) => setStationMarkerSize(Number(event.target.value))} /><output>{stationDisplayStyle.size.toFixed(1)}</output></label>
                 <label><span>形状</span><select aria-label="全球测站图标形状" value={stationDisplayStyle.shape} onChange={(event) => setStationMarkerShape(event.target.value as SeismicStationShape)}><option value="triangle">三角形</option><option value="circle">圆形</option></select></label>
@@ -6488,6 +6508,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 palertContourUrl={palertContourUrl}
                 palertContourOpacity={normalizedPalertContourOpacity}
                 stationStyle={stationDisplayStyle}
+                niedStationStyle={niedStationStyle}
                 cencReport={showCenc ? cencReport : null}
                 cwaOfficialLayer={cwaOfficialLayer}
                 niedFrame={mapDetectionStationIds.length ? niedFrame : null}

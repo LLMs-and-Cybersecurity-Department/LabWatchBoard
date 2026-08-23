@@ -34,6 +34,7 @@ import {
   niedLevelLabel,
   niedSoundCueForRise,
   niedSoundIndex,
+  niedProStationDisplayColor,
   niedStationDisplayColor,
   isLiveEewActive,
   isRelatedEewReport,
@@ -378,6 +379,14 @@ describe("seismic client calculations", () => {
     expect(niedStationDisplayColor(0, 0)).toBe("#31f049");
     expect(niedStationDisplayColor(10, 2)).toBe("#38bdf8");
     expect(niedStationDisplayColor(14, 4)).toBe("#facc15");
+  });
+
+  it("uses the NIED Pro blue-idle, green-weak, and graded response palette", () => {
+    expect(niedProStationDisplayColor(null)).toBe("#1447e6");
+    expect(niedProStationDisplayColor(0, true)).toBe("#20df54");
+    expect(niedProStationDisplayColor(1)).toBe("#47c7aa");
+    expect(niedProStationDisplayColor(4)).toBe("#d8cf65");
+    expect(niedProStationDisplayColor(7)).toBe("#942a86");
   });
 
   it("plays SREV NIED audio only when the maximum intensity rises", () => {

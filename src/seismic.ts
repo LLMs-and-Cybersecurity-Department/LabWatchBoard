@@ -1239,6 +1239,27 @@ export function niedStationDisplayColor(rawLevel: number, activeRank: number | n
   return NIED_RAW_COLORS[index];
 }
 
+const NIED_PRO_COLORS = [
+  "#20df54", "#47c7aa", "#b8e3b4", "#d8ddc4", "#d8cf65",
+  "#d88d32", "#d15331", "#c43a3c", "#8f2030", "#942a86",
+] as const;
+
+/** NIED Pro's compact map palette: idle stations stay blue and every weak
+ * response becomes green before the official JMA intensity colors take over. */
+export function niedProStationDisplayColor(activeRank: number | null, weak = false) {
+  if (activeRank === null) return "#1447e6";
+  if (weak || activeRank < 0.5) return NIED_PRO_COLORS[0];
+  if (activeRank < 1.5) return NIED_PRO_COLORS[1];
+  if (activeRank < 2.5) return NIED_PRO_COLORS[2];
+  if (activeRank < 3.5) return NIED_PRO_COLORS[3];
+  if (activeRank < 4.5) return NIED_PRO_COLORS[4];
+  if (activeRank < 5.25) return NIED_PRO_COLORS[5];
+  if (activeRank < 5.75) return NIED_PRO_COLORS[6];
+  if (activeRank < 6.25) return NIED_PRO_COLORS[7];
+  if (activeRank < 6.75) return NIED_PRO_COLORS[8];
+  return NIED_PRO_COLORS[9];
+}
+
 export function niedGridColor(maxRank: number): NiedDetectionGridCell["color"] {
   if (maxRank >= 4) return "red";
   if (maxRank >= 2) return "yellow";
