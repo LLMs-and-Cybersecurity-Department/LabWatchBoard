@@ -222,6 +222,7 @@ import {
 import { usePersistentState } from "./usePersistentState";
 import type { Station } from "./types";
 import { FdsnWaveformPanel } from "./FdsnWaveformPanel";
+import { StationRollingRecorderPanel } from "./StationRollingRecorderPanel";
 import { FocalMechanismDialog } from "./FocalMechanismDialog";
 import { CwaProductsDialog, type CwaIntensityLayer } from "./CwaProductsDialog";
 import { UsgsDyfiDialog } from "./UsgsDyfiDialog";
@@ -5416,6 +5417,8 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       ? Date.parse(niedFrame?.dataTime ?? "")
       : isKmaStation(selectedStation)
         ? kmaSampleTime
+        : isPalertStation(selectedStation)
+          ? Date.parse(palertRealtime?.dataTime ?? palertRealtime?.fetchedAt ?? "")
         : latestEvent
           ? clock
           : 0;
@@ -5426,10 +5429,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
         ? `JMA ${selectedRank}`
         : isKmaStation(selectedStation)
           ? `MMI ${selectedRank.toFixed(1)}`
+          : isPalertStation(selectedStation)
+            ? `${palertDisplayMetric.toUpperCase()} ${selectedRank.toFixed(palertDisplayMetric === "pgv" ? 5 : 6)} ${palertDisplayMetric === "pgv" ? "cm/s" : "gal"}`
           : `本地预测 ${selectedRank.toFixed(1)}`;
       return [...current, { timestamp, value: selectedRank, label }].slice(-HISTORY_LIMIT);
     });
-  }, [clock, displayedOceanMode, kmaSampleTime, latestEvent, niedFrame?.dataTime, replayEvent, selectedRank, selectedStation]);
+  }, [clock, displayedOceanMode, kmaSampleTime, latestEvent, niedFrame?.dataTime, palertDisplayMetric, palertRealtime?.dataTime, palertRealtime?.fetchedAt, replayEvent, selectedRank, selectedStation]);
 
   const replayStationHistoryProfile = useMemo(() => {
     if (!replayEvent || !selectedStation || isCencStation(selectedStation) || isPalertStation(selectedStation)) return null;
@@ -6843,13 +6848,23 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               autoPlayLabel={selectedWaveformAutoPlayLabel}
               onPrevious={verifiedWaveformStations.length > 1 ? focusPreviousVerifiedWaveformStation : undefined}
               onNext={verifiedWaveformStations.length > 1 ? focusNextVerifiedWaveformStation : undefined}
-            /> : <section className="seismic-station-rolling-panel" aria-live="polite">
-              <header><div><Activity size={14} /><span><strong>测站滚动</strong><small>{selectedStation ? `${selectedStation.network} ${selectedStation.stationCode}` : "未选择测站"}</small></span></div><b className={stationSelectionReason === "nied-auto" ? "auto" : ""}>{stationSelectionReason === "nied-auto" ? "NIED 自动选站" : rollingSampleMode}</b></header>
-              <div className="seismic-station-rolling-content">
-                <div className="seismic-station-rolling-chart">{rollingHistory.length ? <ResponsiveContainer width="100%" height="100%"><LineChart data={rollingHistory}><CartesianGrid stroke="#2b3539" vertical={false} /><XAxis dataKey="timestamp" type="number" domain={["dataMin", "dataMax"]} hide /><YAxis domain={[selectedStation && isOceanStation(selectedStation) && displayedOceanMode === "measured" ? -3 : 0, selectedStation && (isKmaStation(selectedStation) || isCencStation(selectedStation) || isGlobalStation(selectedStation) && !isCwaStation(selectedStation)) ? 12 : 7]} hide /><Tooltip labelFormatter={(value) => formatTime(Number(value))} contentStyle={{ background: "#111719", border: "1px solid #364247", borderRadius: 4 }} /><Line type="stepAfter" dataKey="value" name="强度" stroke="#f59e0b" strokeWidth={2} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer> : <div className="seismic-rolling-empty"><Waves size={20} /><span>{selectedStation && isCencStation(selectedStation) ? "该报告只有单次仪器烈度" : replayEvent ? "推进回放后显示" : "等待所选测站采样"}</span></div>}</div>
-                <div className="seismic-station-rolling-values">{rollingHistory.slice(-4).reverse().map((sample) => <div key={sample.timestamp}><time>{formatTime(sample.timestamp).slice(-8)}</time><span>{sample.label}</span><strong style={{ color: selectedStation && (isKmaStation(selectedStation) || isCencStation(selectedStation) || isGlobalStation(selectedStation) && !isCwaStation(selectedStation)) ? mmiIntensityColor(sample.value) : jmaShindoColor(sample.value) }}>{sample.value.toFixed(1)}</strong></div>)}</div>
-              </div>
-            </section>}
+              rollingHistory={rollingHistory}
+              rollingSampleMode={rollingSampleMode}
+              rollingYDomain={[0, 12]}
+              rollingValueColor={mmiIntensityColor}
+              rollingEmptyText={replayEvent ? "推进回放后显示" : "等待实时 FDSN 测站响应"}
+              selectionAutomatic={stationSelectionReason !== "manual"}
+            /> : <StationRollingRecorderPanel
+              station={selectedStation ? { id: selectedStation.id, network: selectedStation.network, stationCode: selectedStation.stationCode } : null}
+              history={rollingHistory}
+              sampleMode={rollingSampleMode}
+              selectionAutomatic={stationSelectionReason === "nied-auto"}
+              emptyText={selectedStation && isCencStation(selectedStation) ? "该报告只有单次仪器烈度" : replayEvent ? "推进回放后显示" : selectedStation && isPalertStation(selectedStation) ? "等待 P-Alert 官方实时帧" : "等待所选测站采样"}
+              valueScale={selectedStation && isPalertStation(selectedStation) ? palertDisplayMetric === "pgv" ? "palert-pgv" : "palert-pga" : selectedStation && (isKmaStation(selectedStation) || isCencStation(selectedStation)) ? "mmi" : "shindo"}
+              valueDigits={selectedStation && isPalertStation(selectedStation) ? palertDisplayMetric === "pgv" ? 5 : 6 : selectedStation && isOceanStation(selectedStation) ? 2 : 1}
+              valueUnit={selectedStation && isPalertStation(selectedStation) ? palertDisplayMetric === "pgv" ? "cm/s" : "gal" : selectedStation && (isKmaStation(selectedStation) || isCencStation(selectedStation)) ? "MMI" : "JMA shindo"}
+              yDomain={selectedStation && isPalertStation(selectedStation) ? [0, palertDisplayMetric === "pgv" ? 140 : 800] : [selectedStation && isOceanStation(selectedStation) && displayedOceanMode === "measured" ? -3 : 0, selectedStation && (isKmaStation(selectedStation) || isCencStation(selectedStation)) ? 12 : 7]}
+            />}
           </aside>
         </section>
 

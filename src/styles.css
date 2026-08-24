@@ -6470,7 +6470,7 @@ body.seismic-monitor-moving * {
 .seismic-station-rolling-panel {
   min-height: 0;
   display: grid;
-  grid-template-rows: 42px minmax(0, 1fr);
+  grid-template-rows: 42px 34px minmax(0, 1fr);
   border-top: 1px solid var(--line);
   background: #0d1315;
 }
@@ -6501,6 +6501,87 @@ body.seismic-monitor-moving * {
 .seismic-station-rolling-panel > header small { margin-top: 2px; color: var(--muted); font-size: 7px; }
 .seismic-station-rolling-panel > header b { max-width: 145px; overflow: hidden; color: #9baba8; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
 .seismic-station-rolling-panel > header b.auto { color: #facc15; }
+
+.station-recorder-controls {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(94px, 1fr) auto minmax(58px, auto);
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border-bottom: 1px solid #263135;
+  background: #0d1416;
+}
+
+.station-recorder-controls label {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+  color: #8fa09d;
+  font-size: 7px;
+}
+
+.station-recorder-controls select,
+.station-recorder-controls button {
+  height: 26px;
+  border: 1px solid #344044;
+  border-radius: 4px;
+  background: #0c1315;
+  color: #dce6e4;
+  font-size: 8px;
+}
+
+.station-recorder-controls select {
+  min-width: 0;
+  width: 100%;
+  padding: 0 3px;
+}
+
+.station-recorder-transport {
+  display: grid;
+  grid-template-columns: repeat(4, 27px);
+  gap: 3px;
+}
+
+.station-recorder-transport button {
+  width: 27px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.station-recorder-transport button.active {
+  border-color: #b66b09;
+  background: #d98512;
+  color: #101315;
+}
+
+.station-recorder-transport button:disabled {
+  color: #4e5b5f;
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.station-recorder-controls output {
+  min-width: 0;
+  overflow: hidden;
+  color: #8fa09d;
+  font-size: 7px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.station-recorder-controls output.recording { color: #4ade80; }
+.station-recorder-controls output.paused { color: #facc15; }
+.station-recorder-controls output.stopped { color: #f6b554; }
+
+.station-recorder-unavailable {
+  min-height: 0;
+  padding: 18px;
+}
 
 .seismic-station-rolling-content {
   min-height: 0;
@@ -6635,7 +6716,7 @@ body.seismic-monitor-moving * {
 .fdsn-waveform-panel {
   min-height: 0;
   display: grid;
-  grid-template-rows: 42px minmax(0, 1fr);
+  grid-template-rows: 42px 34px minmax(0, 1fr);
   border-top: 1px solid var(--line);
   background: #0b1113;
 }
@@ -6664,6 +6745,8 @@ body.seismic-monitor-moving * {
 .fdsn-waveform-panel > header small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fdsn-waveform-panel > header strong { font-size: 9px; }
 .fdsn-waveform-panel > header small { margin-top: 2px; color: var(--muted); font-size: 7px; }
+.fdsn-waveform-panel > header > b { max-width: 145px; overflow: hidden; color: #9baba8; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.fdsn-waveform-panel > header > b.auto { color: #facc15; }
 
 .fdsn-waveform-actions {
   flex: 0 0 auto;
@@ -6731,12 +6814,12 @@ body.seismic-monitor-moving * {
 .fdsn-waveform-error { color: #fca5a5; }
 .fdsn-waveform-error button { height: 27px; padding: 0 10px; border-color: #7f1d1d; background: #2a1114; color: #fecaca; }
 
-.fdsn-waveform-panel:has(.fdsn-waveform-transport) {
-  grid-template-rows: 42px 31px minmax(0, 1fr) 24px;
+.fdsn-waveform-panel.waveform:has(.fdsn-waveform-transport) {
+  grid-template-rows: 42px 34px 31px minmax(0, 1fr) 24px;
 }
 
-.fdsn-waveform-panel:has(.fdsn-waveform-autoplay) {
-  grid-template-rows: 42px 24px 31px minmax(0, 1fr) 24px;
+.fdsn-waveform-panel.waveform:has(.fdsn-waveform-autoplay) {
+  grid-template-rows: 42px 34px 24px 31px minmax(0, 1fr) 24px;
 }
 
 .fdsn-waveform-transport {
