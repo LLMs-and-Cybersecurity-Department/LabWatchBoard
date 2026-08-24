@@ -101,7 +101,10 @@ macOS、Windows、Linux 与 Android 的安装包构建、签名变量和源码�
 | `GLOBALQUAKE_FEED_TOKEN` | 空 | GlobalQuake Feed Bearer Token，仅由服务端读取 |
 | `EXTERNAL_WARNING_TIMEOUT_MS` | `12000` | Early-est / GlobalQuake 单次授权 Feed 请求超时 |
 | `EXTERNAL_WARNING_CACHE_TTL_MS` | `3000` | 授权预警 Feed 内存缓存有效期 |
-| `CENC_HTTP_PROXY_URL` | 空 | 仅 CENC 产品请求使用的 HTTP/HTTPS 代理；本机 Clash 等代理可填 `http://127.0.0.1:7893` |
+| `CENC_HTTP_PROXY_URL` | 空 | CENC 产品页、NSTI 回退页及实时 WebSocket 共用的 HTTP/mixed 代理；本机 Clash 等代理可填 `http://127.0.0.1:7893` |
+| `CENC_WEBSOCKET_PROXY_URL` | 回退 `CENC_HTTP_PROXY_URL` | FAN Studio CENC 实时 WebSocket 专用 HTTP/mixed 代理；通常无需单独配置 |
+| `FANSTUDIO_APP_ID` | 空 | FAN Studio 开发者平台分配的应用 ID，仅由服务端用于 CENC 实时烈度鉴权 |
+| `FANSTUDIO_API_KEY` | 空 | 与应用 ID 配套的 API Key，仅由服务端读取，不会发送给浏览器 |
 | `CENC_EGRESS_PROXY_URL` | 空 | CENC 产品页服务端出口转发地址；配置后 pBoard 以 `?url=` 传递目标 URL，适用于你有权限使用的中国境内 HTTPS 转发服务 |
 | `CENC_PRODUCT_TIMEOUT_MS` | `18000` | CENC 产品请求超时 |
 | `CENC_PRODUCT_CACHE_TTL_MS` | `300000` | CENC 产品页内存缓存有效期 |
@@ -114,13 +117,23 @@ CENC 地震专题页通过同源 `/api/seismic/cenc-products` 读取。该接口
 
 国家地震科学数据中心（NSTI）强震动参数页由 `/api/seismic/cenc-intensity` 后端读取。配置 `NSTI_HTTP_PROXY_URL=http://127.0.0.1:7893` 后，列表页和坐标导出请求均经本机 7893；界面会显示“NSTI 7893 HTTP 代理”。普通会员的“五级以上/全球七级以上”订阅按照官方用户手册以邮件更新提醒为主，不会自动变成可供第三方服务轮询的实时 API；pBoard 只读取公开强震动页面，不读取邮箱，也不会伪造订阅报文。若需读取授权账户内容，应通过 NSTI 官方账号/数据服务申请并由服务端单独配置授权凭据。
 
+FAN Studio 已将 CENC 实时烈度查询迁移到 `wss://ws.fanstudio.tech/all`，查询 `cencirlist` 前必须发送服务端鉴权消息。先在 [FAN Studio API Key 申请平台](https://api.fanstudio.tech/dev-platform/) 创建应用并取得 `appId` 与 `key`，再配置：
+
+```dotenv
+FANSTUDIO_APP_ID=你的应用ID
+FANSTUDIO_API_KEY=你的密钥
+CENC_HTTP_PROXY_URL=http://127.0.0.1:7893
+```
+
+密钥只存在于 Node 服务端；浏览器只接收归一化后的烈度报告。未配置或鉴权失败时，界面会明确显示“实时源待 API Key”，并把国家地震科学数据中心公开页标为延迟数据，不再把旧报告冒充实时速报。
+
 在 macOS 上使用本机 7893 代理时，将下面一行加入 `.env.local`，然后重启 `pnpm start`：
 
 ```dotenv
 CENC_HTTP_PROXY_URL=http://127.0.0.1:7893
 ```
 
-这只给 CENC 后端请求设置 HTTP 代理，不会修改系统代理、TUN 或其他数据源；7893 必须确实是 HTTP/mixed 代理端口。若端口是 SOCKS5，请先提供 HTTP 转发端口。也可以改用你有权限使用的 HTTPS 转发服务，例如 `CENC_EGRESS_PROXY_URL=https://your-relay.example/cenc`，服务需接受 `?url=<CENC URL>`。pBoard 不会伪造中国 IP、绕过验证码或绕过访问控制。
+这只给 CENC 后端 HTTP 与 WebSocket 请求设置代理，不会修改系统代理、TUN 或其他数据源；7893 必须确实是 HTTP/mixed 代理端口。若 WebSocket 需要不同出口，可单独设置 `CENC_WEBSOCKET_PROXY_URL`。也可以改用你有权限使用的 HTTPS 转发服务，例如 `CENC_EGRESS_PROXY_URL=https://your-relay.example/cenc`，服务需接受 `?url=<CENC URL>`。pBoard 不会伪造中国 IP、绕过验证码或绕过访问控制。
 
 NSTI 与 CENC 可共用同一个 7893 出口，但配置项分开，便于分别停用或排查：
 

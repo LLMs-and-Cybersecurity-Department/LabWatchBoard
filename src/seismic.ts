@@ -200,11 +200,17 @@ export type CencIntensityReport = CencIntensitySummary & {
 };
 
 export type CencIntensityRelaySnapshot = {
-  provider: "FAN CENC-IR 后端中继" | "国家地震科学数据中心强震动参数";
+  provider: string;
   fetchedAt: string;
   state: "connecting" | "online" | "stale" | "error";
   endpoint: string;
   officialEgressMode: "direct" | "http-proxy" | "config-error";
+  webSocketEgressMode: "direct" | "http-proxy" | "config-error";
+  authRequired: boolean;
+  authState: "not-configured" | "pending" | "authenticated" | "failed";
+  credentialsConfigured: boolean;
+  latestReportAt: string | null;
+  latestReportAgeMs: number | null;
   latencyMs: number | null;
   lastGoodAt: number | null;
   cache: "LIVE" | "PERSISTED" | "EMPTY";

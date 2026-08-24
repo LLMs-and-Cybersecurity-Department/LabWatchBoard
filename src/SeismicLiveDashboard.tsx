@@ -2956,6 +2956,10 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [cencLatency, setCencLatency] = useState<number | null>(null);
   const [cencProvider, setCencProvider] = useState("CENC 后端聚合");
   const [cencOfficialEgressMode, setCencOfficialEgressMode] = useState<"direct" | "http-proxy" | "config-error">("direct");
+  const [cencWebSocketEgressMode, setCencWebSocketEgressMode] = useState<"direct" | "http-proxy" | "config-error">("direct");
+  const [cencAuthRequired, setCencAuthRequired] = useState(false);
+  const [cencSourceError, setCencSourceError] = useState("");
+  const [cencLatestReportAt, setCencLatestReportAt] = useState<string | null>(null);
   const [eews, setEews] = useState<LiveEew[]>([]);
   const [eewHistory, setEewHistory] = usePersistentState<LiveEew[]>("seismic-eew-history", []);
   const [warningSourceFilter, setWarningSourceFilter] = usePersistentState<WarningSourceFilter>("seismic-warning-source-filter", "ALL");
@@ -4188,6 +4192,10 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
         if (!active) return;
         setCencProvider(snapshot.provider);
         setCencOfficialEgressMode(snapshot.officialEgressMode);
+        setCencWebSocketEgressMode(snapshot.webSocketEgressMode);
+        setCencAuthRequired(snapshot.authRequired);
+        setCencSourceError(snapshot.error ?? "");
+        setCencLatestReportAt(snapshot.latestReportAt);
         const reports = normalizeCencIntensityList(snapshot.listEnvelope);
         if (reports.length) {
           hasCachedData = true;
@@ -6192,7 +6200,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               <SourceIndicator label="INGV Early-est 授权源" state={earlyEstState} latency={earlyEstLatency} />
               <SourceIndicator label="GlobalQuake 授权源" state={globalQuakeState} latency={globalQuakeLatency} />
               <SourceIndicator label="JMA 海啸预报 code 552" state={jmaTsunamiState} latency={jmaTsunamiLatency} />
-              <SourceIndicator label={`CENC 烈度多源后端${cencOfficialEgressMode === "http-proxy" ? " · NSTI 7893" : cencOfficialEgressMode === "config-error" ? " · 代理配置错误" : ""}`} state={cencState} latency={cencLatency} />
+              <SourceIndicator label={`CENC 烈度多源后端${cencAuthRequired ? " · 实时源待 API Key" : ""}${cencWebSocketEgressMode === "http-proxy" ? " · WSS 7893" : cencWebSocketEgressMode === "config-error" ? " · WSS 代理错误" : ""}${cencOfficialEgressMode === "http-proxy" ? " · NSTI 7893" : cencOfficialEgressMode === "config-error" ? " · NSTI 代理错误" : ""}`} state={cencState} latency={cencLatency} />
               <SourceIndicator label="MSIL S-net 实测历史" state={snetState} latency={snetSnapshot?.latencyMs ?? null} />
               <SourceIndicator label="CWA 进阶会员官方报告 · 3 秒缓存" state={cwaOfficialState} latency={cwaOfficialLatency} />
               <SourceIndicator label="CWA 海啸资讯 E-A0014 · 30 秒" state={cwaTsunamiState} latency={cwaTsunamiLatency} />
@@ -6784,7 +6792,8 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               )}
 
               {panelTab === "intensity" && <>
-                <header className="seismic-section-heading"><div><strong>CENC 仪器烈度分布</strong><span>公开 24 列坐标导出 + 实时中继合并 · {cencProvider} · NSTI {cencOfficialEgressMode === "http-proxy" ? "7893 HTTP 代理" : cencOfficialEgressMode === "config-error" ? "代理配置错误" : "直连"}</span></div><b className={cencState === "online" ? "online" : ""}>{cencState === "online" ? "在线" : cencState === "stale" ? "缓存 · 重连中" : cencState === "error" ? "中断 · 重试中" : "连接中"}</b></header>
+                <header className="seismic-section-heading"><div><strong>CENC 仪器烈度分布</strong><span>公开 24 列坐标导出 + 实时中继合并 · {cencProvider} · WSS {cencWebSocketEgressMode === "http-proxy" ? "7893 HTTP 代理" : cencWebSocketEgressMode === "config-error" ? "代理配置错误" : "直连"} · NSTI {cencOfficialEgressMode === "http-proxy" ? "7893 HTTP 代理" : cencOfficialEgressMode === "config-error" ? "代理配置错误" : "直连"}</span></div><b className={cencState === "online" ? "online" : ""}>{cencAuthRequired ? "需 API Key" : cencState === "online" ? "在线" : cencState === "stale" ? "延迟数据" : cencState === "error" ? "中断 · 重试中" : "连接中"}</b></header>
+                {cencAuthRequired && <p className="seismic-source-error">{cencSourceError || "FAN Studio 新 CENC 实时源需要服务端 API Key。"}{cencLatestReportAt ? ` 当前国家地震科学数据中心公开页最新报告为 ${formatTime(cencLatestReportAt)}，不会再标成实时。` : ""} <a href="https://api.fanstudio.tech/dev-platform/" target="_blank" rel="noreferrer">申请 FAN Studio API Key</a>，然后在 .env.local 配置 FANSTUDIO_APP_ID 与 FANSTUDIO_API_KEY。</p>}
                 <div className="seismic-cenc-picker"><select value={selectedCencId ?? ""} onChange={(event) => chooseCencReport(event.target.value)} disabled={!cencReports.length}><option value="">等待烈度报告</option>{cencReports.map((report) => <option key={report.id} value={report.id}>{formatTime(report.originTime)} · {report.place} M{report.magnitude?.toFixed(1) ?? "--"}</option>)}</select><button title="在地图定位报告" aria-label="在地图定位报告" disabled={!selectedCencId} onClick={() => selectedCencId && chooseCencReport(selectedCencId)}><LocateFixed size={16} /></button></div>
                 {cencReport && cencReport.id === selectedCencId ? <>
                   <h3>{cencReport.place}</h3>
