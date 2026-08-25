@@ -105,6 +105,7 @@ import {
   normalizeWolfxEew,
   prepareReplayStationResponse,
   replayNiedSoundIndex,
+  resolveShakeDetectionSession,
   selectAutoLocatedGlobalEvent,
   selectAutoLocatedGlobalEvents,
   shakeDetectionPresentationForTransition,
@@ -164,6 +165,7 @@ import {
   type SnetIntensitySnapshot,
   type SeismicStation,
   type ShakeDetectionStatus,
+  type ShakeDetectionSession,
   type ShakeDetectorState,
   type StationSample,
   type TriggerObservation,
@@ -3139,6 +3141,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [verifiedWaveformStations, setVerifiedWaveformStations] = useState<FdsnStationDistance[]>([]);
   const [waveformProbeState, setWaveformProbeState] = useState<"idle" | "probing" | "ready" | "unavailable">("idle");
   const [waveformProbeAttempt, setWaveformProbeAttempt] = useState(0);
+  const [detectionWaveformProbeAttempt, setDetectionWaveformProbeAttempt] = useState(0);
   const [waveformAutoPlayKey, setWaveformAutoPlayKey] = useState<string | null>(null);
   const [autoGlobalEventKey, setAutoGlobalEventKey] = useState<string | null>(null);
   const [movieCameraEventKey, setMovieCameraEventKey] = useState<string | null>(null);
@@ -3149,6 +3152,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [triggers, setTriggers] = useState<TriggerObservation[]>([]);
   const [niedDetection, setNiedDetection] = useState(() => blankDetection("NIED"));
   const [kmaDetection, setKmaDetection] = useState(() => blankDetection("KMA-PEWS"));
+  const [liveDetectionWaveformSession, setLiveDetectionWaveformSession] = useState<ShakeDetectionSession | null>(null);
   const [replaySeconds, setReplaySeconds] = useState(-DEFAULT_REPLAY_PRE_ROLL_SECONDS);
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayProductPresentation, setReplayProductPresentation] = useState<{
@@ -3222,7 +3226,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const niedAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const niedAudioBuffersRef = useRef(new Map<SeismicSoundAssetId, AudioBuffer>());
   const autoNiedSelectionSession = useRef<string | null>(null);
-  const manualStationSelection = useRef<{ eventKey: string | null; stationId: string } | null>(null);
+  const manualStationSelection = useRef<{ scopeKey: string | null; stationId: string } | null>(null);
   const autoWaveformSelection = useRef<{ eventKey: string; stationId: string; distanceKm: number } | null>(null);
   const autoNiedWaveformSelection = useRef<{ sessionKey: string; stationId: string; mode: "inside" | "nearest" } | null>(null);
   const niedWaveformProbeSession = useRef<string | null>(null);
@@ -5435,16 +5439,19 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   }, [cwaTsunami, jmaTsunamiSoundEnabled, playSoundAsset, replayEvent]);
 
   const focusStation = useCallback((station: SelectableStation, reason: StationSelectionReason = "manual") => {
-    if (reason !== "manual" && manualStationSelection.current?.eventKey === eventStationKey) return;
-    if (reason === "manual") manualStationSelection.current = { eventKey: eventStationKey, stationId: station.id };
+    const scopeKey = liveDetectionWaveformSession?.key ?? eventStationKey;
+    if (reason !== "manual" && manualStationSelection.current?.scopeKey === scopeKey) return;
+    if (reason === "manual") manualStationSelection.current = { scopeKey, stationId: station.id };
     setSelectedStationId(station.id);
     setSelectedGlobalStation(isGlobalStation(station) ? station : null);
     setStationSelectionReason(reason);
     setPanelTab("station");
-    if (!(reason === "waveform-auto" && replayModeActiveRef.current)) {
+    const movieCameraLocked = reason !== "manual" && movieModeEnabled
+      && (movieCameraMode !== "auto" || !autoLocateGlobalEarthquakes);
+    if (!movieCameraLocked && !(reason === "waveform-auto" && replayModeActiveRef.current)) {
       focusMap(`station:${station.id}`, station.latitude, station.longitude, isCencStation(station) ? 9 : isGlobalStation(station) ? Math.max(6, mapViewportZoomRef.current) : 7);
     }
-  }, [eventStationKey, focusMap, setPanelTab]);
+  }, [autoLocateGlobalEarthquakes, eventStationKey, focusMap, liveDetectionWaveformSession?.key, movieCameraMode, movieModeEnabled, setPanelTab]);
 
   const choosePalertEvent = useCallback((event: PalertEvent) => {
     setSelectedPalertEvent(event);
@@ -5812,6 +5819,24 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     liveDetectionPresentationState.current = visibleByNetwork;
     liveDetectionAutoLocateAllowed.current = autoLocateAllowed;
 
+    const strongestRisingNetwork = [...risingNetworks].sort((a, b) => {
+      const level = (network: ShakeDetectionStatus["network"]) => (
+        network === "NIED" ? niedDetection.currentMaxLevel : kmaDetection.currentMaxLevel
+      );
+      return level(b) - level(a);
+    })[0] ?? null;
+    if (strongestRisingNetwork) manualStationSelection.current = null;
+    const detectionSessionVisibility = replayModeActive
+      ? { NIED: false, "KMA-PEWS": false } as const
+      : visibleByNetwork;
+    const nextDetectionSession = resolveShakeDetectionSession(
+      liveDetectionWaveformSession,
+      detectionSessionVisibility,
+      strongestRisingNetwork,
+      { NIED: niedDetection.updatedAt, "KMA-PEWS": kmaDetection.updatedAt },
+    );
+    if (nextDetectionSession !== liveDetectionWaveformSession) setLiveDetectionWaveformSession(nextDetectionSession);
+
     if (risingNetworks.length && (seismicAlertSoundEnabled || niedSoundEnabled)) void playSoundAsset("srev-caution");
 
     if (!autoLocateNetworks.length) return;
@@ -5835,6 +5860,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     autoLocateGlobalEarthquakes,
     focusMap,
     kmaDetection,
+    liveDetectionWaveformSession,
     movieCameraMode,
     movieModeEnabled,
     niedDetection,
@@ -6269,16 +6295,30 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const snetSimulationActiveCount = snetStations.filter((station) => (visibleOceanSimulation?.ranks[station.id] ?? 0) >= 0.25).length;
   const snetSimulationMaxRank = Math.max(0, ...snetStations.map((station) => visibleOceanSimulation?.ranks[station.id] ?? 0));
   const niedWaveformCandidates = useMemo(() => {
-    if (!mapDetectionSelectionActive || !mapDetectionStationIds.length || !catalogue?.stations.length) return [];
-    const activeIds = new Set(mapDetectionStationIds);
-    const strongest = catalogue.stations
+    const detectionStations = replayEvent || liveDetectionWaveformSession?.network !== "KMA-PEWS"
+      ? catalogue?.stations ?? []
+      : kmaStations;
+    const detectionStationIds = replayEvent || liveDetectionWaveformSession?.network !== "KMA-PEWS"
+      ? mapDetectionStationIds
+      : kmaDetection.activeStationIds;
+    const detectionRanks = replayEvent || liveDetectionWaveformSession?.network !== "KMA-PEWS"
+      ? mapDetectionRanks
+      : liveKmaDetectionRanks;
+    const selectionActive = replayEvent
+      ? mapDetectionSelectionActive
+      : liveDetectionWaveformSession?.network === "KMA-PEWS"
+        ? kmaDetection.detected
+        : mapDetectionSelectionActive;
+    if (!selectionActive || !detectionStationIds.length || !detectionStations.length) return [];
+    const activeIds = new Set(detectionStationIds);
+    const strongest = detectionStations
       .filter((station) => activeIds.has(station.id))
-      .sort((a, b) => (mapDetectionRanks[b.id] ?? 0) - (mapDetectionRanks[a.id] ?? 0))[0];
+      .sort((a, b) => (detectionRanks[b.id] ?? 0) - (detectionRanks[a.id] ?? 0))[0];
     if (!strongest) return [];
     const cells = buildNiedDetectionGridCells(
-      catalogue.stations,
-      mapDetectionStationIds,
-      mapDetectionRanks,
+      detectionStations,
+      detectionStationIds,
+      detectionRanks,
       niedGridAnchor(strongest),
     );
     return rankNiedWaveformCandidates(
@@ -6286,18 +6326,23 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       cells,
       strongest.latitude,
       strongest.longitude,
-      waveformEventTime,
+      replayEvent ? waveformEventTime : null,
     );
-  }, [catalogue, mapDetectionRanks, mapDetectionSelectionActive, mapDetectionStationIds, waveformEventTime, waveformFdsnStations]);
+  }, [catalogue, kmaDetection, kmaStations, liveDetectionWaveformSession?.network, liveKmaDetectionRanks, mapDetectionRanks, mapDetectionSelectionActive, mapDetectionStationIds, replayEvent, waveformEventTime, waveformFdsnStations]);
   const niedWaveformCandidateKey = niedWaveformCandidates
     .slice(0, 30)
     .map((candidate) => `${candidate.mode}:${candidate.station.id}`)
     .join("|");
   const niedWaveformCandidatesRef = useRef(niedWaveformCandidates);
   niedWaveformCandidatesRef.current = niedWaveformCandidates;
-  const niedWaveformSessionKey = mapDetectionSelectionActive && mapDetectionStationIds.length
-    ? replayEvent ? `replay:${eewReportKey(replayEvent)}` : "live"
-    : null;
+  const niedWaveformSessionKey = replayEvent
+    ? mapDetectionSelectionActive && mapDetectionStationIds.length ? `replay:${eewReportKey(replayEvent)}` : null
+    : liveDetectionWaveformSession?.network === "KMA-PEWS"
+      ? kmaDetection.detected && kmaDetection.activeStationIds.length ? liveDetectionWaveformSession.key : null
+      : liveDetectionWaveformSession?.network === "NIED" && mapDetectionSelectionActive && mapDetectionStationIds.length
+        ? liveDetectionWaveformSession.key
+        : null;
+  const detectionWaveformEventTime = replayEvent ? waveformEventTime : null;
   const hasNiedWaveformCandidates = Boolean(niedWaveformCandidateKey);
 
   useEffect(() => {
@@ -6309,13 +6354,20 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     if (!niedWaveformSessionKey) {
       autoNiedWaveformSelection.current = null;
       niedWaveformProbeSession.current = null;
-      if (waveformAutoPlayKey?.startsWith("nied:")) setWaveformAutoPlayKey(null);
+      if (waveformAutoPlayKey?.startsWith("detection:")) setWaveformAutoPlayKey(null);
+      setWaveformProbeState(eventStationKey ? "probing" : "idle");
       return;
     }
     if (niedWaveformProbeSession.current === niedWaveformSessionKey || !hasNiedWaveformCandidates) return;
     niedWaveformProbeSession.current = niedWaveformSessionKey;
     const controller = new AbortController();
     let active = true;
+    let retryTimer: number | undefined;
+    if (autoNiedWaveformSelection.current?.sessionKey !== niedWaveformSessionKey) {
+      autoNiedWaveformSelection.current = null;
+      setVerifiedWaveformStations([]);
+    }
+    setWaveformProbeState("probing");
     const run = async () => {
       const candidates = niedWaveformCandidatesRef.current;
       const inside = candidates.filter((candidate) => candidate.mode === "inside").slice(0, 12);
@@ -6329,7 +6381,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               const available = await probeFdsnWaveform(
                 candidate.station,
                 5,
-                waveformEventTime,
+                detectionWaveformEventTime,
                 controller.signal,
               );
               return available ? candidate : null;
@@ -6342,7 +6394,16 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
         }
         if (selected) break;
       }
-      if (!active || !selected) return;
+      if (!active) return;
+      if (!selected) {
+        setWaveformProbeState("unavailable");
+        retryTimer = window.setTimeout(() => {
+          if (!active) return;
+          niedWaveformProbeSession.current = null;
+          setDetectionWaveformProbeAttempt((attempt) => attempt + 1);
+        }, 15_000);
+        return;
+      }
       autoNiedWaveformSelection.current = {
         sessionKey: niedWaveformSessionKey,
         stationId: selected.station.id,
@@ -6355,7 +6416,8 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       ].sort((a, b) => a.distanceKm - b.distanceKm));
       setShowWaveformStations(true);
       focusStation(selected.station, "waveform-auto");
-      setWaveformAutoPlayKey(`nied:${selected.mode}:${niedWaveformSessionKey}:${selected.station.id}`);
+      setWaveformAutoPlayKey(`detection:${liveDetectionWaveformSession?.network ?? "NIED"}:${selected.mode}:${niedWaveformSessionKey}:${selected.station.id}`);
+      setWaveformProbeState("ready");
     };
     void run().catch((error) => {
       if (!active || error instanceof DOMException && error.name === "AbortError") return;
@@ -6364,37 +6426,35 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     return () => {
       active = false;
       controller.abort();
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
-  }, [autoSelectWaveformStation, focusStation, hasNiedWaveformCandidates, niedWaveformSessionKey, setShowWaveformStations, waveformAutoPlayKey, waveformEventTime]);
+  }, [autoSelectWaveformStation, detectionWaveformEventTime, detectionWaveformProbeAttempt, focusStation, hasNiedWaveformCandidates, liveDetectionWaveformSession?.network, niedWaveformSessionKey, setShowWaveformStations, waveformAutoPlayKey]);
 
   useEffect(() => {
     if (!autoSelectWaveformStation) {
       autoNiedSelectionSession.current = null;
       return;
     }
-    const sessionKey = replayEvent ? `replay:${eewReportKey(replayEvent)}` : "live";
+    const sessionKey = niedWaveformSessionKey;
+    if (!sessionKey) {
+      autoNiedSelectionSession.current = null;
+      return;
+    }
     if (autoNiedWaveformSelection.current?.sessionKey === sessionKey
       && autoNiedWaveformSelection.current.stationId) {
       autoNiedSelectionSession.current = sessionKey;
       return;
     }
-    if (eventStationKey && autoWaveformSelection.current?.eventKey === eventStationKey && verifiedWaveformStations.length) {
-      autoNiedSelectionSession.current = null;
-      return;
-    }
-    if (!mapDetectionSelectionActive || !mapDetectionStationIds.length) {
+    if (!liveDetectionWaveformSession && eventStationKey && autoWaveformSelection.current?.eventKey === eventStationKey && verifiedWaveformStations.length) {
       autoNiedSelectionSession.current = null;
       return;
     }
     if (autoNiedSelectionSession.current === sessionKey) return;
-    const activeIds = new Set(mapDetectionStationIds);
-    const strongest = [...(catalogue?.stations ?? [])]
-      .filter((station) => activeIds.has(station.id))
-      .sort((a, b) => (mapDetectionRanks[b.id] ?? 0) - (mapDetectionRanks[a.id] ?? 0))[0];
+    const strongest = strongestDetectionStation(liveDetectionWaveformSession?.network ?? "NIED");
     if (!strongest) return;
     autoNiedSelectionSession.current = sessionKey;
     focusStation(strongest, "nied-auto");
-  }, [autoSelectWaveformStation, catalogue, eventStationKey, focusStation, mapDetectionRanks, mapDetectionSelectionActive, mapDetectionStationIds, replayEvent, verifiedWaveformStations.length]);
+  }, [autoSelectWaveformStation, eventStationKey, focusStation, liveDetectionWaveformSession?.network, niedWaveformSessionKey, replayEvent, strongestDetectionStation, verifiedWaveformStations.length]);
 
   const focusReplayDetection = () => {
     const activeStationSet = new Set(replaySimulation?.activeStationIds ?? []);
@@ -6540,11 +6600,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       || autoWaveformSelection.current?.stationId === selectedStation.id)
     ? waveformAutoPlayKey
     : null;
-  const selectedWaveformAutoPlayLabel = selectedWaveformAutoPlayKey?.startsWith("nied:nearest:")
-    ? "NIED 框内无可用波形 · 最近站已切换，从预计 P 波到时滚动"
-    : selectedWaveformAutoPlayKey?.startsWith("nied:inside:")
-      ? "NIED 框内波形站联动 · 已从预计 P 波到时开始滚动"
+  const selectedWaveformAutoPlayLabel = selectedWaveformAutoPlayKey?.includes(":inside:")
+    ? "检知框内波形站联动 · 已自动开始实时滚动"
+    : selectedWaveformAutoPlayKey?.includes(":nearest:")
+      ? "检知框附近波形站联动 · 已自动开始实时滚动"
       : "自动选站联动 · 已自动开始波形滚动";
+  const selectedWaveformEventTime = selectedWaveformAutoPlayKey?.startsWith("detection:") ? null : waveformEventTime;
   const monitorWidgetContent: Record<MonitorWidgetId, ReactNode> = {
     tsunami: showJmaTsunami && displayedJmaTsunami?.active ? <section className={`jma-tsunami-alert ${displayedJmaTsunami.state}`} aria-live="assertive">
       <header><AlertTriangle size={16} /><strong>JMA · {displayedJmaTsunami.title}</strong><em>{replayEvent ? "REPLAY" : "LIVE"}</em></header>
@@ -7291,7 +7352,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
             </div>
             {selectedStation && isGlobalStation(selectedStation) && !isCwaStation(selectedStation) ? <FdsnWaveformPanel
               station={selectedStation}
-              eventTime={waveformEventTime}
+              eventTime={selectedWaveformEventTime}
               verifiedIndex={verifiedWaveformIndex}
               verifiedCount={verifiedWaveformStations.length}
               distanceKm={selectedWaveformDistance}

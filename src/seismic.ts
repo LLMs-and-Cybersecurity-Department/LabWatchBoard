@@ -957,6 +957,33 @@ export type ShakeDetectionPresentation = {
   autoLocate: boolean;
 };
 
+export type ShakeDetectionSession = {
+  key: string;
+  network: ShakeDetectionStatus["network"];
+  startedAt: number;
+};
+
+/**
+ * Keep one stable session while a detection frame remains visible, and mint a
+ * new key only on a genuine detection edge. This prevents async waveform
+ * probes from being reused across separate live detections or restarted for
+ * every incoming intensity frame.
+ */
+export function resolveShakeDetectionSession(
+  current: ShakeDetectionSession | null,
+  visible: Record<ShakeDetectionStatus["network"], boolean>,
+  risingNetwork: ShakeDetectionStatus["network"] | null,
+  updatedAt: Record<ShakeDetectionStatus["network"], number>,
+): ShakeDetectionSession | null {
+  const network = risingNetwork
+    ?? (current && visible[current.network] ? current.network : null)
+    ?? (visible.NIED ? "NIED" : visible["KMA-PEWS"] ? "KMA-PEWS" : null);
+  if (!network) return null;
+  if (!risingNetwork && current?.network === network) return current;
+  const startedAt = updatedAt[network] || Date.now();
+  return { key: `live:${network}:${startedAt}`, network, startedAt };
+}
+
 /**
  * A visible live detection frame is an event edge, not a continuously firing
  * state. Always acknowledge a newly displayed frame, but leave the camera

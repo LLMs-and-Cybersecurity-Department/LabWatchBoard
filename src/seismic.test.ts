@@ -51,6 +51,7 @@ import {
   palertPgvColor,
   prepareReplayStationResponse,
   replayNiedSoundIndex,
+  resolveShakeDetectionSession,
   selectAutoLocatedGlobalEvent,
   selectAutoLocatedGlobalEvents,
   shakeDetectionPresentationForTransition,
@@ -1259,6 +1260,55 @@ describe("seismic client calculations", () => {
     const detected = updateKmaPewsDetection(state, stations, [2, 2, 2, 2, 2], 51_000, neighbors);
     expect(detected.status.detected).toBe(true);
     expect(detected.status.currentMaxLabel).toBe("MMI 2.0");
+  });
+
+  it("creates one stable waveform-search session per live detection edge", () => {
+    const first = resolveShakeDetectionSession(
+      null,
+      { NIED: true, "KMA-PEWS": false },
+      "NIED",
+      { NIED: 1_000, "KMA-PEWS": 0 },
+    );
+    const steady = resolveShakeDetectionSession(
+      first,
+      { NIED: true, "KMA-PEWS": false },
+      null,
+      { NIED: 2_000, "KMA-PEWS": 0 },
+    );
+    const cleared = resolveShakeDetectionSession(
+      steady,
+      { NIED: false, "KMA-PEWS": false },
+      null,
+      { NIED: 3_000, "KMA-PEWS": 0 },
+    );
+    const second = resolveShakeDetectionSession(
+      cleared,
+      { NIED: true, "KMA-PEWS": false },
+      "NIED",
+      { NIED: 4_000, "KMA-PEWS": 0 },
+    );
+
+    expect(first?.key).toBe("live:NIED:1000");
+    expect(steady).toBe(first);
+    expect(cleared).toBeNull();
+    expect(second?.key).toBe("live:NIED:4000");
+  });
+
+  it("switches the waveform-search session when KMA raises a new detection", () => {
+    const nied = resolveShakeDetectionSession(
+      null,
+      { NIED: true, "KMA-PEWS": false },
+      "NIED",
+      { NIED: 1_000, "KMA-PEWS": 0 },
+    );
+    const kma = resolveShakeDetectionSession(
+      nied,
+      { NIED: true, "KMA-PEWS": true },
+      "KMA-PEWS",
+      { NIED: 2_000, "KMA-PEWS": 2_500 },
+    );
+
+    expect(kma).toEqual({ key: "live:KMA-PEWS:2500", network: "KMA-PEWS", startedAt: 2_500 });
   });
 
   it("normalizes FAN CENC intensity reports and measured station details", () => {
