@@ -106,6 +106,7 @@ import {
   prepareReplayStationResponse,
   replayNiedSoundIndex,
   resolveShakeDetectionSession,
+  snetStationDisplayColor,
   selectAutoLocatedGlobalEvent,
   selectAutoLocatedGlobalEvents,
   shakeDetectionPresentationForTransition,
@@ -491,6 +492,7 @@ const NIED_GRID_COLORS = {
 const EMPTY_NUMBERS: number[] = [];
 const EMPTY_STATION_IDS: string[] = [];
 const EMPTY_RANKS: Record<string, number> = {};
+const EMPTY_COLORS: Record<string, string> = {};
 const EMPTY_IMPACT_REGIONS: JmaRegionCollection = { type: "FeatureCollection", features: [] };
 
 const NIED_SOUND_CUES: Record<NiedSoundCue, SeismicSoundAssetId> = NIED_SOUND_ASSETS;
@@ -558,6 +560,7 @@ const HYPOCENTER_ICON_URLS = {
 } as const;
 
 const stationValueIconCache = new Map<string, LeafletIcon>();
+const snetStationValueIconCache = new Map<string, LeafletIcon>();
 const pagerCityIconCache = new Map<number, LeafletIcon>();
 const hypocenterIconCache = new Map<keyof typeof HYPOCENTER_ICON_URLS, LeafletIcon>();
 
@@ -625,6 +628,48 @@ const StationValueMarker = memo(function StationValueMarker(props: {
   return <Marker
     position={[props.latitude, props.longitude]}
     icon={stationValueMapIcon(props.scale, props.rank, props.selected)}
+    interactive={false}
+    keyboard={false}
+    bubblingMouseEvents={false}
+    alt={props.label}
+  />;
+});
+
+function snetStationValueMapIcon(rank: number, selected = false) {
+  const value = Number.isFinite(rank) ? rank : 0;
+  const preciseLabel = value.toFixed(2);
+  const shindoLabel = jmaShindoLabel(value);
+  const cacheKey = `${preciseLabel}:${selected ? "selected" : "normal"}`;
+  const cached = snetStationValueIconCache.get(cacheKey);
+  if (cached) return cached;
+  if (snetStationValueIconCache.size > 512) snetStationValueIconCache.clear();
+  const badgeColor = value < 0.5 ? "#626570" : value < 1.5 ? "#198fc0" : snetStationDisplayColor(value);
+  const width = selected ? 70 : 64;
+  const height = selected ? 30 : 28;
+  const center = height / 2;
+  const radius = selected ? 13 : 12;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect x="${center}" y="4" width="${width - center - 1}" height="${height - 8}" rx="${(height - 8) / 2}" fill="#0b1114" fill-opacity=".88" stroke="#6b7379" stroke-width="1"/><circle cx="${center}" cy="${center}" r="${radius}" fill="${badgeColor}" stroke="#f8fafc" stroke-opacity=".74" stroke-width="1.5"/><text x="${center}" y="${center + 4}" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="11" font-weight="800">${shindoLabel}</text><text x="${center + radius + 5}" y="${center + 3.5}" fill="#f8fafc" font-family="ui-monospace,monospace" font-size="9" font-weight="700">${preciseLabel}</text></svg>`;
+  const icon = createLeafletIcon({
+    iconUrl: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    iconRetinaUrl: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    iconSize: [width, height],
+    iconAnchor: [center, center],
+    className: "seismic-snet-value-icon",
+  });
+  snetStationValueIconCache.set(cacheKey, icon);
+  return icon;
+}
+
+const SnetStationValueMarker = memo(function SnetStationValueMarker(props: {
+  latitude: number;
+  longitude: number;
+  rank: number;
+  selected?: boolean;
+  label: string;
+}) {
+  return <Marker
+    position={[props.latitude, props.longitude]}
+    icon={snetStationValueMapIcon(props.rank, props.selected)}
     interactive={false}
     keyboard={false}
     bubblingMouseEvents={false}
@@ -1527,11 +1572,12 @@ const JshisFaultPointCloud = memo(function JshisFaultPointCloud(props: {
 
   useEffect(() => {
     if (!normalizedPositions.length) return undefined;
-    const container = map.getContainer();
+    const pane = map.getPane("seismic-jshis-products");
+    if (!pane) return undefined;
     const canvas = document.createElement("canvas");
     canvas.className = "seismic-jshis-webgl-layer";
     canvas.setAttribute("aria-hidden", "true");
-    container.appendChild(canvas);
+    pane.appendChild(canvas);
 
     const gl = canvas.getContext("webgl", {
       alpha: true,
@@ -1603,6 +1649,8 @@ const JshisFaultPointCloud = memo(function JshisFaultPointCloud(props: {
         canvas.style.width = `${size.x}px`;
         canvas.style.height = `${size.y}px`;
       }
+      const topLeft = map.containerPointToLayerPoint([0, 0]);
+      canvas.style.transform = `translate3d(${topLeft.x}px, ${topLeft.y}px, 0)`;
       const origin = map.getPixelOrigin();
       const worldScale = 256 * 2 ** map.getZoom();
       if (gl && program && buffer) {
@@ -1638,12 +1686,14 @@ const JshisFaultPointCloud = memo(function JshisFaultPointCloud(props: {
     const scheduleDraw = () => {
       if (!frame) frame = window.requestAnimationFrame(draw);
     };
-    map.on("move zoom resize viewreset", scheduleDraw);
+    // The canvas lives inside Leaflet's map pane, so normal drag transforms it
+    // continuously. Redraw only after a settled view to avoid per-mousemove CPU.
+    map.on("moveend zoomend resize viewreset", scheduleDraw);
     scheduleDraw();
     return () => {
       disposed = true;
       if (frame) window.cancelAnimationFrame(frame);
-      map.off("move zoom resize viewreset", scheduleDraw);
+      map.off("moveend zoomend resize viewreset", scheduleDraw);
       if (gl) {
         if (buffer) gl.deleteBuffer(buffer);
         if (program) gl.deleteProgram(program);
@@ -2261,6 +2311,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   showGnss: boolean;
   showPalert: boolean;
   showLowestIntensityIcons: boolean;
+  showSnetStationValues: boolean;
   selectedStation: SelectableStation | null;
   selectedEvent: LiveEew | null;
   waveEvent: LiveEew | null;
@@ -2272,6 +2323,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   replayRanks: Record<string, number> | null;
   replayMode: boolean;
   oceanRanks: Record<string, number>;
+  oceanColors: Record<string, string>;
   globalRanks: Record<string, number>;
   globalArrivedStationIds: string[];
   gnssRanks: Record<string, number>;
@@ -2518,13 +2570,13 @@ const SeismicMap = memo(function SeismicMap(props: {
       .map((station) => station.id),
   ), [displayedKmaResponses, props.kmaReplayRanks, props.kmaValues, props.showLowestIntensityIcons, responseLabelBudget]);
   const labeledOceanStationIds = useMemo(() => new Set(
-    [...displayedOceanResponses]
+    props.showSnetStationValues ? [...displayedOceanResponses]
       .filter((station) => props.oceanMode === "measured"
         ? Object.prototype.hasOwnProperty.call(props.oceanRanks, station.id)
         : (props.oceanRanks[station.id] ?? 0) >= 1)
       .slice(0, responseLabelBudget)
-      .map((station) => station.id),
-  ), [displayedOceanResponses, props.oceanMode, props.oceanRanks, responseLabelBudget]);
+      .map((station) => station.id) : [],
+  ), [displayedOceanResponses, props.oceanMode, props.oceanRanks, props.showSnetStationValues, responseLabelBudget]);
   /* The canvas layers below retain the complete response sets. These small,
    * stable SVG subsets exist only for hit targets, popups and a few labels. */
   const liveGlobalSelectionStations = useMemo(() => [
@@ -2572,6 +2624,21 @@ const SeismicMap = memo(function SeismicMap(props: {
         strokeWidth: 1,
       };
     }), [props.cwaRanks, props.cwaStations, props.cwaArrivedStationIds, responseBudget]);
+  const oceanResponsePoints = useMemo<StationCanvasPoint[]>(() => respondingOceanStations
+    .filter((station) => station.network === "S-net" ? props.showOcean : props.showOtherOcean)
+    .map((station) => {
+      const rank = props.oceanRanks[station.id] ?? 0;
+      const measured = props.oceanMode === "measured" && Object.prototype.hasOwnProperty.call(props.oceanRanks, station.id);
+      return {
+        latitude: station.latitude,
+        longitude: station.longitude,
+        color: station.network === "S-net"
+          ? props.oceanColors[station.id] ?? snetStationDisplayColor(rank)
+          : rank >= 0.25 ? intensityColor(rank) : oceanStationBaseColor(station.network),
+        radius: measured ? 3.55 : rank >= 0.25 ? 3.8 : 3.1,
+        opacity: measured ? 0.98 : 0.92,
+      };
+    }), [props.oceanColors, props.oceanMode, props.oceanRanks, props.showOcean, props.showOtherOcean, respondingOceanStations]);
   const selectableHitStations = useMemo(() => {
     if (props.interactionMode !== "select") return [];
     const stations = new Map<string, SelectableStation>();
@@ -2826,6 +2893,7 @@ const SeismicMap = memo(function SeismicMap(props: {
       </Pane>
       <Pane name="seismic-station-response-pane" style={{ zIndex: 470 }}>
         {layerComplexity >= 2 && props.showCwa && <StationCanvasLayer paneName="seismic-station-response-pane" points={cwaResponsePoints} />}
+        {layerComplexity >= 3 && oceanResponsePoints.length > 0 && <StationCanvasLayer paneName="seismic-station-response-pane" points={oceanResponsePoints} />}
         {layerComplexity >= 4 && props.showGnss && <GnssResponseMarkers stations={props.gnssStations} ranks={props.gnssRanks} mode={props.gnssMode} maxLabels={responseLabelBudget} sessionKey={props.detectionSessionKey} showLowestIntensityIcons={props.showLowestIntensityIcons} />}
         {layerComplexity >= 2 && props.showCwa && displayedCwaResponses.map((station) => {
           const selected = props.selectedStation?.id === station.id;
@@ -2888,12 +2956,13 @@ const SeismicMap = memo(function SeismicMap(props: {
           const rank = props.oceanRanks[station.id] ?? 0;
           const measured = props.oceanMode === "measured" && Object.prototype.hasOwnProperty.call(props.oceanRanks, station.id);
           const active = rank >= (measured ? 0.5 : 0.25);
-          const color = measured ? intensityColor(Math.max(0, rank)) : active ? intensityColor(rank) : oceanStationBaseColor(station.network);
           const sampleLabel = props.oceanMode === "replay" ? "回放模拟震度" : props.oceanMode === "measured" ? "MSIL 实测色值反算震度" : props.oceanMode === "local" ? "本地预测震度" : "等待数据";
-          return <CircleMarker key={`response:${station.id}`} center={[station.latitude, station.longitude]} radius={selected ? 6 : active ? 4.3 : 3.2} pathOptions={{ color: "#ffffff", fillColor: color, weight: selected ? 2.2 : 1.5, fillOpacity: active ? 0.96 : 0.82 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
+          return <Fragment key={`response:${station.id}`}>
+            <CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 6 : 5} pathOptions={{ color: "#ffffff", fillColor: "#ffffff", weight: selected ? 2.2 : 0, opacity: selected ? 1 : 0, fillOpacity: 0.001 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
             {selected && <Popup><strong>{station.network} {station.stationCode}</strong><br />海底深度 {station.depthM.toFixed(0)} m<br />{sampleLabel} {rank.toFixed(2)} [{displayRankLabel(rank)}]<br /><a href={station.waveformUrl} target="_blank" rel="noreferrer">查看官方延迟波形</a></Popup>}
-            {labeledOceanStationIds.has(station.id) && (measured || active) && <LeafletTooltip permanent direction="right" offset={[10, 0]} className="ocean-station-side-label">{rank.toFixed(2)} [{displayRankLabel(rank)}]</LeafletTooltip>}
-          </CircleMarker>;
+            </CircleMarker>
+            {labeledOceanStationIds.has(station.id) && (measured || active) && <SnetStationValueMarker latitude={station.latitude} longitude={station.longitude} rank={rank} selected={selected} label={`${station.network} ${station.stationCode} 震度 ${displayRankLabel(rank)} · ${rank.toFixed(2)}`} />}
+          </Fragment>;
         })}
         {layerComplexity >= 2 && props.showCenc && props.cencReport && <>
           <Marker position={[props.cencReport.latitude, props.cencReport.longitude]} icon={hypocenterMapIcon("catalogue")} zIndexOffset={1100} riseOnHover alt={`${props.cencReport.place} CENC 仪器烈度报告震中`}><Popup><strong>CENC 仪器烈度报告</strong><br />{props.cencReport.place}<br />M {props.cencReport.magnitude?.toFixed(1) ?? "--"} · {props.cencReport.stationMetrics.length} 站报告 / {props.cencReport.stations.length} 站有坐标</Popup></Marker>
@@ -2954,6 +3023,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [showKma, setShowKma] = usePersistentState("seismic-show-kma", true);
   const [showOcean, setShowOcean] = usePersistentState("seismic-show-ocean", true);
   const [showOtherOcean, setShowOtherOcean] = usePersistentState("seismic-show-other-ocean", false);
+  const [showSnetStationValues, setShowSnetStationValues] = usePersistentState("seismic-show-snet-station-values", true);
   const [showCenc, setShowCenc] = usePersistentState("seismic-show-cenc-intensity", true);
   const [showGlobalStations, setShowGlobalStations] = usePersistentState("seismic-show-global-fdsn", true);
   const [showWaveformStations, setShowWaveformStations] = usePersistentState("seismic-show-waveform-fdsn", true);
@@ -5150,6 +5220,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const snetMeasuredRanks = useMemo(() => Object.fromEntries(
     (snetMeasuredFrame?.stations ?? []).map((station) => [station.stationId, station.intensity]),
   ), [snetMeasuredFrame]);
+  const snetMeasuredColors = useMemo(() => Object.fromEntries(
+    (snetMeasuredFrame?.stations ?? []).map((station) => [
+      station.stationId,
+      snetStationDisplayColor(station.intensity, station.rgb),
+    ]),
+  ), [snetMeasuredFrame]);
   const displayedOceanRanks = replayEvent
     ? visibleOceanSimulation?.ranks ?? {}
     : snetViewMode === "measured" && snetMeasuredFrame
@@ -5160,6 +5236,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     : snetViewMode === "measured" && snetMeasuredFrame
       ? "measured"
       : oceanMode;
+  const displayedOceanColors = displayedOceanMode === "measured" ? snetMeasuredColors : EMPTY_COLORS;
   const liveDetectionRanks = useMemo(() => {
     const ranks: Record<string, number> = {};
     const activeIds = new Set(niedDetection.activeStationIds);
@@ -6949,6 +7026,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               <label className="toggle-row"><input type="checkbox" checked={autoOpenWniMonitor} onChange={(event) => setAutoOpenWniMonitor(event.target.checked)} />自动打开 WNI / 实时监控 <em>{autoOpenWniMonitor ? "开启" : "关闭"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={showShakeDetectionGrid} onChange={(event) => setShowShakeDetectionGrid(event.target.checked)} />摇晃检知框与传播响应 <em>{showShakeDetectionGrid ? "显示" : "隐藏"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={showLowestIntensityIcons} onChange={(event) => setShowLowestIntensityIcons(event.target.checked)} />显示震度0，烈度I图标 <em>{showLowestIntensityIcons ? "显示" : "隐藏"}</em></label>
+              <label className="toggle-row"><input type="checkbox" checked={showSnetStationValues} onChange={(event) => setShowSnetStationValues(event.target.checked)} />S-net 点旁震度数值 <em>{showSnetStationValues ? "SVG 显示" : "隐藏"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={autoHypocenterEstimation} onChange={(event) => setAutoHypocenterEstimation(event.target.checked)} />自动震源推算 <em>{autoHypocenterEstimation ? "开启" : "关闭"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={keepLatestWarningVisible} onChange={(event) => setKeepLatestWarningVisible(event.target.checked)} />一直显示最新预警 <em>{keepLatestWarningVisible ? "保持" : "按时结束"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={showTsunamiAlertPanel} onChange={(event) => { setShowTsunamiAlertPanel(event.target.checked); if (event.target.checked) setDismissedTsunamiPanelKey(null); }} />海啸警报分区面板 <em>{showTsunamiAlertPanel ? "自动弹出" : "关闭"}</em></label>
@@ -7069,6 +7147,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 showGnss={showGnssStations && !replayProductPresentationActive}
                 showPalert={showPalertStations && !replayProductPresentationActive}
                 showLowestIntensityIcons={showLowestIntensityIcons}
+                showSnetStationValues={showSnetStationValues}
                 selectedStation={selectedStation}
                 selectedEvent={mapEvent ?? null}
                 waveEvent={tsunamiSimulation ? null : wavefrontEvent}
@@ -7080,6 +7159,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 replayRanks={replayEvent ? visibleReplaySimulation?.ranks ?? EMPTY_RANKS : null}
                 replayMode={Boolean(replayEvent)}
                 oceanRanks={displayedOceanRanks}
+                oceanColors={displayedOceanColors}
                 globalRanks={visibleGlobalSimulation?.ranks ?? EMPTY_RANKS}
                 globalArrivedStationIds={visibleGlobalSimulation?.arrivedStationIds ?? EMPTY_STATION_IDS}
                 gnssRanks={gnssSimulation?.ranks ?? EMPTY_RANKS}
@@ -7278,7 +7358,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                     <dl className="earthquake-detail-list"><div><dt>地址</dt><dd>{selectedStation.address || "--"}</dd></div><div><dt>坐标</dt><dd>{selectedStation.latitude.toFixed(4)}, {selectedStation.longitude.toFixed(4)}</dd></div><div><dt>震中距</dt><dd>{selectedStation.distanceKm?.toFixed(2) ?? "--"} km</dd></div><div><dt>PGA / PGV 烈度</dt><dd>{selectedStation.pgaIntensity?.toFixed(1) ?? "--"} / {selectedStation.pgvIntensity?.toFixed(1) ?? "--"}</dd></div><div><dt>场地</dt><dd>{selectedStation.site || "--"}</dd></div></dl>
                     <p className="seismic-data-label">这里显示 CENC 烈度报告中接口返回的仪器测站数据，没有根据震中反推或插值。</p>
                   </> : isOceanStation(selectedStation) ? <>
-                    <header className="seismic-station-heading"><span style={{ background: intensityColor(Math.max(0, selectedRank ?? 0)) }} /><div><strong>{selectedStation.network} {selectedStation.stationCode}</strong><small>NIED 海底地震观测网</small></div><b>{displayedOceanMode === "measured" ? `实测反算震度 ${jmaShindoLabel(selectedRank ?? 0)} · ${(selectedRank ?? 0).toFixed(2)}` : oceanMode === "replay" ? `模拟震度 ${jmaShindoLabel(selectedRank ?? 0)} · ${(selectedRank ?? 0).toFixed(2)}` : oceanMode === "local" ? `预测震度 ${jmaShindoLabel(selectedRank ?? 0)} · ${(selectedRank ?? 0).toFixed(2)}` : `${selectedStation.depthM.toFixed(0)} m`}</b></header>
+                    <header className="seismic-station-heading"><span style={{ background: displayedOceanColors[selectedStation.id] ?? snetStationDisplayColor(selectedRank ?? -3) }} /><div><strong>{selectedStation.network} {selectedStation.stationCode}</strong><small>NIED 海底地震观测网</small></div><b>{displayedOceanMode === "measured" ? `实测反算震度 ${jmaShindoLabel(selectedRank ?? 0)} · ${(selectedRank ?? 0).toFixed(2)}` : oceanMode === "replay" ? `模拟震度 ${jmaShindoLabel(selectedRank ?? 0)} · ${(selectedRank ?? 0).toFixed(2)}` : oceanMode === "local" ? `预测震度 ${jmaShindoLabel(selectedRank ?? 0)} · ${(selectedRank ?? 0).toFixed(2)}` : `${selectedStation.depthM.toFixed(0)} m`}</b></header>
                     <div className="seismic-gauge-grid"><article><Gauge size={18} /><span>{displayedOceanMode === "measured" ? "MSIL 色值反算" : oceanMode === "replay" ? "回放强度" : "本地预测"}</span><strong>{(selectedRank ?? 0).toFixed(2)}</strong><meter min="-3" max="7" value={selectedRank ?? 0} /></article><article><Activity size={18} /><span>PGA 经验换算</span><strong>{motion.pgaGal.toFixed(2)} gal</strong><meter min="0" max="1000" value={motion.pgaGal} /></article><article><Waves size={18} /><span>PGV 经验换算</span><strong>{motion.pgvCms.toFixed(2)} cm/s</strong><meter min="0" max="100" value={motion.pgvCms} /></article></div>
                     <dl className="earthquake-detail-list"><div><dt>坐标</dt><dd>{selectedStation.latitude.toFixed(4)}, {selectedStation.longitude.toFixed(4)}</dd></div><div><dt>海底深度</dt><dd>{selectedStation.depthM.toFixed(0)} m</dd></div><div><dt>当前样本</dt><dd>{displayedOceanMode === "measured" ? snetMeasuredFrame ? `${formatTime(snetMeasuredFrame.timestamp)} MSIL 观测帧` : "等待 MSIL 帧" : oceanMode === "replay" ? `${formatReplayClock(replaySeconds)} 回放` : oceanMode === "local" ? `T+${oceanResponseElapsed.toFixed(2)} s 本地预测` : "等待有效事件"}</dd></div><div><dt>数据性质</dt><dd>{displayedOceanMode === "measured" ? "海しる强震动观测瓦片色值反算" : "事件驱动确定性传播计算"}</dd></div></dl>
                     <a className="seismic-station-link" href={selectedStation.waveformUrl} target="_blank" rel="noreferrer">打开官方延迟波形<ExternalLink size={13} /></a>
@@ -7318,13 +7398,13 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                   <div className="seismic-snet-summary three"><div><span>{selectedSnetReport ? `${selectedSnetReport.source === "screenshot" ? "截图补录" : "MSIL"} 第 ${selectedSnetReport.reportNumber} 报` : selectedSnetEvent ? "MSIL 历史观测帧" : "MSIL 最新观测帧"}</span><strong>{selectedSnetReport ? formatTime(selectedSnetReport.observedAt) : snetMeasuredFrame ? formatTime(snetMeasuredFrame.timestamp) : "--"}</strong></div><div><span>最大连续震度</span><strong>{snetMeasuredFrame ? `${displayRankLabel(snetMeasuredFrame.maxIntensity)} · ${snetMeasuredFrame.maxIntensity.toFixed(2)}` : "-"}</strong></div><div><span>全部 / 震度 1 以上</span><strong>{snetMeasuredFrame ? `${snetMeasuredFrame.stations.length} / ${snetMeasuredFrame.activeStationCount}` : "0 / 0"} 站</strong></div></div>
                   <div className="seismic-snet-picker"><select aria-label="S-net 检知事件" value={selectedSnetEventId ?? "__live__"} onChange={(event) => chooseSnetEvent(event.target.value)} disabled={!snetSnapshot?.latestFrame}><option value="__live__">{snetSnapshot?.latestFrame ? `最新观测 ${formatTime(snetSnapshot.latestFrame.timestamp)} · 最大连续震度 ${snetSnapshot.latestFrame.maxIntensity.toFixed(2)}（微小值也显示）` : "等待最新观测"}</option>{snetSnapshot?.events.map((event) => <option key={event.id} value={event.id}>{formatTime(event.peakAt)} · {event.reportCount ?? event.reports?.length ?? 1} 报 · 最大震度 {displayRankLabel(event.maxIntensity)}{event.source === "screenshot" ? " · 截图补录" : ""}</option>)}</select><button title="定位最强 S-net 测站" aria-label="定位最强 S-net 测站" onClick={focusStrongestOceanResponse} disabled={!snetMeasuredRows.length}><LocateFixed size={16} /></button></div>
                   {selectedSnetEvent?.reports?.length ? <div className="seismic-snet-picker reports"><select aria-label="S-net 事件报次" value={selectedSnetReport?.id ?? ""} onChange={(event) => chooseSnetReport(event.target.value)}>{selectedSnetEvent.reports.map((report) => <option key={report.id} value={report.id}>第 {report.reportNumber} 报 · {formatTime(report.observedAt)} · 震度 {displayRankLabel(report.maxIntensity)} · {report.stationCount} 站{report.source === "screenshot" ? " · 补录" : ""}</option>)}</select></div> : null}
-                  {snetMeasuredRows.length ? <div className="seismic-snet-ranking measured">{snetMeasuredRows.map(({ station, rank }) => <button key={station.id} onClick={() => focusStation(station)}><span><i style={{ background: intensityColor(Math.max(0, rank)) }} /><strong>{station.stationCode}</strong></span><em>{rank.toFixed(2)} <small>[{displayRankLabel(rank)}]</small></em></button>)}</div> : <div className="seismic-snet-waiting"><Loader2 className={snetState === "connecting" ? "spin" : ""} size={18} /><span>{snetState === "error" ? "MSIL 暂不可用，保留已持久化历史并继续重试。" : "正在回补 MSIL 最近一小时 S-net 观测瓦片。"}</span></div>}
+                  {snetMeasuredRows.length ? <div className="seismic-snet-ranking measured">{snetMeasuredRows.map(({ station, rank }) => <button key={station.id} onClick={() => focusStation(station)}><span><i style={{ background: displayedOceanColors[station.id] ?? snetStationDisplayColor(rank) }} /><strong>{station.stationCode}</strong></span><em>{rank.toFixed(2)} <small>[{displayRankLabel(rank)}]</small></em></button>)}</div> : <div className="seismic-snet-waiting"><Loader2 className={snetState === "connecting" ? "spin" : ""} size={18} /><span>{snetState === "error" ? "MSIL 暂不可用，保留已持久化历史并继续重试。" : "正在回补 MSIL 最近一小时 S-net 观测瓦片。"}</span></div>}
                   {snetSnapshot?.events.length ? <div className="seismic-snet-history"><header><strong>检知历史</strong><span>同一连续震动为一个事件，事件内保留多报</span></header>{snetSnapshot.events.slice(0, 10).map((event) => <button key={event.id} className={selectedSnetEvent?.id === event.id ? "active" : ""} onClick={() => chooseSnetEvent(event.id)}><time>{formatTime(event.peakAt)}</time><span><b>震度 {displayRankLabel(event.maxIntensity)}</b><small>{event.reportCount ?? event.reports?.length ?? 1} 报 · {event.stationCount} 站 · {event.frameCount} 帧</small></span><em className={event.active ? "live" : ""}>{event.source === "screenshot" ? "截图补录" : event.active ? "进行中" : "结束"}</em></button>)}</div> : null}
                   <JapanMiniMap regions={jmaRegions} stations={snetStations} ranks={snetMeasuredRanks} selectedStationId={selectedStationId} onSelectStation={(station) => focusStation(station)} />
                   <p className="seismic-data-label">实时数据来自海上保安厅“海しる”S-net 每分钟强震动瓦片，按色标反算连续震度并在本机保存历史；标有“截图补录”的记录来自用户提供的原始 S-net 震度情报截图。两者均不是 NIED 官方震度公告。</p>
                 </> : <>
                   <div className="seismic-snet-summary"><div><span>推算时间</span><strong>{oceanResponseEvent ? formatTime(Date.parse(oceanResponseEvent.originTime) + oceanResponseElapsed * 1000) : "--"}</strong></div><div><span>最大震度</span><strong>{snetSimulationActiveCount ? `${displayRankLabel(snetSimulationMaxRank)} · ${snetSimulationMaxRank.toFixed(2)}` : "-"}</strong></div></div>
-                  {oceanResponseEvent ? <div className="seismic-snet-ranking measured">{snetSimulationRows.map(({ station, rank }) => <button key={station.id} onClick={() => focusStation(station)}><span><i style={{ background: rank >= 0.25 ? intensityColor(rank) : "#1447e6" }} /><strong>{station.stationCode}</strong></span><em>{rank.toFixed(2)} <small>[{displayRankLabel(rank)}]</small></em></button>)}</div> : <div className="seismic-snet-waiting"><Radio size={18} /><span>收到有效 EEW 后生成明确标注的本地确定性响应。</span></div>}
+                  {oceanResponseEvent ? <div className="seismic-snet-ranking measured">{snetSimulationRows.map(({ station, rank }) => <button key={station.id} onClick={() => focusStation(station)}><span><i style={{ background: snetStationDisplayColor(rank) }} /><strong>{station.stationCode}</strong></span><em>{rank.toFixed(2)} <small>[{displayRankLabel(rank)}]</small></em></button>)}</div> : <div className="seismic-snet-waiting"><Radio size={18} /><span>收到有效 EEW 后生成明确标注的本地确定性响应。</span></div>}
                   <JapanMiniMap regions={jmaRegions} stations={snetStations} ranks={visibleOceanSimulation?.ranks} selectedStationId={selectedStationId} onSelectStation={(station) => focusStation(station)} />
                   <p className="seismic-data-label">这里是事件驱动的确定性传播推算，不是测站实测；它与“实测历史”完全分离。</p>
                 </>}

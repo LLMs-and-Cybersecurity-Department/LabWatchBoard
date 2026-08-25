@@ -4876,10 +4876,16 @@ body.seismic-panel-resizing {
   position: absolute;
   top: 0;
   left: 0;
-  z-index: 335;
   display: block;
   pointer-events: none;
-  transform: none !important;
+  will-change: transform;
+}
+
+.seismic-snet-value-icon {
+  border: 0 !important;
+  background: transparent !important;
+  image-rendering: auto;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.72));
 }
 
 .seismic-map .leaflet-popup-pane {

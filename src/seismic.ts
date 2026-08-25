@@ -1164,6 +1164,25 @@ export function intensityColor(rank: number) {
   return jmaShindoColor(rank);
 }
 
+/** Keep the official MSIL observation colour when it is available. Replay and
+ * local estimates fall back to a compact blue-cyan-green NIED Pro-like scale
+ * so quiet S-net stations never become the generic gray shindo-0 colour. */
+export function snetStationDisplayColor(rank: number, observedRgb?: readonly number[] | null) {
+  if (observedRgb?.length === 3) {
+    const channels = observedRgb.map((channel) => Math.max(0, Math.min(255, Math.round(Number(channel)))));
+    if (channels.every(Number.isFinite) && channels.some((channel) => channel > 0)) {
+      return `rgb(${channels[0]} ${channels[1]} ${channels[2]})`;
+    }
+  }
+  const value = Number.isFinite(rank) ? rank : -3;
+  if (value < -1.5) return "#1447e6";
+  if (value < -0.5) return "#0878d1";
+  if (value < 0.25) return "#0aa4c0";
+  if (value < 0.75) return "#0bc9a0";
+  if (value < 1.5) return "#20df76";
+  return niedProStationDisplayColor(value);
+}
+
 const KANAMEISHI_COLORS = {
   darkGray: "#9f9f9f",
   gray: "#cfcfcf",
