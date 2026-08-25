@@ -21,7 +21,7 @@ export const SEISMIC_SOUND_LIBRARY = {
   "general-50s": { url: "/sound/general/50s.mp3", label: "S 波倒计时 50 秒", family: "replay" },
   "general-60s": { url: "/sound/general/60s.mp3", label: "S 波倒计时 60 秒", family: "replay" },
   "srev-cancel": { url: "/sound/srev/cancel.mp3", label: "预警解除", family: "eew" },
-  "srev-caution": { url: "/sound/srev/shindo0.mp3", label: "接收提示（不自动定位 · 震度 0）", family: "eew" },
+  "srev-caution": { url: "/sound/srev/shindo0.mp3", label: "接收 / 检知提示（震度 0）", family: "eew" },
   "srev-detail": { url: "/sound/srev/detail.mp3", label: "预警详情", family: "eew" },
   "srev-final": { url: "/sound/srev/final.mp3", label: "最终报文", family: "eew" },
   "srev-hypocenter": { url: "/sound/srev/hypocenter.mp3", label: "震源定位", family: "eew" },

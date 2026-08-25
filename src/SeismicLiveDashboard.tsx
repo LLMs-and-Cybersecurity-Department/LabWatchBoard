@@ -107,6 +107,7 @@ import {
   replayNiedSoundIndex,
   selectAutoLocatedGlobalEvent,
   selectAutoLocatedGlobalEvents,
+  shakeDetectionPresentationForTransition,
   isReplayPropagationActive,
   shouldDisplayRegionalWarning,
   shouldDisplayLiveWavefront,
@@ -3172,6 +3173,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const mapFocusSequence = useRef(0);
   const niedDetector = useRef<ShakeDetectorState | undefined>(undefined);
   const kmaDetector = useRef<ShakeDetectorState | undefined>(undefined);
+  const liveDetectionPresentationState = useRef<Record<ShakeDetectionStatus["network"], boolean>>({
+    NIED: false,
+    "KMA-PEWS": false,
+  });
+  const liveDetectionAutoLocateAllowed = useRef(true);
   const previousNiedSoundState = useRef<{ sessionKey: string; index: number } | null>({ sessionKey: "live", index: -1 });
   const previousReplayNiedSoundState = useRef<{ sessionKey: string; index: number } | null>(null);
   const previousReplayTsunamiSoundState = useRef<{
@@ -5760,23 +5766,85 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     setPanelTab("snet");
   };
 
-  const focusStrongestDetection = (network: "NIED" | "KMA-PEWS") => {
+  const strongestDetectionStation = useCallback((network: "NIED" | "KMA-PEWS") => {
     if (network === "KMA-PEWS" && replayEvent && kmaReplaySimulation) {
       const activeIds = new Set(kmaReplaySimulation.activeStationIds);
-      const strongest = [...kmaStations]
+      return [...kmaStations]
         .filter((station) => activeIds.has(station.id))
         .sort((a, b) => (kmaReplaySimulation.ranks[b.id] ?? 0) - (kmaReplaySimulation.ranks[a.id] ?? 0))[0];
-      if (strongest) focusStation(strongest);
-      return;
     }
     const detection = network === "NIED" ? niedDetection : kmaDetection;
     const candidates = detection.activeStationIds.flatMap((id) => allSelectableStations.find((station) => station.id === id) ?? []);
-    const strongest = candidates.sort((a, b) => {
+    return candidates.sort((a, b) => {
       const rank = (station: SelectableStation) => isNiedStation(station) ? niedLevelRank(niedCharToLevel(niedFrame?.intensity[station.index])) : isKmaStation(station) ? Number(kmaValues[station.index] ?? 0) : 0;
       return rank(b) - rank(a);
     })[0];
+  }, [allSelectableStations, kmaDetection, kmaReplaySimulation, kmaStations, kmaValues, niedDetection, niedFrame, replayEvent]);
+
+  const focusStrongestDetection = useCallback((network: "NIED" | "KMA-PEWS") => {
+    const strongest = strongestDetectionStation(network);
     if (strongest) focusStation(strongest);
-  };
+  }, [focusStation, strongestDetectionStation]);
+
+  useEffect(() => {
+    const visibleByNetwork: Record<ShakeDetectionStatus["network"], boolean> = {
+      NIED: showShakeDetectionGrid && niedDetection.detected,
+      "KMA-PEWS": showShakeDetectionGrid && kmaDetection.detected,
+    };
+    const autoLocateAllowed = !movieModeEnabled
+      || (movieCameraMode === "auto" && autoLocateGlobalEarthquakes);
+    const transitions = (["NIED", "KMA-PEWS"] as const).map((network) => ({
+      network,
+      presentation: shakeDetectionPresentationForTransition(
+        liveDetectionPresentationState.current[network],
+        visibleByNetwork[network],
+        {
+          replayActive: replayModeActive,
+          movieModeEnabled,
+          movieCameraMode,
+          autoLocateEnabled: autoLocateGlobalEarthquakes,
+          autoLocateWasEnabled: liveDetectionAutoLocateAllowed.current,
+        },
+      ),
+    }));
+    const risingNetworks = transitions.filter(({ presentation }) => presentation.accepted).map(({ network }) => network);
+    const autoLocateNetworks = transitions.filter(({ presentation }) => presentation.autoLocate).map(({ network }) => network);
+    liveDetectionPresentationState.current = visibleByNetwork;
+    liveDetectionAutoLocateAllowed.current = autoLocateAllowed;
+
+    if (risingNetworks.length && (seismicAlertSoundEnabled || niedSoundEnabled)) void playSoundAsset("srev-caution");
+
+    if (!autoLocateNetworks.length) return;
+
+    const strongestNetwork = [...autoLocateNetworks].sort((a, b) => {
+      const level = (network: ShakeDetectionStatus["network"]) => (
+        network === "NIED" ? niedDetection.currentMaxLevel : kmaDetection.currentMaxLevel
+      );
+      return level(b) - level(a);
+    })[0];
+    const station = strongestDetectionStation(strongestNetwork);
+    if (!station) return;
+    focusMap(
+      `detection-auto:${strongestNetwork}:${strongestNetwork === "NIED" ? niedDetection.updatedAt : kmaDetection.updatedAt}`,
+      station.latitude,
+      station.longitude,
+      7,
+      true,
+    );
+  }, [
+    autoLocateGlobalEarthquakes,
+    focusMap,
+    kmaDetection,
+    movieCameraMode,
+    movieModeEnabled,
+    niedDetection,
+    niedSoundEnabled,
+    playSoundAsset,
+    replayModeActive,
+    seismicAlertSoundEnabled,
+    showShakeDetectionGrid,
+    strongestDetectionStation,
+  ]);
 
   const focusStrongestOceanResponse = () => {
     const strongest = [...(oceanCatalogue?.stations ?? [])]
@@ -6790,7 +6858,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
             <div className="seismic-sound-custom"><label>替换所选音效<input type="file" accept="audio/*" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (!file) return; const previous = customSoundUrlsRef.current.get(soundPreviewAsset); if (previous) URL.revokeObjectURL(previous); customSoundUrlsRef.current.set(soundPreviewAsset, URL.createObjectURL(file)); niedAudioBuffersRef.current.delete(soundPreviewAsset); setCustomSoundVersion((version) => version + 1); event.currentTarget.value = ""; }} /></label>{customSoundUrlsRef.current.has(soundPreviewAsset) && <button title="恢复内置音效" onClick={() => { const previous = customSoundUrlsRef.current.get(soundPreviewAsset); if (previous) URL.revokeObjectURL(previous); customSoundUrlsRef.current.delete(soundPreviewAsset); niedAudioBuffersRef.current.delete(soundPreviewAsset); setCustomSoundVersion((version) => version + 1); }}>恢复内置</button>}</div>
             <output className={niedSoundStatus.includes("阻止") ? "error" : ""}>{niedSoundEnabled ? niedSoundStatus : "音效已关闭"}</output>
             <output className={seismicSoundStatus.includes("阻止") || seismicSoundStatus.includes("超时") ? "error" : ""}>{seismicAlertSoundEnabled ? seismicSoundStatus : "实时预警 / 回放报文音效已关闭"}</output>
-            <p className="seismic-fault-note">接收但不自动定位使用 shindo0；JMA 震度速报使用 detail（同一物理事件只播一次）；JMA/KMA/CWA/CENC 区域源的 issue/update/final/cancel 按报文状态去重播放，报次或受影响区域变化使用 update；issue 是历史时刻的回放首报，prompt 仅表示震源待定 / 查找震源；countdown 与 0–60s 按定位点的 S 波剩余到时播放，回放和实时事件共用同一距离时钟；intense 是强震；shindo 与 tsunami 按震度、海啸等级升级播放。全球目录与授权全球源不触发区域 EEW 音效。</p>
+            <p className="seismic-fault-note">接收但不自动定位、NIED / KMA 检知框首次出现均使用 shindo0（持续显示不重复播放）；JMA 震度速报使用 detail（同一物理事件只播一次）；JMA/KMA/CWA/CENC 区域源的 issue/update/final/cancel 按报文状态去重播放，报次或受影响区域变化使用 update；issue 是历史时刻的回放首报，prompt 仅表示震源待定 / 查找震源；countdown 与 0–60s 按定位点的 S 波剩余到时播放，回放和实时事件共用同一距离时钟；intense 是强震；shindo 与 tsunami 按震度、海啸等级升级播放。全球目录与授权全球源不触发区域 EEW 音效。</p>
           </section>
           <section className="control-section seismic-legal-note">
             <div className="section-title"><span><AlertTriangle /></span><strong>数据级别</strong></div>

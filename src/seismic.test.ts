@@ -53,6 +53,7 @@ import {
   replayNiedSoundIndex,
   selectAutoLocatedGlobalEvent,
   selectAutoLocatedGlobalEvents,
+  shakeDetectionPresentationForTransition,
   mmiIntensityColor,
   simulateJmaRegionImpact,
   simulatePreparedReplayStationResponse,
@@ -73,6 +74,46 @@ import {
 } from "./seismic";
 
 describe("seismic client calculations", () => {
+  it("acknowledges a newly visible shake-detection frame and follows the movie camera policy", () => {
+    expect(shakeDetectionPresentationForTransition(false, true, {
+      replayActive: false,
+      movieModeEnabled: false,
+      movieCameraMode: "locked",
+      autoLocateEnabled: false,
+    })).toEqual({ accepted: true, autoLocate: true });
+    expect(shakeDetectionPresentationForTransition(false, true, {
+      replayActive: false,
+      movieModeEnabled: true,
+      movieCameraMode: "locked",
+      autoLocateEnabled: true,
+    })).toEqual({ accepted: true, autoLocate: false });
+    expect(shakeDetectionPresentationForTransition(false, true, {
+      replayActive: false,
+      movieModeEnabled: true,
+      movieCameraMode: "auto",
+      autoLocateEnabled: true,
+    })).toEqual({ accepted: true, autoLocate: true });
+    expect(shakeDetectionPresentationForTransition(true, true, {
+      replayActive: false,
+      movieModeEnabled: true,
+      movieCameraMode: "auto",
+      autoLocateEnabled: true,
+    })).toEqual({ accepted: false, autoLocate: false });
+    expect(shakeDetectionPresentationForTransition(true, true, {
+      replayActive: false,
+      movieModeEnabled: true,
+      movieCameraMode: "auto",
+      autoLocateEnabled: true,
+      autoLocateWasEnabled: false,
+    })).toEqual({ accepted: false, autoLocate: true });
+    expect(shakeDetectionPresentationForTransition(false, true, {
+      replayActive: true,
+      movieModeEnabled: false,
+      movieCameraMode: "auto",
+      autoLocateEnabled: true,
+    })).toEqual({ accepted: false, autoLocate: false });
+  });
+
   it("selects the nearest small Canvas station without capturing empty map clicks", () => {
     const candidates = [
       { x: 20, y: 20, radius: 2, value: "W001" },

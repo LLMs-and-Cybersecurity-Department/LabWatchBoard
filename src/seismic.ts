@@ -952,6 +952,40 @@ export type ShakeDetectionUpdate = {
   observations: TriggerObservation[];
 };
 
+export type ShakeDetectionPresentation = {
+  accepted: boolean;
+  autoLocate: boolean;
+};
+
+/**
+ * A visible live detection frame is an event edge, not a continuously firing
+ * state. Always acknowledge a newly displayed frame, but leave the camera
+ * untouched while replay is open or movie mode has explicitly locked/freed
+ * the view from automatic tracking.
+ */
+export function shakeDetectionPresentationForTransition(
+  wasVisible: boolean,
+  isVisible: boolean,
+  options: {
+    replayActive: boolean;
+    movieModeEnabled: boolean;
+    movieCameraMode: "locked" | "auto";
+    autoLocateEnabled: boolean;
+    autoLocateWasEnabled?: boolean;
+  },
+): ShakeDetectionPresentation {
+  const accepted = !options.replayActive && !wasVisible && isVisible;
+  const autoLocateAllowed = !options.movieModeEnabled
+    || (options.movieCameraMode === "auto" && options.autoLocateEnabled);
+  return {
+    accepted,
+    autoLocate: !options.replayActive
+      && isVisible
+      && autoLocateAllowed
+      && (!wasVisible || options.autoLocateWasEnabled === false),
+  };
+}
+
 export type HypocenterEstimate = {
   latitude: number;
   longitude: number;
