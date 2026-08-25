@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   CircleGauge,
   Clock3,
+  Crosshair,
   Database,
   ExternalLink,
   FastForward,
@@ -139,6 +140,7 @@ import {
   type HypocenterEstimate,
   type KmaStation,
   type JmaSeismicSiteCatalogue,
+  type JmaTsunamiArea,
   type JmaTsunamiSnapshot,
   type JmaTsunamiHistorySnapshot,
   type LiveEew,
@@ -229,6 +231,25 @@ import { UsgsDyfiDialog } from "./UsgsDyfiDialog";
 import { UsgsPagerDialog } from "./UsgsPagerDialog";
 import { JshisDialog } from "./JshisDialog";
 import { SeismicCameraRelay } from "./SeismicCameraRelay";
+import { TsunamiSimulationDialog, type TsunamiMapPickTarget, type TsunamiPickedLocation } from "./TsunamiSimulationDialog";
+import { TsunamiAlertPanel, type TsunamiAlertEntry } from "./TsunamiAlertPanel";
+import {
+  simulateEastAsiaTsunami,
+  simulationReportTimeline,
+  simulationToJmaSnapshot,
+  simulationToLiveEew,
+  simulationWaveEventsAt,
+  tsunamiHaversineKm,
+  tsunamiHeightLabel,
+  tsunamiImpactStatus,
+  tsunamiMeanLongitude,
+  tsunamiSimulationSourceTimings,
+  tsunamiTitle,
+  type TsunamiScenario,
+  type TsunamiSimulationResult,
+  type TsunamiSimulationSourceTiming,
+} from "./tsunamiSimulation";
+import { loadDetailedTsunamiRegions } from "./tsunamiRegions";
 import {
   WNI_CAMERA_MAP_URL,
   fetchWniCameras,
@@ -309,6 +330,9 @@ type TsunamiRegionProperties = {
   namekana?: string;
   grade?: string;
   level?: number;
+  heightM?: number;
+  country?: "JP" | "CN" | "TW" | "KR";
+  simulated?: boolean;
 };
 type TsunamiRegionCollection = FeatureCollection<Geometry, TsunamiRegionProperties>;
 type GlobalFaultProperties = {
@@ -617,6 +641,41 @@ function formatTime(value: string | number, seconds = true) {
     hour12: false,
     timeZone: "Asia/Shanghai",
   }).format(date);
+}
+
+function tsunamiAreaPanelEntry(area: JmaTsunamiArea, nowMs: number): TsunamiAlertEntry {
+  const condition = area.arrivalCondition?.normalize("NFKC") ?? "";
+  const arrivalMs = Date.parse(area.arrivalTime ?? "");
+  const hasArrival = Number.isFinite(arrivalMs);
+  const confirmed = condition.includes("到達を確認");
+  const estimatedArrived = condition.includes("到達中") || condition.includes("到達した") || condition.includes("模拟预计已到达");
+  const immediate = area.immediate || condition.includes("ただちに") || condition.includes("すぐ");
+  let status: TsunamiAlertEntry["status"] = "unknown";
+  let timing = condition || "到达时间调查中";
+  if (confirmed) {
+    status = "arrived";
+    timing = "第一波已确认到达";
+  } else if (estimatedArrived) {
+    status = "arrived";
+    timing = "推测已经到达";
+  } else if (immediate) {
+    status = "imminent";
+    timing = "预计立即来袭";
+  } else if (hasArrival && arrivalMs <= nowMs) {
+    status = "unknown";
+    timing = "预计时刻已过 · 等待观测确认";
+  } else if (hasArrival) {
+    status = arrivalMs - nowMs <= 10 * 60_000 ? "imminent" : "forecast";
+    timing = `预计 ${formatTime(arrivalMs, false)} 到达`;
+  }
+  return {
+    id: `${area.name}:${area.grade}`,
+    name: area.name,
+    level: area.level,
+    timing,
+    height: area.maxHeightDescription || (area.maxHeightM !== null ? tsunamiHeightLabel(area.maxHeightM) : "观测中"),
+    status,
+  };
 }
 
 function displayRankLabel(rank: number) {
@@ -1301,6 +1360,29 @@ function SeismicMapViewport({ onChange }: { onChange: (viewport: FdsnMapViewport
     zoomend: (event) => report(event.target),
   });
   useEffect(() => report(map), [map, report]);
+  return null;
+}
+
+function TsunamiSimulationMapPicker(props: {
+  active: boolean;
+  onPick: (latitude: number, longitude: number) => void;
+}) {
+  const map = useMapEvents({
+    click: (event) => {
+      if (!props.active) return;
+      event.originalEvent.preventDefault();
+      event.originalEvent.stopPropagation();
+      props.onPick(
+        Math.round(event.latlng.lat * 10_000) / 10_000,
+        Math.round(normalizedLongitude(event.latlng.lng) * 10_000) / 10_000,
+      );
+    },
+  });
+  useEffect(() => {
+    const container = map.getContainer();
+    container.classList.toggle("seismic-map--tsunami-pick", props.active);
+    return () => container.classList.remove("seismic-map--tsunami-pick");
+  }, [map, props.active]);
   return null;
 }
 
@@ -2179,6 +2261,8 @@ const SeismicMap = memo(function SeismicMap(props: {
   selectedStation: SelectableStation | null;
   selectedEvent: LiveEew | null;
   waveEvent: LiveEew | null;
+  simulationWaveEvents: LiveEew[];
+  simulationSources: TsunamiSimulationSourceTiming[];
   selectedReport: EarthquakeEvent | null;
   estimate: HypocenterEstimate | null;
   estimateMode: "live" | "replay";
@@ -2230,7 +2314,9 @@ const SeismicMap = memo(function SeismicMap(props: {
   waveNow: number;
   wavePlaybackRate: number;
   showWaves: boolean;
+  tsunamiMapPickActive: boolean;
   focusTarget: MapFocusTarget | null;
+  onTsunamiMapPick: (latitude: number, longitude: number) => void;
   onSelectStation: (station: SelectableStation) => void;
   onViewportChange: (viewport: FdsnMapViewport) => void;
 }) {
@@ -2590,6 +2676,12 @@ const SeismicMap = memo(function SeismicMap(props: {
       <Pane name="seismic-wave-pane" style={{ zIndex: 390, pointerEvents: "none" }}>
         {props.showWaves && props.waveEvent && props.waveEvent.hypocenterKnown !== false && !props.waveEvent.cancelled
           && <SmoothWavefrontCircles event={props.waveEvent} waveNow={props.waveNow} playbackRate={props.wavePlaybackRate} />}
+        {props.showWaves && props.simulationWaveEvents.map((event) => <SmoothWavefrontCircles
+          key={event.id}
+          event={event}
+          waveNow={props.waveNow}
+          playbackRate={props.wavePlaybackRate}
+        />)}
       </Pane>
       <Pane name="seismic-grid-pane" style={{ zIndex: 410, pointerEvents: "none" }}>
         {props.showDetectionGrid && layerComplexity >= 3 && detectionCells.map((cell) => <Rectangle key={`${props.detectionSessionKey}:${cell.id}`} bounds={cell.bounds} interactive={false} pathOptions={{ color: NIED_GRID_COLORS[cell.color], weight: blinkOn ? 2.8 : 1.6, opacity: blinkOn ? 1 : 0.28, dashArray: props.detectionMode === "replay" ? "7 5" : undefined, fill: false }} />)}
@@ -2603,6 +2695,17 @@ const SeismicMap = memo(function SeismicMap(props: {
           interactive={false}
           style={(feature) => {
             const level = Number(feature?.properties?.level ?? 1);
+            if (feature?.properties?.simulated) {
+              const color = jmaTsunamiLineStyle(level).color;
+              return {
+                color,
+                fillColor: color,
+                weight: level >= 3 ? 2.6 : level === 2 ? 2.1 : 1.6,
+                opacity: 0.96,
+                fillOpacity: level >= 3 ? 0.36 : level === 2 ? 0.29 : 0.2,
+                className: level >= 2 ? "seismic-tsunami-coastline-flash" : undefined,
+              };
+            }
             return {
               ...jmaTsunamiLineStyle(level),
               className: level >= 2 ? "seismic-tsunami-coastline-flash" : undefined,
@@ -2623,6 +2726,15 @@ const SeismicMap = memo(function SeismicMap(props: {
         {props.selectedReport && <Marker position={[props.selectedReport.latitude, props.selectedReport.longitude]} icon={hypocenterMapIcon("catalogue")} zIndexOffset={1100} riseOnHover alt={`${props.selectedReport.place} 机构报告震中`}>
           <Popup><strong>{EARTHQUAKE_SOURCE_LABELS[props.selectedReport.source]} 机构报告</strong><br />{props.selectedReport.place}<br />{formatMagnitudeType(props.selectedReport.magnitudeType)} {props.selectedReport.magnitude.toFixed(1)}<br /><a href={props.selectedReport.url} target="_blank" rel="noreferrer">打开机构原文</a></Popup>
         </Marker>}
+        {props.simulationSources.length > 1 && props.simulationSources.map((source) => <CircleMarker
+          key={`simulation-source:${source.id}`}
+          center={[source.latitude, source.longitude]}
+          radius={8}
+          pathOptions={{ color: "#f8fafc", fillColor: "#e11d48", weight: 2, fillOpacity: 0.94 }}
+        >
+          <LeafletTooltip permanent direction="center" className="tsunami-simulation-source-number">{source.order}</LeafletTooltip>
+          <Popup><strong>SIMULATION 震源 {source.order}</strong><br />{source.name}<br />{source.latitude.toFixed(4)}, {source.longitude.toFixed(4)}<br />{source.reportCount} 报 · 每 {source.reportIntervalSeconds}s</Popup>
+        </CircleMarker>)}
       </Pane>
       <Pane name="seismic-cwa-official-products" style={{ zIndex: 475 }}>
         {props.cwaOfficialLayer?.points.map((point) => <CircleMarker
@@ -2798,6 +2910,7 @@ const SeismicMap = memo(function SeismicMap(props: {
       </Pane>
       <SeismicMapFocus target={props.focusTarget} />
       <SeismicMapViewport onChange={props.onViewportChange} />
+      <TsunamiSimulationMapPicker active={props.tsunamiMapPickActive} onPick={props.onTsunamiMapPick} />
       <ZoomControl position="bottomleft" />
       <ScaleControl position="bottomleft" imperial={false} />
     </MapContainer>
@@ -2868,6 +2981,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   );
   const [showPagerCities, setShowPagerCities] = usePersistentState("seismic-show-usgs-pager-cities", true);
   const [showJmaTsunami, setShowJmaTsunami] = usePersistentState("seismic-show-jma-tsunami", true);
+  const [showTsunamiAlertPanel, setShowTsunamiAlertPanel] = usePersistentState("seismic-show-tsunami-alert-panel", true);
   const [jmaTsunamiSoundEnabled, setJmaTsunamiSoundEnabled] = usePersistentState("seismic-jma-tsunami-sound-enabled", true);
   const [showLocalImpact, setShowLocalImpact] = usePersistentState("seismic-show-local-impact", true);
   const [showOfficialImpact, setShowOfficialImpact] = usePersistentState("seismic-show-official-impact", true);
@@ -2890,6 +3004,16 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [eastAsiaImpactRegions, setEastAsiaImpactRegions] = useState<JmaRegionCollection | null>(null);
   const [jmaSeismicSites, setJmaSeismicSites] = useState<JmaSeismicSiteCatalogue | null>(null);
   const [tsunamiRegions, setTsunamiRegions] = useState<TsunamiRegionCollection | null>(null);
+  const [detailedTsunamiRegions, setDetailedTsunamiRegions] = useState<TsunamiRegionCollection | null>(null);
+  const [detailedTsunamiRegionError, setDetailedTsunamiRegionError] = useState("");
+  const [tsunamiSimulationDialogOpen, setTsunamiSimulationDialogOpen] = useState(false);
+  const [tsunamiSimulation, setTsunamiSimulation] = useState<TsunamiSimulationResult | null>(null);
+  const [tsunamiMapPick, setTsunamiMapPick] = useState<(TsunamiMapPickTarget & {
+    remaining: TsunamiMapPickTarget[];
+    totalSources: number;
+  }) | null>(null);
+  const [tsunamiPickedLocation, setTsunamiPickedLocation] = useState<TsunamiPickedLocation | null>(null);
+  const [dismissedTsunamiPanelKey, setDismissedTsunamiPanelKey] = useState<string | null>(null);
   const [jmaTsunami, setJmaTsunami] = useState<JmaTsunamiSnapshot | null>(null);
   const [jmaTsunamiHistory, setJmaTsunamiHistory] = useState<JmaTsunamiHistorySnapshot | null>(null);
   const [jmaTsunamiHistoryError, setJmaTsunamiHistoryError] = useState("");
@@ -4474,14 +4598,26 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     || !PERSISTENT_REGIONAL_EEW_SOURCES.has(event.source)
     || shouldDisplayLiveWavefront(event, clock)
   )) ?? null;
+  const simulationReports = useMemo(
+    () => tsunamiSimulation ? simulationReportTimeline(tsunamiSimulation) : [],
+    [tsunamiSimulation],
+  );
+  const simulationEvent = useMemo(() => {
+    if (!tsunamiSimulation) return null;
+    const originMs = Date.parse(tsunamiSimulation.scenario.originTime);
+    return [...simulationReports].reverse().find((report) => (
+      (Date.parse(report.announcedAt) - originMs) / 1000 <= replaySeconds
+    )) ?? simulationReports[0] ?? simulationToLiveEew(tsunamiSimulation);
+  }, [replaySeconds, simulationReports, tsunamiSimulation]);
   const selectedEvent = useMemo(() => {
     const selected = selectedEewKey
       ? [...regionalHistory, ...institutionEewReports].find((event) => eewReportKey(event) === selectedEewKey)
       : null;
-    return selected ?? historyEvents[0]?.latestReport ?? latestEvent ?? null;
-  }, [historyEvents, institutionEewReports, latestEvent, regionalHistory, selectedEewKey]);
+    return simulationEvent ?? selected ?? historyEvents[0]?.latestReport ?? latestEvent ?? null;
+  }, [historyEvents, institutionEewReports, latestEvent, regionalHistory, selectedEewKey, simulationEvent]);
   const selectedReplayReports = useMemo(() => {
     if (!selectedEvent) return [];
+    if (tsunamiSimulation && simulationEvent?.id === selectedEvent.id) return simulationReports;
     const reports = [...regionalHistory, ...institutionEewReports, selectedEvent]
       .filter((report) => isRelatedEewReport(selectedEvent, report));
     return [...new Map(reports.map((report) => [eewReportKey(report), report])).values()]
@@ -4489,8 +4625,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
         Date.parse(left.announcedAt) - Date.parse(right.announcedAt)
         || left.serial - right.serial
       ));
-  }, [institutionEewReports, regionalHistory, selectedEvent]);
+  }, [institutionEewReports, regionalHistory, selectedEvent, simulationEvent?.id, simulationReports, tsunamiSimulation]);
   const selectedReplayPropagationEvent = useMemo(() => {
+    if (tsunamiSimulation && simulationEvent && selectedEvent?.id === simulationEvent.id) return simulationEvent;
     const regionalLocatedReports = selectedReplayReports.filter((report) => (
       report.relay !== "Catalogue"
       && !report.observedIntensity
@@ -4502,7 +4639,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     return regionalLocatedReports[regionalLocatedReports.length - 1]
       ?? selectedReplayReports.find((report) => !report.observedIntensity && report.hypocenterKnown !== false)
       ?? selectedEvent;
-  }, [selectedEvent, selectedReplayReports]);
+  }, [selectedEvent, selectedReplayReports, simulationEvent, tsunamiSimulation]);
   const selectedReplayReportTimeline = useMemo(() => selectedReplayReports.flatMap((report) => {
     const offsetSeconds = replayEewReportOffsetSeconds(report);
     return offsetSeconds === null ? [] : [{ report, offsetSeconds }];
@@ -4579,9 +4716,12 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
         jmaTsunamiReplayDurationSeconds(selectedEvent.originTime, replayTsunamiEpisode),
         selectedReplayReportDurationSeconds,
         normalizedReplayStepMinutes * 60,
+        tsunamiSimulation && simulationEvent?.id === selectedEvent.id
+          ? Math.min(12 * 60 * 60, tsunamiSimulation.lastArrivalSeconds + 30 * 60)
+          : 0,
       )
       : 300,
-    [normalizedReplayStepMinutes, replayTsunamiEpisode, selectedEvent, selectedReplayReportDurationSeconds],
+    [normalizedReplayStepMinutes, replayTsunamiEpisode, selectedEvent, selectedReplayReportDurationSeconds, simulationEvent?.id, tsunamiSimulation],
   );
   useEffect(() => {
     replayDurationRef.current = replayDurationSeconds;
@@ -4871,10 +5011,23 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     .filter((event): event is LiveEew => Boolean(event))
     .sort((left, right) => Date.parse(right.announcedAt) - Date.parse(left.announcedAt))[0] ?? null;
   const wavefrontEvent = replayEvent ?? liveWavefrontEvent;
-  const replayTsunamiSnapshot = replayEvent
-    ? jmaTsunamiSnapshotAt(replayTsunamiEpisode, replaySeconds)
-    : null;
+  const tsunamiReplaySecond = Math.floor(Math.max(0, replaySeconds));
+  const replayTsunamiSnapshot = useMemo(() => replayEvent
+    ? tsunamiSimulation && simulationEvent?.id === replayEvent.id
+      ? simulationToJmaSnapshot(tsunamiSimulation, tsunamiReplaySecond)
+      : jmaTsunamiSnapshotAt(replayTsunamiEpisode, tsunamiReplaySecond)
+    : null, [replayEvent, replayTsunamiEpisode, simulationEvent?.id, tsunamiReplaySecond, tsunamiSimulation]);
   const displayedJmaTsunami = replayEvent ? replayTsunamiSnapshot : jmaTsunami;
+  const simulationSources = useMemo(
+    () => tsunamiSimulation ? tsunamiSimulationSourceTimings(tsunamiSimulation.scenario) : [],
+    [tsunamiSimulation],
+  );
+  const simulationWaveEvents = useMemo(
+    () => tsunamiSimulation && replayEvent && simulationEvent?.id === replayEvent.id
+      ? simulationWaveEventsAt(tsunamiSimulation, tsunamiReplaySecond)
+      : [],
+    [replayEvent, simulationEvent?.id, tsunamiReplaySecond, tsunamiSimulation],
+  );
   const replayProfile = useMemo(() => replayEvent && catalogue
     ? prepareReplayStationResponse(replayEvent, catalogue.stations)
     : null, [catalogue, replayEvent]);
@@ -5788,24 +5941,55 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     previous.playedAt = now;
     void playSoundAsset("srev-update");
   }, [liveWavefrontEvent, localImpactSoundSignature, playSoundAsset, replayEvent, replayPlaying, replayProductPresentationActive, seismicAlertSoundEnabled]);
+  useEffect(() => {
+    if (!tsunamiSimulation || !displayedJmaTsunami?.active) {
+      setDetailedTsunamiRegions(null);
+      setDetailedTsunamiRegionError("");
+      return;
+    }
+    const nonJapaneseImpacts = tsunamiSimulation.impacts.filter((impact) => impact.country !== "JP");
+    if (!nonJapaneseImpacts.length) {
+      setDetailedTsunamiRegions(null);
+      setDetailedTsunamiRegionError("");
+      return;
+    }
+    const controller = new AbortController();
+    setDetailedTsunamiRegionError("");
+    void loadDetailedTsunamiRegions(nonJapaneseImpacts, controller.signal)
+      .then((collection) => setDetailedTsunamiRegions(collection as TsunamiRegionCollection))
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setDetailedTsunamiRegions(null);
+        setDetailedTsunamiRegionError(error instanceof Error ? error.message : String(error));
+    });
+    return () => controller.abort();
+  }, [displayedJmaTsunami?.active, tsunamiSimulation]);
   const activeTsunamiRegions = useMemo<TsunamiRegionCollection>(() => {
     if (!tsunamiRegions || !displayedJmaTsunami?.active) return { type: "FeatureCollection", features: [] };
     const activeAreas = new Map(displayedJmaTsunami.areas.map((area) => [area.name, area]));
+    const japaneseFeatures = tsunamiRegions.features.flatMap((feature) => {
+      const area = activeAreas.get(feature.properties.name);
+      return area ? [{
+        ...feature,
+        properties: {
+          ...feature.properties,
+          country: "JP" as const,
+          grade: area.grade,
+          level: area.level,
+          heightM: area.maxHeightM ?? undefined,
+        },
+      }] : [];
+    });
     return {
       type: "FeatureCollection",
-      features: tsunamiRegions.features.flatMap((feature) => {
-        const area = activeAreas.get(feature.properties.name);
-        return area ? [{
-          ...feature,
-          properties: {
-            ...feature.properties,
-            grade: area.grade,
-            level: area.level,
-          },
-        }] : [];
-      }),
+      features: [
+        ...japaneseFeatures,
+        ...(tsunamiSimulation && simulationEvent && replayEvent?.id === simulationEvent.id
+          ? detailedTsunamiRegions?.features ?? []
+          : []),
+      ],
     };
-  }, [displayedJmaTsunami, tsunamiRegions]);
+  }, [detailedTsunamiRegions, displayedJmaTsunami, replayEvent?.id, simulationEvent, tsunamiRegions, tsunamiSimulation]);
   const waveOrigin = wavefrontEvent ? Date.parse(wavefrontEvent.originTime) : 0;
   const waveNow = replayEvent ? waveOrigin + replaySeismicSeconds * 1000 : clock;
   const showWaves = !replayProductPresentationActive && (replayEvent
@@ -5903,6 +6087,83 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const cwaRealtimeWarning = activeEews.find((event) => event.source === "CWA" && event.relay !== "Catalogue" && event.warning && !event.cancelled) ?? null;
   const latestCwaOfficialReport = institutionReports.find((event) => event.source === "cwa") ?? null;
   const displayedCwaTsunami = cwaTsunami?.activeReport ?? cwaTsunami?.latestReport ?? null;
+  const tsunamiPanelModel = useMemo(() => {
+    if (tsunamiSimulation && simulationEvent && replayEvent?.id === simulationEvent.id && displayedJmaTsunami?.active) {
+      const entries: TsunamiAlertEntry[] = tsunamiSimulation.impacts.map((impact) => {
+        const status = tsunamiImpactStatus(impact, tsunamiReplaySecond);
+        return {
+          id: impact.id,
+          name: impact.name,
+          level: impact.level,
+          timing: status.kind === "forecast" || status.kind === "imminent"
+            ? `${status.label} ${formatTime(impact.arrivalTime, false)}`
+            : status.label,
+          height: tsunamiHeightLabel(impact.heightM),
+          status: status.kind,
+        };
+      });
+      return {
+        key: `simulation:${tsunamiSimulation.scenario.id}:${tsunamiSimulation.issuedAt}`,
+        mode: "SIMULATION" as const,
+        source: "KESHI-LITE-1",
+        title: tsunamiTitle(tsunamiSimulation.maximumLevel),
+        place: tsunamiSimulation.scenario.place,
+        originTime: tsunamiSimulation.scenario.originTime,
+        magnitude: tsunamiSimulation.scenario.magnitude,
+        depthKm: tsunamiSimulation.scenario.depthKm,
+        level: tsunamiSimulation.maximumLevel,
+        entries,
+        disclaimer: tsunamiSimulation.disclaimer,
+      };
+    }
+    if (displayedJmaTsunami?.active) {
+      const event = replayEvent ?? jmaRealtimeWarning ?? persistentRegionalEvent ?? selectedEvent;
+      const panelNow = replayEvent ? Date.parse(replayEvent.originTime) + tsunamiReplaySecond * 1000 : clock;
+      return {
+        key: `jma:${displayedJmaTsunami.reportId ?? displayedJmaTsunami.issuedAt ?? displayedJmaTsunami.fetchedAt}`,
+        mode: replayEvent ? "REPLAY" as const : "LIVE" as const,
+        source: "JMA",
+        title: displayedJmaTsunami.title,
+        place: event?.place ?? "日本近海",
+        originTime: event?.originTime ?? displayedJmaTsunami.issuedAt ?? displayedJmaTsunami.fetchedAt,
+        magnitude: event?.magnitude ?? null,
+        depthKm: event?.depthKm ?? null,
+        level: displayedJmaTsunami.level,
+        entries: displayedJmaTsunami.areas.map((area) => tsunamiAreaPanelEntry(area, panelNow)),
+        disclaimer: "JMA 预报区；到达状态仅在官方报文明示时标为已确认。",
+      };
+    }
+    const report = cwaTsunami?.activeReport;
+    if (report) {
+      const level = report.severity === "warning" ? 2 as const : 1 as const;
+      return {
+        key: `cwa:${report.id}:${report.reportNo}`,
+        mode: "LIVE" as const,
+        source: "CWA",
+        title: report.reportType || "海啸资讯",
+        place: report.earthquake?.location ?? "台湾沿海",
+        originTime: report.earthquake?.originTime ?? report.issuedAt,
+        magnitude: report.earthquake?.magnitude ?? null,
+        depthKm: report.earthquake?.depthKm ?? null,
+        level,
+        entries: [{
+          id: report.id,
+          name: report.earthquake?.location ?? "台湾沿海",
+          level,
+          timing: report.reportContent || "官方资讯有效中",
+          height: "依官方报文",
+          status: "unknown" as const,
+        }],
+        disclaimer: "CWA E-A0014 官方海啸资讯；未提供分区浪高时不进行补造。",
+      };
+    }
+    return null;
+  }, [clock, cwaTsunami?.activeReport, displayedJmaTsunami, jmaRealtimeWarning, persistentRegionalEvent, replayEvent, selectedEvent, simulationEvent, tsunamiReplaySecond, tsunamiSimulation]);
+  const tsunamiPanelVisible = Boolean(
+    showTsunamiAlertPanel
+      && tsunamiPanelModel
+      && dismissedTsunamiPanelKey !== tsunamiPanelModel.key,
+  );
   const oceanHistorySelected = displayedOceanMode === "measured" && Boolean(snetMeasuredFrame) && !selectedSnetEvent?.active;
   const oceanResponseActive = displayedOceanMode === "measured"
     ? Boolean(selectedSnetEvent?.active && activeOceanCount)
@@ -6074,6 +6335,91 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       .sort((a, b) => (replaySimulation?.ranks[b.id] ?? 0) - (replaySimulation?.ranks[a.id] ?? 0))[0];
     if (strongest) focusStation(strongest);
   };
+
+  const startTsunamiSimulation = useCallback((scenario: TsunamiScenario) => {
+    const result = simulateEastAsiaTsunami(scenario);
+    const sources = tsunamiSimulationSourceTimings(scenario);
+    const mapCenter = sources.length
+      ? {
+        latitude: sources.reduce((sum, source) => sum + source.latitude, 0) / sources.length,
+        longitude: tsunamiMeanLongitude(sources.map((source) => source.longitude)),
+      }
+      : { latitude: scenario.latitude, longitude: scenario.longitude };
+    const radiusKm = Math.max(50, ...sources.map((source) => tsunamiHaversineKm(
+      mapCenter.latitude,
+      mapCenter.longitude,
+      source.latitude,
+      source.longitude,
+    )));
+    void primeReplayAudio();
+    clearReplayPresentation();
+    setTsunamiSimulation(result);
+    setDetailedTsunamiRegions(null);
+    setDetailedTsunamiRegionError("");
+    setDismissedTsunamiPanelKey(null);
+    setShowTsunamiAlertPanel(true);
+    setShowJmaTsunami(true);
+    setTsunamiSimulationDialogOpen(false);
+    setTsunamiMapPick(null);
+    setSettingsOpen(false);
+    setBottomTab("replay");
+    setReplaySeconds(-normalizedReplayPreRollSeconds);
+    setReplayPlaying(true);
+    commitMapFocus({
+      id: `tsunami-simulation:${scenario.id}`,
+      latitude: mapCenter.latitude,
+      longitude: mapCenter.longitude,
+      zoom: 6,
+      exact: true,
+      radiusKm,
+      animate: false,
+    });
+  }, [clearReplayPresentation, commitMapFocus, normalizedReplayPreRollSeconds, primeReplayAudio, setBottomTab, setShowJmaTsunami, setShowTsunamiAlertPanel]);
+
+  const stopTsunamiSimulation = useCallback(() => {
+    clearReplayPresentation();
+    setTsunamiSimulation(null);
+    setDetailedTsunamiRegions(null);
+    setDetailedTsunamiRegionError("");
+    setDismissedTsunamiPanelKey(null);
+    setTsunamiMapPick(null);
+  }, [clearReplayPresentation]);
+
+  const requestTsunamiMapPick = useCallback((sourceId: string, sourceOrder: number) => {
+    setTsunamiMapPick({ sourceId, sourceOrder, remaining: [], totalSources: 1 });
+    setTsunamiSimulationDialogOpen(false);
+    setSettingsOpen(false);
+  }, []);
+
+  const requestTsunamiMapPickSequence = useCallback((targets: TsunamiMapPickTarget[]) => {
+    const [first, ...remaining] = targets;
+    if (!first) return;
+    setTsunamiMapPick({ ...first, remaining, totalSources: targets.length });
+    setTsunamiSimulationDialogOpen(false);
+    setSettingsOpen(false);
+  }, []);
+
+  const acceptTsunamiMapPick = useCallback((latitude: number, longitude: number) => {
+    if (!tsunamiMapPick) return;
+    setTsunamiPickedLocation({
+      sourceId: tsunamiMapPick.sourceId,
+      latitude,
+      longitude,
+      nonce: Date.now(),
+    });
+    const [next, ...remaining] = tsunamiMapPick.remaining;
+    if (next) {
+      setTsunamiMapPick({ ...next, remaining, totalSources: tsunamiMapPick.totalSources });
+    } else {
+      setTsunamiMapPick(null);
+      setTsunamiSimulationDialogOpen(true);
+    }
+  }, [tsunamiMapPick]);
+
+  const cancelTsunamiMapPick = useCallback(() => {
+    setTsunamiMapPick(null);
+    setTsunamiSimulationDialogOpen(true);
+  }, []);
 
   const toggleReplay = () => {
     if (!selectedEvent || !selectedReplayPropagationEvent) return;
@@ -6476,6 +6822,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               <label className="toggle-row"><input type="checkbox" checked={showLowestIntensityIcons} onChange={(event) => setShowLowestIntensityIcons(event.target.checked)} />显示震度0，烈度I图标 <em>{showLowestIntensityIcons ? "显示" : "隐藏"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={autoHypocenterEstimation} onChange={(event) => setAutoHypocenterEstimation(event.target.checked)} />自动震源推算 <em>{autoHypocenterEstimation ? "开启" : "关闭"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={keepLatestWarningVisible} onChange={(event) => setKeepLatestWarningVisible(event.target.checked)} />一直显示最新预警 <em>{keepLatestWarningVisible ? "保持" : "按时结束"}</em></label>
+              <label className="toggle-row"><input type="checkbox" checked={showTsunamiAlertPanel} onChange={(event) => { setShowTsunamiAlertPanel(event.target.checked); if (event.target.checked) setDismissedTsunamiPanelKey(null); }} />海啸警报分区面板 <em>{showTsunamiAlertPanel ? "自动弹出" : "关闭"}</em></label>
+              <div className="seismic-settings-tsunami-actions">
+                <button onClick={() => setTsunamiSimulationDialogOpen(true)}><Waves size={14} />地震 / 海啸模拟</button>
+                {tsunamiSimulation && <button className="danger" onClick={stopTsunamiSimulation}><X size={14} />停止当前模拟</button>}
+              </div>
               <label className="toggle-row"><input type="checkbox" checked={showWniCameras} onChange={(event) => setShowWniCameras(event.target.checked)} />显示 WNI 摄像头图层 <em>{showWniCameras ? "显示" : "隐藏"}</em></label>
               <label className="toggle-row"><input type="checkbox" checked={seismicAlertSoundEnabled} onChange={(event) => setSeismicAlertSoundEnabled(event.target.checked)} />实时预警与回放音效 <em>{seismicAlertSoundEnabled ? "开启" : "关闭"}</em></label>
               <label className="seismic-layer-complexity"><span><strong>图层复杂度</strong><output>{normalizedMapLayerComplexity}/6</output></span><input type="range" min="1" max="6" step="1" value={normalizedMapLayerComplexity} aria-label="地图图层复杂度 1 到 6" onChange={(event) => setMapLayerComplexity(Number(event.target.value))} /><small>1 仅事件与核心响应；6 显示完整测站、标签、产品和背景层。</small></label>
@@ -6499,12 +6850,13 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
             </div>}
           </div>
         </header>
-        {(niedCatalogueError || oceanCatalogueError || jmaCatalogueError || tsunamiCatalogueError || regionalBoundaryError) && <div className="error-banner">台网目录更新失败：{[
+        {(niedCatalogueError || oceanCatalogueError || jmaCatalogueError || tsunamiCatalogueError || regionalBoundaryError || detailedTsunamiRegionError) && <div className="error-banner">台网目录更新失败：{[
           niedCatalogueError && `NIED：${niedCatalogueError}`,
           oceanCatalogueError && `海底台网：${oceanCatalogueError}`,
           jmaCatalogueError && `JMA：${jmaCatalogueError}`,
           tsunamiCatalogueError && `JMA 海啸：${tsunamiCatalogueError}`,
           regionalBoundaryError && `中港台边界：${regionalBoundaryError}`,
+          detailedTsunamiRegionError && `模拟沿海边界：${detailedTsunamiRegionError}`,
         ].filter(Boolean).join("；")}</div>}
 
         <section
@@ -6533,6 +6885,24 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
               {replayEvent && replayLiveNotice && <section key={replayLiveNotice.key} className="seismic-replay-live-notice" role="status" aria-live="assertive">
                 <Siren size={18} />
                 <span><small>回放未中断 · 最新实时预警</small><strong>{replayLiveNotice.event.source} · {replayLiveNotice.event.place}</strong><em>M {replayLiveNotice.event.magnitude?.toFixed(1) ?? "--"} · 第 {replayLiveNotice.event.serial} 报</em></span>
+              </section>}
+              {tsunamiPanelVisible && tsunamiPanelModel && <TsunamiAlertPanel
+                mode={tsunamiPanelModel.mode}
+                source={tsunamiPanelModel.source}
+                title={tsunamiPanelModel.title}
+                place={tsunamiPanelModel.place}
+                originTime={tsunamiPanelModel.originTime}
+                magnitude={tsunamiPanelModel.magnitude}
+                depthKm={tsunamiPanelModel.depthKm}
+                level={tsunamiPanelModel.level}
+                entries={tsunamiPanelModel.entries}
+                disclaimer={tsunamiPanelModel.disclaimer}
+                onClose={() => setDismissedTsunamiPanelKey(tsunamiPanelModel.key)}
+              />}
+              {tsunamiMapPick && <section className="tsunami-map-pick-prompt" role="status">
+                <Crosshair size={19} />
+                <span><strong>拾取震源 {tsunamiMapPick.sourceOrder}{tsunamiMapPick.totalSources > 1 ? ` / ${tsunamiMapPick.totalSources}` : ""}</strong><small>拖动或缩放地图后，点击目标位置写入经纬度{tsunamiMapPick.remaining.length ? "；点击后继续下一个震源" : ""}</small></span>
+                <button onClick={cancelTsunamiMapPick}>取消</button>
               </section>}
               <SeismicMap
                 theme={mapTheme}
@@ -6572,7 +6942,9 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 showLowestIntensityIcons={showLowestIntensityIcons}
                 selectedStation={selectedStation}
                 selectedEvent={mapEvent ?? null}
-                waveEvent={wavefrontEvent}
+                waveEvent={tsunamiSimulation ? null : wavefrontEvent}
+                simulationWaveEvents={simulationWaveEvents}
+                simulationSources={simulationSources}
                 selectedReport={selectedInstitutionReport}
                 estimate={estimate}
                 estimateMode={replayEvent ? "replay" : "live"}
@@ -6635,9 +7007,11 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 waveNow={waveNow}
                 wavePlaybackRate={replayEvent ? replayPlaying ? normalizedReplaySpeed : 0 : 1}
                 showWaves={showWaves}
+                tsunamiMapPickActive={Boolean(tsunamiMapPick)}
                 warningLocation={sWaveWarningVisible ? userStation : null}
                 focusTarget={mapFocus}
-                onSelectStation={focusStation}
+                onTsunamiMapPick={acceptTsunamiMapPick}
+                onSelectStation={tsunamiMapPick ? () => undefined : focusStation}
                 onViewportChange={updateMapViewport}
               />
               {cwaOfficialLayer && <button className="seismic-cwa-product-layer-chip" onClick={() => setCwaOfficialLayer(null)} title="移除 CWA 官方震度图层"><Layers3 size={13} /><span>{cwaOfficialLayer.kind === "station" ? "CWA 测站" : "CWA 乡镇"} {cwaOfficialLayer.points.length} 点</span><X size={12} /></button>}
@@ -6905,7 +7279,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 </div>
                 <div>
                   <div className="seismic-wave-legend"><div><i className="p" /><span>P 波</span><strong>{selectedEvent ? waveRadiusKm(selectedEvent.originTime, 6, selectedOrigin + replaySeismicSeconds * 1000).toFixed(0) : 0} km</strong></div><div><i className="s" /><span>S 波</span><strong>{selectedEvent ? waveRadiusKm(selectedEvent.originTime, 3.5, selectedOrigin + replaySeismicSeconds * 1000).toFixed(0) : 0} km</strong></div></div>
-                  <dl className="earthquake-detail-list"><div><dt>JMA 海啸回放</dt><dd>{replayTsunamiSnapshot ? `${replayTsunamiSnapshot.cancelled ? "预报解除" : replayTsunamiSnapshot.title} · ${formatTime(replayTsunamiSnapshot.issuedAt ?? selectedOrigin)}` : replayTsunamiEpisode ? `等待首报 · 共 ${replayTsunamiEpisode.reports.length} 份` : jmaTsunamiHistory ? "当前事件无匹配报文" : "历史报文加载中"}</dd></div><div><dt>NIED 陆地响应</dt><dd>{visibleReplaySimulation ? `${visibleReplaySimulation.activeStationIds.length} 站 / 最大震度 ${jmaShindoLabel(visibleReplaySimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>KMA-PEWS 响应</dt><dd>{visibleKmaReplaySimulation ? `${visibleKmaReplaySimulation.activeStationIds.length} 站 / 最大烈度 ${intensityRomanLabel(visibleKmaReplaySimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>海底台网响应</dt><dd>{visibleOceanSimulation ? `${visibleOceanSimulation.activeStationIds.length} 站 / 最大震度 ${jmaShindoLabel(visibleOceanSimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>全球 FDSN 响应</dt><dd>{visibleGlobalSimulation ? `${visibleGlobalSimulation.arrivedStationIds.length} 站已到达 / 最大 MMI ${visibleGlobalSimulation.maxRank.toFixed(1)}` : "等待播放"}</dd></div><div><dt>CWA CWASN 响应</dt><dd>{visibleCwaSimulation ? `${visibleCwaSimulation.arrivedStationIds.length} 站已到达 / 最大震度 ${jmaShindoLabel(visibleCwaSimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>官方产品插播</dt><dd>{replayProductPresentation?.stage === "official" ? "官方地区上色 · 5 秒" : replayProductPresentation?.stage === "waiting-products" ? "等待 USGS 官方产品" : replayProductPresentation?.stage === "contours" ? "ShakeMap 烈度线" : replayProductPresentation?.stage === "cities" ? "PAGER SVG 城市烈度标 · 人口暴露" : replayProductPresentation?.stage === "radius" ? "烈度线 / 城市 / 影响半径 · 保持 5 秒" : replayUsgsShakeMapLoading || replayUsgsPagerLoading ? "正在预取 USGS ShakeMap / PAGER" : replayUsgsShakeMap || replayUsgsPager ? `已就绪 · ${replayUsgsShakeMap ? "ShakeMap" : ""}${replayUsgsShakeMap && replayUsgsPager ? " + " : ""}${replayUsgsPager ? "PAGER" : ""}` : "当前事件无匹配产品"}</dd></div><div><dt>回放音效</dt><dd>NIED {niedSoundEnabled ? "启用" : "关闭"} / 海啸 {jmaTsunamiSoundEnabled ? "启用" : "关闭"}</dd></div><div><dt>P / S 速度</dt><dd>6.0 / 3.5 km/s（仅前 300 秒）</dd></div><div><dt>用途</dt><dd>传播时序与官方海啸报文复盘，不代表当前预警</dd></div></dl>
+                  <dl className="earthquake-detail-list"><div><dt>{tsunamiSimulation ? "模拟海啸" : "JMA 海啸回放"}</dt><dd>{replayTsunamiSnapshot ? `${replayTsunamiSnapshot.cancelled ? "预报解除" : replayTsunamiSnapshot.title} · ${formatTime(replayTsunamiSnapshot.issuedAt ?? selectedOrigin)}` : tsunamiSimulation ? `等待模拟首报 · T+${tsunamiSimulation.scenario.reportDelaySeconds}s · ${tsunamiSimulation.impacts.length} 个沿海分区` : replayTsunamiEpisode ? `等待首报 · 共 ${replayTsunamiEpisode.reports.length} 份` : jmaTsunamiHistory ? "当前事件无匹配报文" : "历史报文加载中"}</dd></div><div><dt>NIED 陆地响应</dt><dd>{visibleReplaySimulation ? `${visibleReplaySimulation.activeStationIds.length} 站 / 最大震度 ${jmaShindoLabel(visibleReplaySimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>KMA-PEWS 响应</dt><dd>{visibleKmaReplaySimulation ? `${visibleKmaReplaySimulation.activeStationIds.length} 站 / 最大烈度 ${intensityRomanLabel(visibleKmaReplaySimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>海底台网响应</dt><dd>{visibleOceanSimulation ? `${visibleOceanSimulation.activeStationIds.length} 站 / 最大震度 ${jmaShindoLabel(visibleOceanSimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>全球 FDSN 响应</dt><dd>{visibleGlobalSimulation ? `${visibleGlobalSimulation.arrivedStationIds.length} 站已到达 / 最大 MMI ${visibleGlobalSimulation.maxRank.toFixed(1)}` : "等待播放"}</dd></div><div><dt>CWA CWASN 响应</dt><dd>{visibleCwaSimulation ? `${visibleCwaSimulation.arrivedStationIds.length} 站已到达 / 最大震度 ${jmaShindoLabel(visibleCwaSimulation.maxRank)}` : "等待播放"}</dd></div><div><dt>官方产品插播</dt><dd>{replayProductPresentation?.stage === "official" ? "官方地区上色 · 5 秒" : replayProductPresentation?.stage === "waiting-products" ? "等待 USGS 官方产品" : replayProductPresentation?.stage === "contours" ? "ShakeMap 烈度线" : replayProductPresentation?.stage === "cities" ? "PAGER SVG 城市烈度标 · 人口暴露" : replayProductPresentation?.stage === "radius" ? "烈度线 / 城市 / 影响半径 · 保持 5 秒" : replayUsgsShakeMapLoading || replayUsgsPagerLoading ? "正在预取 USGS ShakeMap / PAGER" : replayUsgsShakeMap || replayUsgsPager ? `已就绪 · ${replayUsgsShakeMap ? "ShakeMap" : ""}${replayUsgsShakeMap && replayUsgsPager ? " + " : ""}${replayUsgsPager ? "PAGER" : ""}` : "当前事件无匹配产品"}</dd></div><div><dt>回放音效</dt><dd>NIED {niedSoundEnabled ? "启用" : "关闭"} / 海啸 {jmaTsunamiSoundEnabled ? "启用" : "关闭"}</dd></div><div><dt>P / S 速度</dt><dd>6.0 / 3.5 km/s（仅前 300 秒）</dd></div><div><dt>用途</dt><dd>{tsunamiSimulation ? tsunamiSimulation.disclaimer : "传播时序与官方海啸报文复盘，不代表当前预警"}</dd></div></dl>
                   {replayEstimate ? <div className="seismic-replay-inference"><span><CircleGauge size={15} />回放本地震源反演</span><strong>{replayEstimate.latitude.toFixed(3)}, {replayEstimate.longitude.toFixed(3)}</strong><small>深度 {replayEstimate.depthKm.toFixed(1)} km · {replayEstimate.stationCount} 站 · 残差 {replayEstimate.residualMs} ms · 距官方 {replayEstimate.referenceDistanceKm?.toFixed(2) ?? "--"} km</small></div> : <div className="seismic-replay-inference waiting"><span><CircleGauge size={15} />{autoHypocenterEstimation ? "等待至少 4 个模拟 P 波触发站" : "自动震源推算已关闭"}</span><small>{autoHypocenterEstimation ? "测站按理论到时逐一响应，满足条件后自动生成震源。" : "可在右上角设置中重新开启。"}</small></div>}
                 </div>
               </div>
@@ -7001,6 +7375,14 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
         onFaultLoaded={handleJshisFaultLoaded}
         onClose={() => setJshisTarget(null)}
       />}
+      <TsunamiSimulationDialog
+        open={tsunamiSimulationDialogOpen}
+        pickedLocation={tsunamiPickedLocation}
+        onClose={() => { setTsunamiSimulationDialogOpen(false); setTsunamiMapPick(null); }}
+        onRequestMapPick={requestTsunamiMapPick}
+        onRequestMapPickSequence={requestTsunamiMapPickSequence}
+        onStart={startTsunamiSimulation}
+      />
     </>
   );
 }
