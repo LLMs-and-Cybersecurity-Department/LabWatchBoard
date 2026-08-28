@@ -810,6 +810,18 @@ export function shouldDisplayRegionalWarning(
   return keepLatestWarningVisible || (!terminated && shouldDisplayLiveWavefront(event, now));
 }
 
+/** Official intensity paint has its own lifetime. A final/detail report stops
+ * propagation immediately, but its affected areas must still appear without
+ * requiring the user to select the report card. */
+export function shouldDisplayRegionalImpact(
+  event: LiveEew,
+  keepLatestWarningVisible: boolean,
+  now = Date.now(),
+) {
+  if (event.cancelled || !event.affectedAreas?.length) return false;
+  return keepLatestWarningVisible || isLiveEewActive(event, now);
+}
+
 export function isReplayPropagationActive(elapsedSeconds: number) {
   if (!Number.isFinite(elapsedSeconds) || elapsedSeconds <= 0) return false;
   // The replay clock is rendered to hundredths. Close propagation as soon as
@@ -1181,6 +1193,10 @@ export function snetStationDisplayColor(rank: number, observedRgb?: readonly num
   if (value < 0.75) return "#0bc9a0";
   if (value < 1.5) return "#20df76";
   return niedProStationDisplayColor(value);
+}
+
+export function shouldShowSnetSvgValueIcon(rank: number) {
+  return Number.isFinite(rank) && rank >= 0;
 }
 
 const KANAMEISHI_COLORS = {

@@ -111,8 +111,10 @@ import {
   selectAutoLocatedGlobalEvents,
   shakeDetectionPresentationForTransition,
   isReplayPropagationActive,
+  shouldDisplayRegionalImpact,
   shouldDisplayRegionalWarning,
   shouldDisplayLiveWavefront,
+  shouldShowSnetSvgValueIcon,
   shouldShowStationValueIcon,
   JMA_SHINDO_LEGEND,
   MMI_LEGEND,
@@ -2569,14 +2571,10 @@ const SeismicMap = memo(function SeismicMap(props: {
       .slice(0, responseLabelBudget)
       .map((station) => station.id),
   ), [displayedKmaResponses, props.kmaReplayRanks, props.kmaValues, props.showLowestIntensityIcons, responseLabelBudget]);
-  const labeledOceanStationIds = useMemo(() => new Set(
-    props.showSnetStationValues ? [...displayedOceanResponses]
-      .filter((station) => props.oceanMode === "measured"
-        ? Object.prototype.hasOwnProperty.call(props.oceanRanks, station.id)
-        : (props.oceanRanks[station.id] ?? 0) >= 1)
-      .slice(0, responseLabelBudget)
-      .map((station) => station.id) : [],
-  ), [displayedOceanResponses, props.oceanMode, props.oceanRanks, props.showSnetStationValues, responseLabelBudget]);
+  const snetSvgValueStations = useMemo(() => respondingOceanStations
+    .filter((station) => station.network === "S-net"
+      && shouldShowSnetSvgValueIcon(props.oceanRanks[station.id] ?? Number.NaN))
+    .slice(0, 180), [props.oceanRanks, respondingOceanStations]);
   /* The canvas layers below retain the complete response sets. These small,
    * stable SVG subsets exist only for hit targets, popups and a few labels. */
   const liveGlobalSelectionStations = useMemo(() => [
@@ -2961,8 +2959,15 @@ const SeismicMap = memo(function SeismicMap(props: {
             <CircleMarker center={[station.latitude, station.longitude]} radius={selected ? 6 : 5} pathOptions={{ color: "#ffffff", fillColor: "#ffffff", weight: selected ? 2.2 : 0, opacity: selected ? 1 : 0, fillOpacity: 0.001 }} eventHandlers={{ click: () => props.onSelectStation(station) }}>
             {selected && <Popup><strong>{station.network} {station.stationCode}</strong><br />海底深度 {station.depthM.toFixed(0)} m<br />{sampleLabel} {rank.toFixed(2)} [{displayRankLabel(rank)}]<br /><a href={station.waveformUrl} target="_blank" rel="noreferrer">查看官方延迟波形</a></Popup>}
             </CircleMarker>
-            {labeledOceanStationIds.has(station.id) && (measured || active) && <SnetStationValueMarker latitude={station.latitude} longitude={station.longitude} rank={rank} selected={selected} label={`${station.network} ${station.stationCode} 震度 ${displayRankLabel(rank)} · ${rank.toFixed(2)}`} />}
           </Fragment>;
+        })}
+        {layerComplexity >= 3 && props.showOcean && snetSvgValueStations.map((station) => {
+          const rank = props.oceanRanks[station.id] ?? 0;
+          const selected = props.selectedStation?.id === station.id;
+          const label = `S-net ${station.stationCode} 震度 ${displayRankLabel(rank)} · ${rank.toFixed(2)}`;
+          return props.showSnetStationValues
+            ? <SnetStationValueMarker key={`snet-value:${station.id}`} latitude={station.latitude} longitude={station.longitude} rank={rank} selected={selected} label={label} />
+            : <StationValueMarker key={`snet-value:${station.id}`} latitude={station.latitude} longitude={station.longitude} rank={rank} scale="shindo" selected={selected} label={label} />;
         })}
         {layerComplexity >= 2 && props.showCenc && props.cencReport && <>
           <Marker position={[props.cencReport.latitude, props.cencReport.longitude]} icon={hypocenterMapIcon("catalogue")} zIndexOffset={1100} riseOnHover alt={`${props.cencReport.place} CENC 仪器烈度报告震中`}><Popup><strong>CENC 仪器烈度报告</strong><br />{props.cencReport.place}<br />M {props.cencReport.magnitude?.toFixed(1) ?? "--"} · {props.cencReport.stationMetrics.length} 站报告 / {props.cencReport.stations.length} 站有坐标</Popup></Marker>
@@ -4648,7 +4653,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
     ? persistentRegionalEvent
     : null;
   const visiblePersistentRegionalImpactEvent = persistentRegionalImpactEvent
-    && shouldDisplayRegionalWarning(persistentRegionalImpactEvent, keepLatestWarningVisible, latestRegionalState.terminated, clock)
+    && shouldDisplayRegionalImpact(persistentRegionalImpactEvent, keepLatestWarningVisible, clock)
     ? persistentRegionalImpactEvent
     : null;
   const historyEvents = useMemo(
@@ -7054,6 +7059,17 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 <label><span>等值线不透明度</span><input type="range" min="0" max="1" step="0.05" value={normalizedPalertContourOpacity} disabled={!showPalertContour} aria-label="P-Alert PGA 等值线不透明度" onChange={(event) => setPalertContourOpacity(Number(event.target.value))} /><output>{normalizedPalertContourOpacity.toFixed(2)}</output></label>
               </section>
               <div className="seismic-settings-source-block"><div className="seismic-settings-source-heading"><strong>接收源</strong><button onClick={() => setEnabledEewSources([...LIVE_EEW_SOURCE_ORDER])}>全选</button><button onClick={() => setEnabledEewSources([])}>清空</button></div><div className="seismic-settings-source-grid">{LIVE_EEW_SOURCE_ORDER.map((source) => <label key={source}><input type="checkbox" checked={enabledEewSourceSet.has(source)} onChange={(event) => setEnabledEewSources((current) => event.target.checked ? [...new Set([...current, source])] : current.filter((item) => item !== source))} /><span>{source}</span></label>)}</div><small>关闭的源不会进入实时历史、自动定位或音效；历史记录不会被删除。</small></div>
+              <section className="seismic-api-registration">
+                <header><div><strong>需自行申请 / 授权的数据源</strong><small>只显示配置状态，不显示密钥内容</small></div><Database size={15} /></header>
+                <div className="seismic-api-registration-grid">
+                  <article><div><strong>FAN Studio</strong><em className={cencAuthRequired ? "warn" : cencState === "online" ? "ok" : ""}>{cencAuthRequired ? "待配置" : cencState === "online" ? "已鉴权" : "检查中"}</em></div><p>CENC 实时烈度 WebSocket；申请 appId 与 key，配置 <code>FANSTUDIO_APP_ID</code> / <code>FANSTUDIO_API_KEY</code>。</p><a href="https://api.fanstudio.tech/dev-platform/" target="_blank" rel="noreferrer">开发者平台<ExternalLink size={11} /></a></article>
+                  <article><div><strong>CWA 开放资料</strong><em className={cwaOfficialState === "online" ? "ok" : cwaOfficialState === "error" ? "warn" : ""}>{cwaOfficialState === "online" ? "授权可用" : cwaOfficialState === "error" ? "检查授权码" : "连接中"}</em></div><p>一般会员免费取得 API 授权码；配置 <code>CWA_API_TOKEN</code>，用于官方地震、震度产品与海啸资料。</p><span className="seismic-api-links"><a href="https://opendata.cwa.gov.tw/about/application/general" target="_blank" rel="noreferrer">一般会员申请<ExternalLink size={11} /></a><a href="https://opendata.cwa.gov.tw/devManual/insrtuction" target="_blank" rel="noreferrer">API 说明<ExternalLink size={11} /></a></span></article>
+                  <article><div><strong>INGV Early-est</strong><em className={earlyEstState === "online" ? "ok" : "restricted"}>{earlyEstState === "online" ? "授权源在线" : "需机构授权"}</em></div><p>官方实验性研究系统没有面向本项目的通用 API Key；取得合法 JSON/CAP Feed 后配置 URL 与 Token。</p><a href="https://early-est.rm.ingv.it/" target="_blank" rel="noreferrer">官方项目与声明<ExternalLink size={11} /></a></article>
+                  <article><div><strong>GlobalQuake</strong><em className={globalQuakeState === "online" ? "ok" : "restricted"}>{globalQuakeState === "online" ? "授权源在线" : "需运营方许可"}</em></div><p>官网客户端连接不等于可再分发 Feed；仅在取得许可后配置 <code>GLOBALQUAKE_FEED_URL</code> / Token。</p><a href="https://globalquake.net/" target="_blank" rel="noreferrer">官方网站<ExternalLink size={11} /></a></article>
+                  <article><div><strong>NSTI 地震科学数据中心</strong><em className="restricted">账号 / 订单制</em></div><p>普通会员可注册下载一级数据，订阅邮件不是实时轮询 API；高级数据按官方流程申请。</p><span className="seismic-api-links"><a href="https://data.earthquake.cn/datashare/login.jsp" target="_blank" rel="noreferrer">登录 / 注册<ExternalLink size={11} /></a><a href="https://data.earthquake.cn/fwlc/info/2024/334672344.html" target="_blank" rel="noreferrer">服务流程<ExternalLink size={11} /></a></span></article>
+                </div>
+                <small>开发版读取项目根目录 <code>.env.local</code>；Windows 安装版读取 <code>%APPDATA%\LabWatch\.env.local</code>。USGS、JMA、NIED、KMA、P-Alert 和公开 FDSN 等当前接法无需个人 API Key。</small>
+              </section>
             </div>}
           </div>
         </header>

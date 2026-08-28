@@ -4562,6 +4562,107 @@ button,
   accent-color: #f59e0b;
 }
 
+.seismic-api-registration {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid #34464a;
+  border-radius: 5px;
+  background: rgba(10, 18, 20, 0.82);
+}
+
+.seismic-api-registration > header,
+.seismic-api-registration article > div,
+.seismic-api-links {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.seismic-api-registration > header {
+  justify-content: space-between;
+  color: #dce7e4;
+}
+
+.seismic-api-registration > header div {
+  display: grid;
+  gap: 1px;
+}
+
+.seismic-api-registration-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.seismic-api-registration article {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid #29383c;
+  border-radius: 4px;
+  background: rgba(18, 28, 30, 0.82);
+}
+
+.seismic-api-registration article > div {
+  justify-content: space-between;
+}
+
+.seismic-api-registration article strong {
+  color: #e3ecea;
+  font-size: 8px;
+}
+
+.seismic-api-registration article em {
+  color: #a7b5b2;
+  font-size: 7px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.seismic-api-registration article em.ok { color: #34d399; }
+.seismic-api-registration article em.warn { color: #fbbf24; }
+.seismic-api-registration article em.restricted { color: #93a4a1; }
+
+.seismic-api-registration p {
+  margin: 0;
+  color: #9baba8;
+  font-size: 7px;
+  line-height: 1.45;
+}
+
+.seismic-api-registration code {
+  color: #d7e1df;
+  font-size: 0.95em;
+  overflow-wrap: anywhere;
+}
+
+.seismic-api-registration a {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #67c9ff;
+  font-size: 7px;
+  text-decoration: none;
+}
+
+.seismic-api-registration a:hover,
+.seismic-api-registration a:focus-visible {
+  color: #a5e2ff;
+  text-decoration: underline;
+}
+
+.seismic-api-links {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 560px) {
+  .seismic-api-registration-grid { grid-template-columns: 1fr; }
+}
+
 .seismic-primary-grid {
   min-width: 0;
   display: grid;

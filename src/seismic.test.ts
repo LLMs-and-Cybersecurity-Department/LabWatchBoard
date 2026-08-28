@@ -41,7 +41,9 @@ import {
   isRelatedEewReport,
   isReplayPropagationActive,
   shouldDisplayRegionalWarning,
+  shouldDisplayRegionalImpact,
   shouldDisplayLiveWavefront,
+  shouldShowSnetSvgValueIcon,
   shouldShowStationValueIcon,
   normalizeFanEewEnvelope,
   normalizeCencIntensityDetail,
@@ -209,6 +211,16 @@ describe("seismic client calculations", () => {
     expect(shouldDisplayLiveWavefront({ ...report, final: true, relay: "Catalogue" }, originTime + 20_000, false)).toBe(true);
     expect(shouldDisplayRegionalWarning({ ...report, final: true }, false, true, originTime + 20_000)).toBe(false);
     expect(shouldDisplayRegionalWarning({ ...report, final: true }, true, true, originTime + 20_000)).toBe(true);
+    const officialAreas = [{ name: "東京都", intensity: "4", rank: 4, warning: false }];
+    expect(shouldDisplayRegionalImpact({ ...report, observedIntensity: true, affectedAreas: officialAreas }, false, originTime + 20_000)).toBe(true);
+    expect(shouldDisplayRegionalImpact({ ...report, observedIntensity: true, affectedAreas: officialAreas }, false, originTime + 31 * 60_000)).toBe(false);
+  });
+
+  it("shows an S-net SVG shindo icon for every finite value at or above zero", () => {
+    expect(shouldShowSnetSvgValueIcon(-0.01)).toBe(false);
+    expect(shouldShowSnetSvgValueIcon(0)).toBe(true);
+    expect(shouldShowSnetSvgValueIcon(0.49)).toBe(true);
+    expect(shouldShowSnetSvgValueIcon(Number.NaN)).toBe(false);
   });
 
   it("does not merge near-simultaneous known earthquakes across continents", () => {
