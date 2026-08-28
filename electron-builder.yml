@@ -1,7 +1,7 @@
-appId: io.basyacatx.weatherquake
-productName: 天气与地震信息看板
-executableName: weather-quake-board
-artifactName: Weather-Earthquake-Board-${version}-${os}-${arch}.${ext}
+appId: io.basyacatx.labwatch
+productName: LabWatch
+executableName: LabWatch
+artifactName: LabWatch-${version}-Windows-${arch}.${ext}
 directories:
   output: release
   buildResources: build
@@ -10,6 +10,10 @@ files:
   - desktop-dist/main.mjs
   - data/seismic/**
   - package.json
+  - "!.env"
+  - "!.env.*"
+  - "!**/.env*"
+  - "!**/*.{pem,key,p12,pfx}"
   - "!**/*.map"
   - "!**/*.ts"
   - "!**/*.tsx"
@@ -42,6 +46,7 @@ pkg:
   allowAnywhere: false
   allowCurrentUserHome: true
 win:
+  icon: icon/LabWatch.ico
   target:
     - msi
 msi:

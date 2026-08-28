@@ -111,6 +111,20 @@ macOS、Windows、Linux 与 Android 的安装包构建、签名变量和源码�
 
 对内网开放时至少配置 `DASHBOARD_USER` 和 `DASHBOARD_PASSWORD`，并在反向代理层启用 HTTPS。
 
+### 需要自行申请或获得授权的数据源
+
+LabWatch 的设置面板内也提供这些入口，并且只展示“已连接 / 待配置”状态，不会显示授权码或密钥内容。
+
+| 数据源 | 如何取得 | 本地变量 | 说明与入口 |
+| --- | --- | --- | --- |
+| CWA 开放资料 | 注册免费一般会员，登录后进入“会员资讯 → API 授权码 → 取得授权码” | `CWA_API_TOKEN` | [一般会员权益与申请](https://opendata.cwa.gov.tw/about/application/general) · [REST / GraphQL API 使用说明](https://opendata.cwa.gov.tw/devManual/insrtuction) |
+| FAN Studio | 在开发者平台创建应用并取得 `appId` 与 `key` | `FANSTUDIO_APP_ID`、`FANSTUDIO_API_KEY` | [FAN Studio 开发者平台](https://api.fanstudio.tech/dev-platform/)；用于 CENC 实时烈度 WebSocket |
+| INGV Early-est | 没有面向本项目的公开通用 API Key；需运营机构明确提供合法 JSON/CAP Feed | `EARLY_EST_FEED_URL`、`EARLY_EST_FEED_TOKEN` | [Early-est 官方实验系统与使用声明](https://early-est.rm.ingv.it/) |
+| GlobalQuake | 官网客户端服务不等于允许第三方再分发的 Feed；需运营方许可 | `GLOBALQUAKE_FEED_URL`、`GLOBALQUAKE_FEED_TOKEN` | [GlobalQuake 官方网站](https://globalquake.net/) |
+| 国家地震科学数据中心（NSTI） | 中国公民可注册普通用户；更高等级数据需升级或下单申请 | 无通用实时 API Token；代理可用 `NSTI_HTTP_PROXY_URL` | [登录 / 注册](https://data.earthquake.cn/datashare/login.jsp) · [官方数据服务流程](https://data.earthquake.cn/fwlc/info/2024/334672344.html) |
+
+开发运行时把凭据写入项目根目录的 `.env.local`。Windows 安装版只从 `%APPDATA%\LabWatch\.env.local` 读取用户自己的配置；`.env`、`.env.local`、证书、私钥和本机凭据值均被发布检查与打包规则排除。USGS、JMA、NIED、KMA、P-Alert、公开 FDSN 等现有接法不要求用户另行注册 API Key。
+
 Early-est 与 GlobalQuake 当前没有随本项目分发的公开生产 Feed。只有在运营方提供合法授权地址后才可配置上述变量；Token 不会传给浏览器，未配置、过期和错误三种状态会分别展示，也不会用模拟事件冒充实时预警。
 
 CENC 地震专题页通过同源 `/api/seismic/cenc-products` 读取。该接口只允许 `www.cenc.ac.cn` 资源，能解析页面文字、图片、脚本链接和内嵌 GeoJSON，并可在应用内一键把解析出的 GeoJSON 叠加到地图；浏览器不直接访问 CENC。若当前出口收到 403/人机验证，应用会显示“受限”而不把错误页面当成产品。
