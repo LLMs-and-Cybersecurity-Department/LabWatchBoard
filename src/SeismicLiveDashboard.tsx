@@ -43,10 +43,21 @@ import {
 } from "lucide-react";
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { icon as createLeafletIcon, type Circle as LeafletCircleLayer, type Icon as LeafletIcon, type LeafletMouseEvent } from "leaflet";
-import { Circle, CircleMarker, GeoJSON as LeafletGeoJSON, ImageOverlay, MapContainer, Marker, Pane, Popup, Rectangle, ScaleControl, TileLayer, Tooltip as LeafletTooltip, useMap, useMapEvents, ZoomControl } from "react-leaflet";
+import { Circle, CircleMarker, GeoJSON as LeafletGeoJSON, ImageOverlay, MapContainer, Marker, Pane, Polyline, Popup, Rectangle, ScaleControl, TileLayer, Tooltip as LeafletTooltip, useMap, useMapEvents, ZoomControl } from "react-leaflet";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { feature as topojsonFeature } from "topojson-client";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
+
+import {
+  FAN_INTERFACES,
+  fetchFanInterface,
+  isFanInterfaceEnabled,
+  normalizeFanTyphoons,
+  setFanDataEnabled,
+  setFanInterfaceEnabled,
+  useFanDataSettings,
+  type FanTyphoon,
+} from "./fanData";
 
 import {
   advanceMovieCameraQueue,
@@ -299,7 +310,10 @@ type SeismicLiveDashboardProps = {
   onToggleSidebar: () => void;
   onOpenGlobal: () => void;
   userStation: Station;
+  developerMode: boolean;
 };
+
+const FAN_SEISMIC_INTERFACES = FAN_INTERFACES.filter((item) => item.category === "seismic");
 
 type PanelTab = "station" | "intensity" | "snet" | "palert" | "exposure";
 type BottomTab = "inference" | "replay" | "warnings" | "reports";
@@ -2277,6 +2291,30 @@ const SmoothWavefrontCircles = memo(function SmoothWavefrontCircles(props: {
   </>;
 });
 
+const FanTyphoonLayer = memo(function FanTyphoonLayer({ typhoons }: { typhoons: FanTyphoon[] }) {
+  return <Pane name="fan-typhoon-tracks" style={{ zIndex: 345 }}>
+    {typhoons.map((typhoon) => {
+      const latest = typhoon.track.length ? typhoon.track[typhoon.track.length - 1] : null;
+      const trackPositions = typhoon.track.map((point) => [point.latitude, point.longitude] as [number, number]);
+      return <Fragment key={typhoon.id}>
+        {trackPositions.length > 1 ? <Polyline positions={trackPositions} interactive={false} pathOptions={{ color: "#fb923c", weight: 2.4, opacity: 0.9 }} /> : null}
+        {typhoon.forecasts.map((forecast) => {
+          const positions = latest
+            ? [[latest.latitude, latest.longitude] as [number, number], ...forecast.points.map((point) => [point.latitude, point.longitude] as [number, number])]
+            : forecast.points.map((point) => [point.latitude, point.longitude] as [number, number]);
+          return positions.length > 1 ? <Polyline key={`${typhoon.id}:${forecast.agency}`} positions={positions} interactive={false} pathOptions={{ color: "#facc15", weight: 1.5, opacity: 0.78, dashArray: "5 5" }} /> : null;
+        })}
+        {latest ? <CircleMarker center={[latest.latitude, latest.longitude]} radius={7} pathOptions={{ color: "#fff7ed", weight: 2, fillColor: "#f97316", fillOpacity: 0.95 }}>
+          <LeafletTooltip direction="top" offset={[0, -8]} opacity={0.96}>
+            <strong>{typhoon.name} {typhoon.englishName}</strong><br />
+            {latest.pressure !== null ? `${latest.pressure} hPa` : "中心气压待定"}{latest.strong ? ` · ${latest.strong}` : ""}
+          </LeafletTooltip>
+        </CircleMarker> : null}
+      </Fragment>;
+    })}
+  </Pane>;
+});
+
 const SeismicMap = memo(function SeismicMap(props: {
   theme: SeismicMapTheme;
   interactionMode: SeismicMapInteractionMode;
@@ -2314,6 +2352,7 @@ const SeismicMap = memo(function SeismicMap(props: {
   showPalert: boolean;
   showLowestIntensityIcons: boolean;
   showSnetStationValues: boolean;
+  fanTyphoons: FanTyphoon[];
   selectedStation: SelectableStation | null;
   selectedEvent: LiveEew | null;
   waveEvent: LiveEew | null;
@@ -2700,6 +2739,7 @@ const SeismicMap = memo(function SeismicMap(props: {
       <SeismicMapInteractionBehavior mode={props.interactionMode} />
       <SeismicMapResizeSync />
       <TileLayer key={props.theme} url={layer.url} attribution={layer.attribution} maxZoom={19} />
+      {props.fanTyphoons.length ? <FanTyphoonLayer typhoons={props.fanTyphoons} /> : null}
       <Pane name="seismic-impact-local" style={{ zIndex: 310, pointerEvents: "none" }}>
         {props.showLocalImpact && (props.forceLocalImpact || layerComplexity >= 3) && props.localRegions.features.length > 0 && <LeafletGeoJSON key={`local:${props.selectedEvent?.id}:${props.selectedEvent?.serial}:${localRegionKey}`} data={props.localRegions} interactive={false} style={(feature) => { const rank = Number(feature?.properties?.rank ?? 0); const currentRank = Number(feature?.properties?.currentRank ?? 0); const arrived = Boolean(feature?.properties?.arrived); const scale = feature?.properties?.scale === "intensity" ? "intensity" : "shindo"; const displayRank = arrived ? Math.max(1, currentRank) : rank; const color = scale === "intensity" ? mmiIntensityColor(displayRank) : jmaShindoColor(displayRank); const contour = Boolean(feature?.properties?.contour); return { color, fillColor: color, weight: arrived ? contour ? 1.8 : 1.45 : 0.8, opacity: arrived ? 0.96 : 0.66, fillOpacity: arrived ? contour ? 0.28 : 0.44 : contour ? 0.08 : 0.16, dashArray: arrived ? undefined : "4 3" }; }} />}
       </Pane>
@@ -2994,7 +3034,9 @@ const SeismicMap = memo(function SeismicMap(props: {
   );
 });
 
-export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStation }: SeismicLiveDashboardProps) {
+export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStation, developerMode }: SeismicLiveDashboardProps) {
+  const fanDataSettings = useFanDataSettings();
+  const fanTyphoonEnabled = developerMode && isFanInterfaceEnabled(fanDataSettings, "typhoon");
   const [panelTab, setPanelTab] = usePersistentState<PanelTab>("seismic-panel-tab", "station");
   const [bottomTab, setBottomTab] = usePersistentState<BottomTab>("seismic-bottom-tab", "warnings");
   const [warningOverlayTab, setWarningOverlayTab] = useState<WarningOverlayTab>("latest");
@@ -3048,6 +3090,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
   const [palertContourOpacity, setPalertContourOpacity] = usePersistentState("seismic-palert-contour-opacity", 0.5);
   const [showLowestIntensityIcons, setShowLowestIntensityIcons] = usePersistentState("seismic-show-lowest-intensity-icons", false);
   const [showWniCameras, setShowWniCameras] = usePersistentState("seismic-show-wni-cameras", true);
+  const [fanTyphoons, setFanTyphoons] = useState<FanTyphoon[]>([]);
   const [showGlobalFaults, setShowGlobalFaults] = usePersistentState("seismic-show-global-faults", false);
   const [showJshisHazard, setShowJshisHazard] = usePersistentState("seismic-show-jshis-hazard", true);
   const [showJshisSite, setShowJshisSite] = usePersistentState("seismic-show-jshis-site", true);
@@ -4352,6 +4395,35 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
       controller?.abort();
     };
   }, [ingestEew]);
+
+  useEffect(() => {
+    if (!fanTyphoonEnabled) {
+      setFanTyphoons([]);
+      return;
+    }
+    let active = true;
+    let timer = 0;
+    let controller: AbortController | null = null;
+    const poll = async () => {
+      controller?.abort();
+      controller = new AbortController();
+      try {
+        const payload = await fetchFanInterface<unknown>("typhoon", undefined, controller.signal);
+        if (!active) return;
+        setFanTyphoons(normalizeFanTyphoons(payload).filter((typhoon) => typhoon.active));
+      } catch (error) {
+        if (!active || (error instanceof DOMException && error.name === "AbortError")) return;
+      } finally {
+        if (active) timer = window.setTimeout(poll, 5 * 60_000);
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      controller?.abort();
+    };
+  }, [fanTyphoonEnabled]);
 
   useEffect(() => {
     let active = true;
@@ -7059,10 +7131,15 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 <label><span>等值线不透明度</span><input type="range" min="0" max="1" step="0.05" value={normalizedPalertContourOpacity} disabled={!showPalertContour} aria-label="P-Alert PGA 等值线不透明度" onChange={(event) => setPalertContourOpacity(Number(event.target.value))} /><output>{normalizedPalertContourOpacity.toFixed(2)}</output></label>
               </section>
               <div className="seismic-settings-source-block"><div className="seismic-settings-source-heading"><strong>接收源</strong><button onClick={() => setEnabledEewSources([...LIVE_EEW_SOURCE_ORDER])}>全选</button><button onClick={() => setEnabledEewSources([])}>清空</button></div><div className="seismic-settings-source-grid">{LIVE_EEW_SOURCE_ORDER.map((source) => <label key={source}><input type="checkbox" checked={enabledEewSourceSet.has(source)} onChange={(event) => setEnabledEewSources((current) => event.target.checked ? [...new Set([...current, source])] : current.filter((item) => item !== source))} /><span>{source}</span></label>)}</div><small>关闭的源不会进入实时历史、自动定位或音效；历史记录不会被删除。</small></div>
+              {developerMode ? <div className="seismic-settings-source-block fan-settings-block">
+                <div className="seismic-settings-source-heading"><strong>FAN 地震数据服务 · 开发者</strong></div>
+                <div className="seismic-settings-source-grid">{FAN_SEISMIC_INTERFACES.map((item) => <label key={item.id}><input type="checkbox" checked={fanDataSettings.enabled && fanDataSettings.interfaces[item.id]} onChange={(event) => { if (event.target.checked) setFanDataEnabled(true); setFanInterfaceEnabled(item.id, event.target.checked); }} /><span>{item.label}</span></label>)}</div>
+                <small>这里仅控制 FAN 地震接口；气象、台风、雷达与站点资料统一放在气象面板的 FAN 数据源中。</small>
+              </div> : null}
               <section className="seismic-api-registration">
                 <header><div><strong>需自行申请 / 授权的数据源</strong><small>只显示配置状态，不显示密钥内容</small></div><Database size={15} /></header>
                 <div className="seismic-api-registration-grid">
-                  <article><div><strong>FAN Studio</strong><em className={cencAuthRequired ? "warn" : cencState === "online" ? "ok" : ""}>{cencAuthRequired ? "待配置" : cencState === "online" ? "已鉴权" : "检查中"}</em></div><p>CENC 实时烈度 WebSocket；申请 appId 与 key，配置 <code>FANSTUDIO_APP_ID</code> / <code>FANSTUDIO_API_KEY</code>。</p><a href="https://api.fanstudio.tech/dev-platform/" target="_blank" rel="noreferrer">开发者平台<ExternalLink size={11} /></a></article>
+                  {developerMode ? <article><div><strong>FAN Studio</strong><em className={cencAuthRequired ? "warn" : cencState === "online" ? "ok" : ""}>{cencAuthRequired ? "待配置" : cencState === "online" ? "已鉴权" : "检查中"}</em></div><p>CENC 实时烈度 WebSocket；申请 appId 与 key，配置 <code>FANSTUDIO_APP_ID</code> / <code>FANSTUDIO_API_KEY</code>。</p><a href="https://api.fanstudio.tech/dev-platform/" target="_blank" rel="noreferrer">开发者平台<ExternalLink size={11} /></a></article> : null}
                   <article><div><strong>CWA 开放资料</strong><em className={cwaOfficialState === "online" ? "ok" : cwaOfficialState === "error" ? "warn" : ""}>{cwaOfficialState === "online" ? "授权可用" : cwaOfficialState === "error" ? "检查授权码" : "连接中"}</em></div><p>一般会员免费取得 API 授权码；配置 <code>CWA_API_TOKEN</code>，用于官方地震、震度产品与海啸资料。</p><span className="seismic-api-links"><a href="https://opendata.cwa.gov.tw/about/application/general" target="_blank" rel="noreferrer">一般会员申请<ExternalLink size={11} /></a><a href="https://opendata.cwa.gov.tw/devManual/insrtuction" target="_blank" rel="noreferrer">API 说明<ExternalLink size={11} /></a></span></article>
                   <article><div><strong>INGV Early-est</strong><em className={earlyEstState === "online" ? "ok" : "restricted"}>{earlyEstState === "online" ? "授权源在线" : "需机构授权"}</em></div><p>官方实验性研究系统没有面向本项目的通用 API Key；取得合法 JSON/CAP Feed 后配置 URL 与 Token。</p><a href="https://early-est.rm.ingv.it/" target="_blank" rel="noreferrer">官方项目与声明<ExternalLink size={11} /></a></article>
                   <article><div><strong>GlobalQuake</strong><em className={globalQuakeState === "online" ? "ok" : "restricted"}>{globalQuakeState === "online" ? "授权源在线" : "需运营方许可"}</em></div><p>官网客户端连接不等于可再分发 Feed；仅在取得许可后配置 <code>GLOBALQUAKE_FEED_URL</code> / Token。</p><a href="https://globalquake.net/" target="_blank" rel="noreferrer">官方网站<ExternalLink size={11} /></a></article>
@@ -7164,6 +7241,7 @@ export function SeismicLiveDashboard({ onToggleSidebar, onOpenGlobal, userStatio
                 showPalert={showPalertStations && !replayProductPresentationActive}
                 showLowestIntensityIcons={showLowestIntensityIcons}
                 showSnetStationValues={showSnetStationValues}
+                fanTyphoons={fanTyphoons}
                 selectedStation={selectedStation}
                 selectedEvent={mapEvent ?? null}
                 waveEvent={tsunamiSimulation ? null : wavefrontEvent}

@@ -124,9 +124,15 @@ const EarthquakeDashboard = lazy(async () => {
   return { default: module.EarthquakeDashboard };
 });
 
+const FanWeatherDashboard = lazy(async () => {
+  const module = await import("./FanWeatherDashboard");
+  return { default: module.FanWeatherDashboard };
+});
+
 const DEFAULT_STATION: Station = { name: "上海", lat: 31.2304, lon: 121.4737 };
 const APP_TITLE = "天气与地震信息看板 · 多模式天气";
 const EARTHQUAKE_APP_TITLE = "天气与地震信息看板 · 全球地震";
+const FAN_WEATHER_APP_TITLE = "LabWatch · FAN 气象数据";
 const FPS_OPTIONS = [1, 2, 5, 10, 24, 30, 60];
 const DEFAULT_PRODUCT = "medium-mslp-rain";
 const DEFAULT_PACKAGE = "opencharts";
@@ -144,7 +150,7 @@ type DrawerView = "messages" | "alerts" | "settings" | "help" | "user" | "info" 
 
 type ToolMode = "ens" | "browse" | "measure";
 
-type DashboardView = "weather" | "earthquake";
+type DashboardView = "weather" | "earthquake" | "fan-weather";
 
 type MeasurementPoint = {
   x: number;
@@ -287,6 +293,7 @@ function loadBrowserImage(url: string, signal: AbortSignal) {
 
 export default function App() {
   const [activeDashboard, setActiveDashboard] = usePersistentState<DashboardView>("ecmwf-pboard-dashboard", "weather");
+  const [developerMode, setDeveloperMode] = usePersistentState("labwatch-developer-mode", import.meta.env.DEV);
   const [earthquakeMounted, setEarthquakeMounted] = useState(activeDashboard === "earthquake");
   const [selectedProvider, setSelectedProvider] = useState<ProviderId>("ecmwf");
   const [packages, setPackages] = useState<EcmwfPackage[]>([]);
@@ -1122,6 +1129,10 @@ export default function App() {
   }, [activeDashboard]);
 
   useEffect(() => {
+    if (!developerMode && activeDashboard === "fan-weather") setActiveDashboard("weather");
+  }, [activeDashboard, developerMode, setActiveDashboard]);
+
+  useEffect(() => {
     if (!isMobileViewport || !mobileSidebarOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -1432,6 +1443,8 @@ export default function App() {
   const stationLabel = `${station.lat.toFixed(4)}°N, ${station.lon.toFixed(4)}°E`;
   const currentValidLabel = formatUtcLabel(validOptions.find((item) => item.value === selectedValidTime)?.label);
   const activeRiskCount = risks.filter((risk) => risk.level !== "normal").length;
+  const currentAppTitle = activeDashboard === "earthquake" ? EARTHQUAKE_APP_TITLE : activeDashboard === "fan-weather" ? FAN_WEATHER_APP_TITLE : APP_TITLE;
+  const compactAppTitle = activeDashboard === "earthquake" ? "地震速报" : activeDashboard === "fan-weather" ? "FAN 气象" : "气象图表";
 
   return (
     <div
@@ -1465,35 +1478,44 @@ export default function App() {
           >
             <Menu size={18} />
           </button>
-          <strong title={activeDashboard === "weather" ? APP_TITLE : EARTHQUAKE_APP_TITLE}>
-            <span className="brand-title-full">{activeDashboard === "weather" ? APP_TITLE : EARTHQUAKE_APP_TITLE}</span>
-            <span className="brand-title-compact">{activeDashboard === "weather" ? "气象图表" : "地震速报"}</span>
+          <strong title={currentAppTitle}>
+            <span className="brand-title-full">{currentAppTitle}</span>
+            <span className="brand-title-compact">{compactAppTitle}</span>
           </strong>
           <nav className="dashboard-tabs" aria-label="Dashboard 切换">
-            <button className={activeDashboard === "weather" ? "active" : ""} aria-pressed={activeDashboard === "weather"} title="气象 Dashboard" onClick={() => setActiveDashboard("weather")}>
+            <button className={activeDashboard !== "earthquake" ? "active" : ""} aria-pressed={activeDashboard !== "earthquake"} title="气象 Dashboard" onClick={() => setActiveDashboard("weather")}>
               <CloudRain size={15} /><span>气象</span>
             </button>
             <button className={activeDashboard === "earthquake" ? "active" : ""} aria-pressed={activeDashboard === "earthquake"} title="地震 Dashboard" onClick={() => setActiveDashboard("earthquake")}>
               <Activity size={15} /><span>地震</span>
             </button>
           </nav>
-          {activeDashboard === "weather" ? (
+          {activeDashboard !== "earthquake" ? (
             <div className="provider-switcher" title="选择图表接口">
               <Database size={15} />
               <select
                 aria-label="图表接口"
-                value={selectedProvider}
-                onChange={(event) => switchProvider(event.target.value as ProviderId)}
+                value={activeDashboard === "fan-weather" ? "__fan__" : selectedProvider}
+                onChange={(event) => {
+                  if (event.target.value === "__fan__") setActiveDashboard("fan-weather");
+                  else {
+                    setActiveDashboard("weather");
+                    switchProvider(event.target.value as ProviderId);
+                  }
+                }}
               >
                 {PROVIDERS.map((provider) => (
                   <option value={provider.id} key={provider.id}>
                     {provider.shortLabel}
                   </option>
                 ))}
+                {developerMode ? <option value="__fan__">FAN 气象数据</option> : null}
               </select>
-              <span className={`latency-dot ${providerHealth.status}`} />
+              <span className={`latency-dot ${activeDashboard === "fan-weather" ? "green" : providerHealth.status}`} />
               <span className="latency-text">
-                {providerHealth.latency === null
+                {activeDashboard === "fan-weather"
+                  ? "按需"
+                  : providerHealth.latency === null
                   ? providerHealth.status === "checking"
                     ? "检测中"
                     : "连接异常"
@@ -1507,9 +1529,9 @@ export default function App() {
           )}
         </div>
         <div className="global-actions">
-          {activeDashboard === "weather" ? (
+          {activeDashboard !== "earthquake" ? (
             <>
-              <span className="header-source">接口：{selectedProviderConfig.label}</span>
+              <span className="header-source">接口：{activeDashboard === "fan-weather" ? "FAN Studio" : selectedProviderConfig.label}</span>
               <button title="消息" aria-label="消息" onClick={() => setDrawer("messages")}>
                 <MessageSquare size={17} />
                 <span className="action-label">消息</span>
@@ -1558,7 +1580,7 @@ export default function App() {
       >
         {earthquakeMounted && (
           <Suspense fallback={<div className="dashboard-route-loading"><Loader2 size={24} /><span>正在加载地震分析组件</span></div>}>
-            <EarthquakeDashboard onToggleSidebar={toggleSidebar} userStation={station} />
+            <EarthquakeDashboard onToggleSidebar={toggleSidebar} userStation={station} developerMode={developerMode} />
           </Suspense>
         )}
       </div>
@@ -2283,6 +2305,12 @@ export default function App() {
       </main>
       </>
       </div>
+      <div
+        className={`dashboard-route${activeDashboard === "fan-weather" ? "" : " dashboard-route-inactive"}`}
+        aria-hidden={activeDashboard !== "fan-weather"}
+      >
+        {activeDashboard === "fan-weather" ? <Suspense fallback={<div className="dashboard-route-loading"><Loader2 size={24} /><span>正在加载 FAN 气象数据板</span></div>}><FanWeatherDashboard /></Suspense> : null}
+      </div>
       <DashboardDrawer
         view={drawer}
         onClose={() => setDrawer(null)}
@@ -2311,6 +2339,8 @@ export default function App() {
         legend={<LegendList frame={currentFrame} />}
         alertHistoryCount={weatherAlertHistory.length}
         onSpeak={announceCurrentRisk}
+        developerMode={developerMode}
+        setDeveloperMode={setDeveloperMode}
       />
     </div>
   );
@@ -2344,6 +2374,8 @@ function DashboardDrawer(props: {
   legend: React.ReactNode;
   alertHistoryCount: number;
   onSpeak: () => void;
+  developerMode: boolean;
+  setDeveloperMode: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   useEffect(() => {
     if (!props.view) return;
@@ -2447,6 +2479,10 @@ function DashboardDrawer(props: {
             <label className="toggle-row">
               <input type="checkbox" checked={props.smooth} onChange={(event) => props.setSmooth(event.target.checked)} />
               平滑动画
+            </label>
+            <label className="toggle-row">
+              <input type="checkbox" checked={props.developerMode} onChange={(event) => props.setDeveloperMode(event.target.checked)} />
+              开发者模式（显示 FAN 实验数据源）
             </label>
             <label className="toggle-row">
               <input

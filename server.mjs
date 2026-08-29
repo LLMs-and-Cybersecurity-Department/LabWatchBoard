@@ -44,6 +44,7 @@ import { AnimationFrameProxyError, resolveAnimationFrameSource } from "./server/
 import { fetchProxyResource, ProxyResponseCache } from "./server/upstreamProxy.mjs";
 import { CencProductError, getCencProductSnapshot, getCencResource } from "./server/cencProducts.mjs";
 import { CwaOfficialError, getCwaCatalogueSnapshot, getCwaOfficialSnapshot, getCwaProductSnapshot, getCwaTsunamiSnapshot } from "./server/cwaOfficial.mjs";
+import { resolveFanGetRequest } from "./server/fanStudio.mjs";
 
 const ROOT = process.env.APP_ROOT
   ? path.resolve(process.env.APP_ROOT)
@@ -241,6 +242,32 @@ const server = createServer(async (request, response) => {
       setSecurityHeaders(response);
       response.writeHead(401, { "WWW-Authenticate": "Basic realm=ecmwf-pBoard", "Cache-Control": "no-store" });
       response.end("需要身份验证");
+      return;
+    }
+    if (requestUrl.pathname.startsWith("/api/fan/")) {
+      if (!new Set(["GET", "HEAD"]).has(request.method ?? "GET")) {
+        sendJson(response, 405, { error: "FAN 数据代理仅支持 GET/HEAD" });
+        return;
+      }
+      try {
+        const endpointName = decodeURIComponent(requestUrl.pathname.slice("/api/fan/".length));
+        const fanRequest = resolveFanGetRequest(endpointName, requestUrl.searchParams);
+        const largeResponse = fanRequest.timeoutMs > 45_000;
+        await proxyRequest(request, response, fanRequest.url, {
+          cacheNamespace: fanRequest.cacheNamespace,
+          cacheTtlMs: fanRequest.cacheTtlMs,
+          staleTtlMs: fanRequest.staleTtlMs,
+          retries: largeResponse ? 0 : 2,
+          attemptTimeoutMs: largeResponse ? fanRequest.timeoutMs - 10_000 : 25_000,
+          timeoutMs: fanRequest.timeoutMs,
+          clientCacheControl: "private, max-age=60, stale-if-error=3600",
+        });
+      } catch (error) {
+        sendJson(response, 400, {
+          error: "FAN 数据接口参数无效",
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
       return;
     }
     if (requestUrl.pathname === "/api/animation-frame") {

@@ -148,6 +148,7 @@ const BASE_LAYERS = {
 type EarthquakeDashboardProps = {
   onToggleSidebar: () => void;
   userStation: Station;
+  developerMode: boolean;
 };
 
 type EarthquakeSection = "live" | "global";
@@ -915,9 +916,9 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
   );
 }
 
-export function EarthquakeDashboard({ onToggleSidebar, userStation }: EarthquakeDashboardProps) {
+export function EarthquakeDashboard({ onToggleSidebar, userStation, developerMode }: EarthquakeDashboardProps) {
   const [section, setSection] = usePersistentState<EarthquakeSection>("earthquake-section", "live");
   return section === "live"
-    ? <SeismicLiveDashboard onToggleSidebar={onToggleSidebar} onOpenGlobal={() => setSection("global")} userStation={userStation} />
-    : <GlobalEarthquakeDashboard onToggleSidebar={onToggleSidebar} onOpenLive={() => setSection("live")} userStation={userStation} />;
+    ? <SeismicLiveDashboard onToggleSidebar={onToggleSidebar} onOpenGlobal={() => setSection("global")} userStation={userStation} developerMode={developerMode} />
+    : <GlobalEarthquakeDashboard onToggleSidebar={onToggleSidebar} onOpenLive={() => setSection("live")} userStation={userStation} developerMode={developerMode} />;
 }

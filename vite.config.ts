@@ -6,6 +6,7 @@ import react from "@vitejs/plugin-react";
 import { getModelChart, ModelChartError } from "./server/modelChart.mjs";
 import { EarthquakeDataError, getEarthquakeSnapshot } from "./server/earthquake.mjs";
 import { getJmaTsunamiSnapshot } from "./server/jmaTsunami.mjs";
+import { resolveFanGetRequest } from "./server/fanStudio.mjs";
 
 const ecmwfProxy = {
   target: "https://charts.ecmwf.int/opencharts-api/v1",
@@ -173,9 +174,53 @@ function jmaTsunamiApi(): Plugin {
   };
 }
 
+function fanDataApi(): Plugin {
+  const attach = (server: ViteDevServer | PreviewServer) => {
+    server.middlewares.use(async (request, response, next) => {
+      const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      if (!requestUrl.pathname.startsWith("/api/fan/")) {
+        next();
+        return;
+      }
+      if (!new Set(["GET", "HEAD"]).has(request.method ?? "GET")) {
+        response.writeHead(405, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "FAN 数据代理仅支持 GET/HEAD" }));
+        return;
+      }
+      try {
+        const endpointName = decodeURIComponent(requestUrl.pathname.slice("/api/fan/".length));
+        const target = resolveFanGetRequest(endpointName, requestUrl.searchParams);
+        const upstream = await fetch(target.url, {
+          headers: { Accept: request.headers.accept ?? "application/json", "User-Agent": "LabWatch/1.0" },
+          signal: AbortSignal.timeout(target.timeoutMs),
+        });
+        const body = Buffer.from(await upstream.arrayBuffer());
+        response.writeHead(upstream.status, {
+          "Content-Type": upstream.headers.get("content-type") ?? "application/octet-stream",
+          "Cache-Control": "private, max-age=60, stale-if-error=3600",
+          "Content-Length": String(body.length),
+          "X-Upstream-Service": "api.fanstudio.tech",
+        });
+        response.end(request.method === "HEAD" ? undefined : body);
+      } catch (error) {
+        response.writeHead(400, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        response.end(JSON.stringify({
+          error: "FAN 数据接口请求失败",
+          detail: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    });
+  };
+  return {
+    name: "fan-data-api",
+    configureServer: attach,
+    configurePreviewServer: attach,
+  };
+}
+
 export default defineConfig({
   base: "./",
-  plugins: [cleanBuildOutput(), react(), modelChartApi(), earthquakeApi(), jmaTsunamiApi(), copyCatalogue()],
+  plugins: [cleanBuildOutput(), react(), modelChartApi(), earthquakeApi(), jmaTsunamiApi(), fanDataApi(), copyCatalogue()],
   build: {
     emptyOutDir: false,
     sourcemap: false,
