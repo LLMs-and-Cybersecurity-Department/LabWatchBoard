@@ -135,7 +135,7 @@ export function JshisDialog({ latitude, longitude, label, onLoaded, onFaultLoade
                   <div><span>发生概率 {percent(fault.occurrenceProbability)}</span><span>贡献评分 {number(fault.score, 3)}</span></div>
                   <button disabled={Boolean(faultLoadingCode)} onClick={() => void loadFault(fault.code)}>
                     {faultLoadingCode === fault.code ? <Loader2 size={13} /> : <Layers3 size={13} />}
-                    {selectedFault?.code === fault.code ? "已叠加" : "叠加断层面"}
+                    {faultLoadingCode === fault.code ? "下载大型点云…" : selectedFault?.code === fault.code ? "已叠加" : "叠加断层面"}
                   </button>
                 </article>)}
                 {!snapshot.faults.length && <div className="jshis-empty">该位置没有返回可排序的断层模型。</div>}

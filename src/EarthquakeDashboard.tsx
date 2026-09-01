@@ -22,9 +22,10 @@ import {
   Search,
   TriangleAlert,
   Waves,
+  X,
 } from "lucide-react";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CircleMarker, GeoJSON as LeafletGeoJSON, MapContainer, Pane, Popup, ScaleControl, TileLayer, useMap, ZoomControl } from "react-leaflet";
+import { CircleMarker, GeoJSON as LeafletGeoJSON, MapContainer, Pane, Popup, ScaleControl, TileLayer, Tooltip as LeafletTooltip, useMap, ZoomControl } from "react-leaflet";
 import {
   Bar,
   BarChart,
@@ -66,6 +67,7 @@ import {
 } from "./earthquake";
 import { FocalMechanismDialog } from "./FocalMechanismDialog";
 import { CencProductsDialog } from "./CencProductsDialog";
+import { CwaProductsDialog, type CwaIntensityLayer } from "./CwaProductsDialog";
 import { NiedProductsDialog } from "./NiedProductsDialog";
 import { JshisDialog } from "./JshisDialog";
 import { ShakeMapDialog } from "./ShakeMapDialog";
@@ -73,6 +75,7 @@ import { SeismicLiveDashboard } from "./SeismicLiveDashboard";
 import { UsgsDyfiDialog } from "./UsgsDyfiDialog";
 import { UsgsPagerDialog } from "./UsgsPagerDialog";
 import { usePersistentState } from "./usePersistentState";
+import type { Station } from "./types";
 import {
   isJshisPositionSupported,
   type JshisFaultShape,
@@ -84,6 +87,41 @@ const SOURCE_ORDER: EarthquakeSourceId[] = ["usgs", "shakealert", "jma", "cenc",
 const MIN_MAGNITUDES = [0, 1, 2.5, 4, 5, 6];
 const MAP_EVENT_LIMIT = 1200;
 const TABLE_EVENT_LIMIT = 100;
+
+type CwaCatalogueSnapshot = {
+  stale: boolean;
+  cache: "HIT" | "MISS" | "REVALIDATED" | "STALE";
+  issueTime: string | null;
+  coverage: { startTime: string | null; endTime: string | null };
+  declaredCount: number | null;
+  events: EarthquakeEvent[];
+};
+
+async function fetchCwaCatalogue(range: EarthquakeRange, minMagnitude: number, signal: AbortSignal) {
+  const query = new URLSearchParams({ range, min_magnitude: String(minMagnitude) });
+  const response = await fetch(`/api/cwa-catalogue?${query}`, { signal, headers: { Accept: "application/json" } });
+  const payload = await response.json().catch(() => null) as CwaCatalogueSnapshot | { error?: string; detail?: string } | null;
+  if (!response.ok || !payload || !("events" in payload) || !Array.isArray(payload.events)) {
+    const errorPayload = payload && !("events" in payload) ? payload : null;
+    throw new Error(errorPayload?.detail || errorPayload?.error || `CWA 年度目录返回 ${response.status}`);
+  }
+  return payload;
+}
+
+function mergeCwaCatalogue(snapshot: EarthquakeSnapshot, catalogue: CwaCatalogueSnapshot) {
+  const cwaReports = snapshot.events.filter((event) => event.source === "cwa");
+  const additions = catalogue.events.filter((candidate) => !cwaReports.some((report) => (
+    Math.abs(Date.parse(report.time) - Date.parse(candidate.time)) <= 15_000
+    && Math.abs(report.latitude - candidate.latitude) <= 0.15
+    && Math.abs(report.longitude - candidate.longitude) <= 0.15
+  )));
+  if (!additions.length) return snapshot;
+  return {
+    ...snapshot,
+    events: [...snapshot.events, ...additions].sort((left, right) => Date.parse(right.time) - Date.parse(left.time)),
+    sources: snapshot.sources.map((source) => source.id === "cwa" ? { ...source, count: source.count + additions.length } : source),
+  };
+}
 
 const MAGNITUDE_GUIDE = [
   { code: "Mw", name: "矩震级", detail: "由地震矩计算，适合中强及巨大地震，较少出现饱和。" },
@@ -109,6 +147,8 @@ const BASE_LAYERS = {
 
 type EarthquakeDashboardProps = {
   onToggleSidebar: () => void;
+  userStation: Station;
+  developerMode: boolean;
 };
 
 type EarthquakeSection = "live" | "global";
@@ -132,6 +172,22 @@ function intensityLabel(event: EarthquakeEvent) {
   return `MMI ${event.intensity}`;
 }
 
+function isCwaProductQueryable(event: EarthquakeEvent) {
+  return event.source === "cwa" && !event.sourceEventId.startsWith("catalogue:");
+}
+
+function cwaIntensityColor(rank: number) {
+  if (rank >= 7) return "#7e22ce";
+  if (rank >= 6.5) return "#991b1b";
+  if (rank >= 6) return "#dc2626";
+  if (rank >= 5.5) return "#f97316";
+  if (rank >= 5) return "#f59e0b";
+  if (rank >= 4) return "#facc15";
+  if (rank >= 3) return "#22c55e";
+  if (rank >= 2) return "#38bdf8";
+  return "#cbd5e1";
+}
+
 function MapFocus({ event }: { event: EarthquakeEvent | null }) {
   const map = useMap();
   const previousId = useRef<string | null>(null);
@@ -140,6 +196,22 @@ function MapFocus({ event }: { event: EarthquakeEvent | null }) {
     previousId.current = event.id;
     map.flyTo([event.latitude, event.longitude], Math.max(map.getZoom(), 5), { duration: 0.55 });
   }, [event, map]);
+  return null;
+}
+
+function CwaLayerFocus({ layer }: { layer: CwaIntensityLayer | null }) {
+  const map = useMap();
+  const previousLayerKey = useRef("");
+  useEffect(() => {
+    if (!layer?.points.length) return;
+    const layerKey = `${layer.eventId}:${layer.kind}:${layer.points.length}`;
+    if (previousLayerKey.current === layerKey) return;
+    previousLayerKey.current = layerKey;
+    map.fitBounds(
+      layer.points.map((point) => [point.latitude, point.longitude] as [number, number]),
+      { animate: true, duration: 0.55, padding: [32, 32], maxZoom: 8 },
+    );
+  }, [layer, map]);
   return null;
 }
 
@@ -173,6 +245,7 @@ function EarthquakeMap(props: {
   jshisLocation: JshisLocationSnapshot | null;
   jshisFault: JshisFaultShape | null;
   cencLayers: CencProductLayer[];
+  cwaLayer: CwaIntensityLayer | null;
   onSelect: (event: EarthquakeEvent, focus?: boolean) => void;
 }) {
   const layer = BASE_LAYERS[props.baseLayer];
@@ -200,6 +273,7 @@ function EarthquakeMap(props: {
       <ScaleControl position="bottomleft" imperial={false} />
       <MapResizeSync />
       <MapFocus event={props.focusedEvent} />
+      <CwaLayerFocus layer={props.cwaLayer} />
       <Pane name="global-jshis-products" style={{ zIndex: 390, pointerEvents: "none" }}>
         {props.jshisLocation?.hazard && <LeafletGeoJSON data={props.jshisLocation.hazard.feature} interactive={false} style={{ color: "#facc15", fillColor: "#f97316", weight: 2.2, opacity: 0.98, fillOpacity: 0.22, dashArray: "5 3" }} />}
         {props.jshisLocation?.site && <LeafletGeoJSON data={props.jshisLocation.site.feature} interactive={false} style={{ color: "#22d3ee", fillColor: "#0891b2", weight: 1.8, opacity: 0.95, fillOpacity: 0.18 }} />}
@@ -207,6 +281,17 @@ function EarthquakeMap(props: {
       </Pane>
       <Pane name="global-cenc-products" style={{ zIndex: 395, pointerEvents: "none" }}>
         {props.cencLayers.map((layer, index) => layer.data && <LeafletGeoJSON key={`${layer.title}:${index}`} data={layer.data} interactive={false} style={{ color: "#f59e0b", fillColor: "#f97316", weight: 2, opacity: 0.9, fillOpacity: 0.18 }} />)}
+      </Pane>
+      <Pane name="global-cwa-products" style={{ zIndex: 560 }}>
+        {props.cwaLayer?.points.map((point) => <CircleMarker
+          key={`${props.cwaLayer?.eventId}:${props.cwaLayer?.kind}:${point.id}`}
+          center={[point.latitude, point.longitude]}
+          radius={9}
+          pathOptions={{ color: "#f8fafc", fillColor: cwaIntensityColor(point.rank), weight: 1.5, opacity: 1, fillOpacity: 0.96 }}
+        >
+          <LeafletTooltip permanent direction="center" className="cwa-intensity-map-label">{point.intensity.replace(/級$/, "")}</LeafletTooltip>
+          <Popup><div className="earthquake-popup"><b>{point.kind === "station" ? "CWA 实测站" : "CWA 乡镇震度"} · {point.intensity}</b><strong>{point.name}</strong><span>{point.areaName}{point.epicenterDistanceKm === null ? "" : ` · 震中距 ${point.epicenterDistanceKm.toFixed(1)} km`}</span>{point.pga && <span>PGA {point.pga.intensityScaleValue?.toFixed(2) ?? "--"} {point.pga.unit}</span>}{point.pgv && <span>PGV {point.pgv.intensityScaleValue?.toFixed(2) ?? "--"} {point.pgv.unit}</span>}</div></Popup>
+        </CircleMarker>)}
       </Pane>
       {props.events.map((event) => {
         const selected = event.id === props.selectedId;
@@ -343,6 +428,8 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
   const [storedRefreshIntervalSeconds, setRefreshIntervalSeconds] = usePersistentState("earthquake-refresh-interval-seconds", 60);
   const [search, setSearch] = useState("");
   const [snapshot, setSnapshot] = useState<EarthquakeSnapshot | null>(null);
+  const [cwaCatalogue, setCwaCatalogue] = useState<CwaCatalogueSnapshot | null>(null);
+  const [cwaCatalogueError, setCwaCatalogueError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -357,6 +444,8 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
   const [jshisFault, setJshisFault] = useState<JshisFaultShape | null>(null);
   const [cencEvent, setCencEvent] = useState<EarthquakeEvent | null>(null);
   const [cencLayers, setCencLayers] = useState<CencProductLayer[]>([]);
+  const [cwaEvent, setCwaEvent] = useState<EarthquakeEvent | null>(null);
+  const [cwaLayer, setCwaLayer] = useState<CwaIntensityLayer | null>(null);
   const [updateBursts, setUpdateBursts] = useState<Record<string, number>>({});
   const [burstClock, setBurstClock] = useState(Date.now());
   const abortRef = useRef<AbortController | null>(null);
@@ -378,8 +467,21 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
     abortRef.current = controller;
     setLoading(true);
     setError("");
+    setCwaCatalogueError("");
     try {
-      const next = await fetchEarthquakeSnapshot({ range, minMagnitude, force, signal: controller.signal });
+      const [baseSnapshot, catalogueResult] = await Promise.all([
+        fetchEarthquakeSnapshot({ range, minMagnitude, force, signal: controller.signal }),
+        range === "30d" || range === "90d"
+          ? fetchCwaCatalogue(range, minMagnitude, controller.signal).catch((catalogueError) => {
+              if (!(catalogueError instanceof DOMException && catalogueError.name === "AbortError")) {
+                setCwaCatalogueError(catalogueError instanceof Error ? catalogueError.message : String(catalogueError));
+              }
+              return null;
+            })
+          : Promise.resolve(null),
+      ]);
+      const next = catalogueResult ? mergeCwaCatalogue(baseSnapshot, catalogueResult) : baseSnapshot;
+      setCwaCatalogue(catalogueResult);
       const queryKey = `${range}:${minMagnitude}`;
       if (previousQueryRef.current !== queryKey) {
         previousQueryRef.current = queryKey;
@@ -608,6 +710,8 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
 
         {error && <div className="error-banner">地震速报更新失败：{error}。{snapshot ? "继续显示上次成功数据。" : ""}</div>}
         {snapshot?.partial && <div className="earthquake-partial-banner"><AlertTriangle size={15} />部分机构暂不可用；有成功快照的机构继续显示缓存报告，其余地图和报表保持更新。</div>}
+        {cwaCatalogue && <div className="earthquake-cwa-catalogue-banner"><Database size={14} /><span><strong>CWA 年度地震目录 E-A0073</strong>本筛选读取 {cwaCatalogue.events.length} 条审核目录；官方文件覆盖至 {cwaCatalogue.coverage.endTime ? formatEarthquakeTime(cwaCatalogue.coverage.endTime, timeZone) : "未注明"}，每小时最多重验证一次{cwaCatalogue.stale ? " · 当前显示缓存" : ""}。</span></div>}
+        {cwaCatalogueError && <div className="earthquake-cwa-catalogue-banner warn"><AlertTriangle size={14} /><span><strong>CWA 年度目录暂不可用</strong>{cwaCatalogueError}；显著与小区域有感报告仍继续显示。</span></div>}
 
         <section className="earthquake-primary-grid">
           <div className="earthquake-map-panel">
@@ -630,12 +734,14 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
                 jshisLocation={jshisLocation}
                 jshisFault={jshisFault}
                 cencLayers={cencLayers}
+                cwaLayer={cwaLayer}
                 onSelect={chooseEvent}
               />
               <div className="earthquake-map-legend" aria-label="地图编码图例">
                 <strong>机构边框</strong>
                 <div>{SOURCE_ORDER.map((source) => <span key={source}><i style={{ borderColor: sourceTone(source) }} />{EARTHQUAKE_SOURCE_LABELS[source]}</span>)}</div>
               </div>
+              {cwaLayer && <button className="earthquake-map-layer-chip" onClick={() => setCwaLayer(null)} title="移除 CWA 官方震度图层"><Layers3 size={13} /><span>{cwaLayer.kind === "station" ? "CWA 测站" : "CWA 乡镇"} {cwaLayer.points.length} 点</span><X size={12} /></button>}
             </div>
           </div>
 
@@ -669,6 +775,7 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
                   {isMechanismQueryable(selectedEvent) && <button onClick={() => setMechanismEvent(selectedEvent)}><CircleGauge size={15} />{selectedEvent.source === "emsc" ? "查询 EMSC 机制解" : "官方机制解"}</button>}
                   {isJshisPositionSupported(selectedEvent.latitude, selectedEvent.longitude) && <button onClick={() => setJshisEvent(selectedEvent)}><Layers3 size={15} />J-SHIS 位置产品</button>}
                   {selectedEvent.source === "cenc" && <button onClick={() => openCencProducts(selectedEvent)}><Layers3 size={15} />CENC 官方专题</button>}
+                  {isCwaProductQueryable(selectedEvent) && <button onClick={() => setCwaEvent(selectedEvent)}><Activity size={15} />CWA 官方震度</button>}
                   {isShakeMapQueryable(selectedEvent) && <button onClick={() => setShakeMapEvent(selectedEvent)}><MapIcon size={15} />USGS ShakeMap</button>}
                   {isPagerQueryable(selectedEvent) && <button onClick={() => setPagerEvent(selectedEvent)}><BarChart3 size={15} />USGS PAGER</button>}
                   {isDyfiQueryable(selectedEvent) && <button onClick={() => setDyfiEvent(selectedEvent)}><MessageCircle size={15} />Did You Feel It?</button>}
@@ -748,7 +855,7 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
                     <td><span className="depth-readout"><i style={{ background: depthColor(event.depthKm) }} />{event.depthKm?.toFixed(0) ?? "--"} km</span></td>
                     <td>{intensityLabel(event)}</td>
                     <td>{event.status}</td>
-                    <td><div className="earthquake-product-actions">{event.shakeAlertReport && <button title="查看 ShakeAlert 性能报告" aria-label={`查看 ${event.place} ShakeAlert 性能报告`} onClick={() => chooseEvent(event)}><Radio size={14} /></button>}{isNiedQueryable(event) && <button title="查看 NIED F-net / Hi-net 一键详情" aria-label={`查看 ${event.place} NIED 一键详情`} onClick={() => setNiedEvent(event)}><Activity size={14} /></button>}{isMechanismQueryable(event) && <button title={event.source === "emsc" ? "查询 EMSC 收录的机制解" : "查看官方机制解"} aria-label={`查看 ${event.place} 官方机制解`} onClick={() => setMechanismEvent(event)}><CircleGauge size={14} /></button>}{isJshisPositionSupported(event.latitude, event.longitude) && <button title="查看 J-SHIS 官方位置产品" aria-label={`查看 ${event.place} J-SHIS`} onClick={() => setJshisEvent(event)}><Layers3 size={14} /></button>}{event.source === "cenc" && <button title="查看 CENC 官方专题产品" aria-label={`查看 ${event.place} CENC 官方专题`} onClick={() => openCencProducts(event)}><Layers3 size={14} /></button>}{isShakeMapQueryable(event) && <button title="查看已确认存在的 USGS ShakeMap" aria-label={`查看 ${event.place} USGS ShakeMap`} onClick={() => setShakeMapEvent(event)}><MapIcon size={14} /></button>}{isPagerQueryable(event) && <button title="查看已确认存在的 USGS PAGER 人口与损失估算" aria-label={`查看 ${event.place} USGS PAGER`} onClick={() => setPagerEvent(event)}><BarChart3 size={14} /></button>}{isDyfiQueryable(event) && <button title="查看已确认存在的 USGS Did You Feel It? 图片与图表" aria-label={`查看 ${event.place} USGS DYFI`} onClick={() => setDyfiEvent(event)}><MessageCircle size={14} /></button>}<a href={event.url} target="_blank" rel="noreferrer" aria-label={`打开 ${event.place} 官方记录`}><ExternalLink size={14} /></a></div></td>
+                    <td><div className="earthquake-product-actions">{event.shakeAlertReport && <button title="查看 ShakeAlert 性能报告" aria-label={`查看 ${event.place} ShakeAlert 性能报告`} onClick={() => chooseEvent(event)}><Radio size={14} /></button>}{isNiedQueryable(event) && <button title="查看 NIED F-net / Hi-net 一键详情" aria-label={`查看 ${event.place} NIED 一键详情`} onClick={() => setNiedEvent(event)}><Activity size={14} /></button>}{isMechanismQueryable(event) && <button title={event.source === "emsc" ? "查询 EMSC 收录的机制解" : "查看官方机制解"} aria-label={`查看 ${event.place} 官方机制解`} onClick={() => setMechanismEvent(event)}><CircleGauge size={14} /></button>}{isJshisPositionSupported(event.latitude, event.longitude) && <button title="查看 J-SHIS 官方位置产品" aria-label={`查看 ${event.place} J-SHIS`} onClick={() => setJshisEvent(event)}><Layers3 size={14} /></button>}{event.source === "cenc" && <button title="查看 CENC 官方专题产品" aria-label={`查看 ${event.place} CENC 官方专题`} onClick={() => openCencProducts(event)}><Layers3 size={14} /></button>}{isCwaProductQueryable(event) && <button title="查看 CWA 官方震度、测站与强震产品" aria-label={`查看 ${event.place} CWA 官方产品`} onClick={() => setCwaEvent(event)}><Activity size={14} /></button>}{isShakeMapQueryable(event) && <button title="查看已确认存在的 USGS ShakeMap" aria-label={`查看 ${event.place} USGS ShakeMap`} onClick={() => setShakeMapEvent(event)}><MapIcon size={14} /></button>}{isPagerQueryable(event) && <button title="查看已确认存在的 USGS PAGER 人口与损失估算" aria-label={`查看 ${event.place} USGS PAGER`} onClick={() => setPagerEvent(event)}><BarChart3 size={14} /></button>}{isDyfiQueryable(event) && <button title="查看已确认存在的 USGS Did You Feel It? 图片与图表" aria-label={`查看 ${event.place} USGS DYFI`} onClick={() => setDyfiEvent(event)}><MessageCircle size={14} /></button>}<a href={event.url} target="_blank" rel="noreferrer" aria-label={`打开 ${event.place} 官方记录`}><ExternalLink size={14} /></a></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -797,13 +904,21 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
         onClose={() => setCencEvent(null)}
         onShowLayer={(layer) => setCencLayers((current) => [...current.filter((existing) => existing.title !== layer.title), layer])}
       />}
+      {cwaEvent && <CwaProductsDialog
+        event={cwaEvent}
+        onClose={() => setCwaEvent(null)}
+        onShowLayer={(layer) => {
+          setCwaLayer(layer);
+          setCwaEvent(null);
+        }}
+      />}
     </>
   );
 }
 
-export function EarthquakeDashboard({ onToggleSidebar }: EarthquakeDashboardProps) {
+export function EarthquakeDashboard({ onToggleSidebar, userStation, developerMode }: EarthquakeDashboardProps) {
   const [section, setSection] = usePersistentState<EarthquakeSection>("earthquake-section", "live");
   return section === "live"
-    ? <SeismicLiveDashboard onToggleSidebar={onToggleSidebar} onOpenGlobal={() => setSection("global")} />
-    : <GlobalEarthquakeDashboard onToggleSidebar={onToggleSidebar} onOpenLive={() => setSection("live")} />;
+    ? <SeismicLiveDashboard onToggleSidebar={onToggleSidebar} onOpenGlobal={() => setSection("global")} userStation={userStation} developerMode={developerMode} />
+    : <GlobalEarthquakeDashboard onToggleSidebar={onToggleSidebar} onOpenLive={() => setSection("live")} userStation={userStation} developerMode={developerMode} />;
 }

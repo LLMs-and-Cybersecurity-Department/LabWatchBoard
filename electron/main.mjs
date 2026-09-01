@@ -15,6 +15,16 @@ function isSafeExternalUrl(rawUrl) {
 }
 
 async function startLocalService() {
+  const environmentFiles = app.isPackaged
+    ? [path.join(app.getPath("userData"), ".env.local")]
+    : [path.join(app.getAppPath(), ".env.local")];
+  for (const environmentFile of environmentFiles) {
+    try {
+      process.loadEnvFile(environmentFile);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
   const runtimeDirectory = path.join(app.getPath("userData"), "runtime");
   await mkdir(runtimeDirectory, { recursive: true });
 
@@ -46,7 +56,7 @@ async function createWindow() {
     minHeight: 680,
     show: false,
     backgroundColor: "#090e10",
-    title: "天气与地震信息看板",
+    title: "LabWatch",
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

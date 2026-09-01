@@ -20,6 +20,177 @@
   --ok: #22c55e;
 }
 
+/* Tsunami warning and lightweight simulation */
+.seismic-settings-tsunami-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+
+.seismic-settings-tsunami-actions button {
+  min-height: 34px;
+  border: 1px solid #355160;
+  border-radius: 7px;
+  background: #10232a;
+  color: #dff6ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-weight: 700;
+}
+
+.seismic-settings-tsunami-actions button:hover { border-color: #22d3ee; }
+.seismic-settings-tsunami-actions button.danger { border-color: #8f2e3d; color: #ffbac4; background: #2a1118; }
+
+.tsunami-alert-panel {
+  position: absolute;
+  z-index: 1260;
+  top: 12px;
+  right: 12px;
+  width: min(390px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--tsunami-accent, #f43f5e) 75%, #ffffff 12%);
+  border-radius: 12px;
+  background: #13233c;
+  color: #f8fbff;
+  box-shadow: 0 20px 48px rgb(0 0 0 / 58%), 0 0 0 1px rgb(255 255 255 / 5%) inset;
+  display: flex;
+  flex-direction: column;
+  font-variant-numeric: tabular-nums;
+}
+
+.tsunami-alert-panel.level-3 { --tsunami-accent: #ef1212; --tsunami-secondary: #bd22ed; }
+.tsunami-alert-panel.level-2 { --tsunami-accent: #ef2d2d; --tsunami-secondary: #ef2d2d; }
+.tsunami-alert-panel.level-1 { --tsunami-accent: #f6df23; --tsunami-secondary: #f6df23; }
+
+.tsunami-alert-panel > header {
+  min-height: 48px;
+  padding: 0 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  background: var(--tsunami-accent);
+  color: #fff;
+}
+
+.tsunami-alert-panel.level-1 > header { color: #181800; }
+.tsunami-alert-panel > header div { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tsunami-alert-panel > header strong { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tsunami-alert-panel > header span { font-size: 10px; font-weight: 900; letter-spacing: .08em; opacity: .86; }
+.tsunami-alert-panel > header button { width: 28px; height: 28px; border: 0; border-radius: 6px; background: rgb(0 0 0 / 18%); color: inherit; display: grid; place-items: center; }
+
+.tsunami-alert-event { padding: 13px 15px 11px; border-bottom: 1px solid rgb(255 255 255 / 10%); }
+.tsunami-alert-event small { color: #bfcae0; font-weight: 700; }
+.tsunami-alert-event h3 { margin: 3px 0 10px; font-size: 22px; line-height: 1.2; }
+.tsunami-alert-event > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tsunami-alert-event > div span { border-radius: 9px; padding: 8px 10px; background: #29446e; color: #eaf1ff; display: flex; justify-content: space-between; align-items: baseline; }
+.tsunami-alert-event > div strong { font-size: 21px; }
+
+.tsunami-alert-areas { min-height: 0; display: grid; grid-template-columns: 46px minmax(0, 1fr); overflow: hidden; }
+.tsunami-alert-rail { margin: 12px 0 12px 13px; border-radius: 8px 0 0 8px; background: var(--tsunami-secondary); display: flex; justify-content: center; padding-top: 10px; color: white; }
+.tsunami-alert-groups { min-height: 0; overflow: auto; padding: 10px 12px 14px 0; scrollbar-width: thin; }
+.tsunami-alert-group { margin: 0 0 10px; }
+.tsunami-alert-group h4 { margin: 0 0 5px 10px; font-size: 17px; }
+.tsunami-alert-group article { margin: 0 0 6px; }
+.tsunami-alert-group article > strong { display: block; margin: 0 0 3px 10px; font-size: 16px; }
+.tsunami-alert-group article > span { min-height: 34px; border-radius: 18px; padding: 5px 10px 5px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 7px; align-items: center; background: #f1d92c; color: #151515; font-weight: 800; }
+.tsunami-alert-group.level-2 article > span { background: #f33232; color: #fff; }
+.tsunami-alert-group.level-3 article > span { background: #bf20eb; color: #fff; }
+.tsunami-alert-group article > span small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; }
+.tsunami-alert-group article > span b { font-size: 16px; white-space: nowrap; }
+.tsunami-alert-group article > span i { font-size: 19px; font-style: normal; animation: tsunami-arrival-pulse 1s ease-in-out infinite alternate; }
+.tsunami-alert-group article.observing > span { filter: saturate(.68); }
+.tsunami-alert-empty { display: flex; align-items: center; gap: 8px; min-height: 72px; padding: 12px; color: #bdc9dd; }
+.tsunami-alert-panel > footer { padding: 8px 12px; border-top: 1px solid rgb(255 255 255 / 9%); background: #0c1729; color: #a9b6ca; font-size: 10px; line-height: 1.4; }
+
+@keyframes tsunami-arrival-pulse { from { transform: translateY(1px); opacity: .55; } to { transform: translateY(-1px); opacity: 1; } }
+
+.tsunami-simulator-backdrop {
+  position: fixed;
+  z-index: 5200;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgb(1 8 13 / 78%);
+  backdrop-filter: blur(8px);
+}
+
+.tsunami-simulator-dialog {
+  width: min(760px, 96vw);
+  max-height: min(900px, 94vh);
+  overflow: auto;
+  border: 1px solid #2d5666;
+  border-radius: 14px;
+  background: #09161d;
+  color: #e9f7fb;
+  box-shadow: 0 28px 90px rgb(0 0 0 / 70%);
+}
+
+.tsunami-simulator-dialog > header { min-height: 62px; padding: 0 18px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #213b45; background: linear-gradient(120deg, #102a34, #0a171e); }
+.tsunami-simulator-dialog > header > div { display: flex; align-items: center; gap: 11px; color: #52e3f6; }
+.tsunami-simulator-dialog > header span { display: flex; flex-direction: column; gap: 2px; }
+.tsunami-simulator-dialog > header strong { color: #f0fcff; font-size: 18px; }
+.tsunami-simulator-dialog > header small { color: #82a9b5; }
+.tsunami-simulator-dialog > header button { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #34515a; border-radius: 8px; background: #11252d; color: #c7e8ef; }
+
+.tsunami-simulator-warning { margin: 14px 16px 10px; padding: 10px 12px; border: 1px solid #805522; border-radius: 9px; background: #2a1d0c; color: #ffd79a; display: flex; gap: 9px; align-items: flex-start; font-size: 12px; line-height: 1.5; }
+.tsunami-simulator-warning strong { display: block; color: #ffb339; }
+.tsunami-simulator-presets { padding: 4px 16px 12px; display: flex; flex-wrap: wrap; gap: 7px; }
+.tsunami-simulator-presets button { min-height: 30px; padding: 0 10px; border: 1px solid #2b4650; border-radius: 999px; background: #102129; color: #b9ced5; }
+.tsunami-simulator-presets button.active { border-color: #22d3ee; background: #12323c; color: #e7fbff; box-shadow: 0 0 0 1px #22d3ee33 inset; }
+
+.tsunami-simulator-form { padding: 0 16px 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.tsunami-simulator-form label { display: flex; flex-direction: column; gap: 5px; color: #93aeb8; font-size: 11px; }
+.tsunami-simulator-form label.wide { grid-column: 1 / -1; }
+.tsunami-simulator-form input { min-height: 38px; width: 100%; border: 1px solid #2b4853; border-radius: 7px; background: #0d2028; color: #f1fbff; padding: 0 10px; font: inherit; font-size: 13px; }
+.tsunami-simulator-form input[type="range"] { padding: 0; accent-color: #22d3ee; }
+.tsunami-simulator-source-config { margin: 0 16px 14px; border: 1px solid #29454f; border-radius: 10px; background: #0b1b22; overflow: hidden; }
+.tsunami-simulator-source-config > header { min-height: 48px; padding: 9px 12px; display: flex; align-items: center; flex-wrap: wrap; gap: 9px 16px; border-bottom: 1px solid #203d47; }
+.tsunami-simulator-source-config > header label { display: flex; align-items: center; gap: 7px; color: #d5eef4; font-size: 12px; font-weight: 700; }
+.tsunami-simulator-source-config > header input[type="checkbox"] { accent-color: #22d3ee; }
+.tsunami-simulator-source-config > header input[type="number"] { width: 70px; min-height: 30px; border: 1px solid #31505b; border-radius: 6px; padding: 0 8px; background: #10252d; color: #fff; }
+.tsunami-simulator-source-config > header .sequence-pick { min-height: 30px; padding: 0 9px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid #276978; border-radius: 6px; background: #0d3340; color: #a5f3fc; font-size: 11px; font-weight: 750; }
+.tsunami-simulator-source-config > header .sequence-pick:hover { border-color: #67e8f9; color: #ecfeff; }
+.tsunami-simulator-source-config > header small { flex: 1 1 260px; color: #7999a4; font-size: 10px; line-height: 1.35; }
+.tsunami-simulator-source-list { max-height: 330px; overflow: auto; padding: 10px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.tsunami-simulator-source-list article { min-width: 0; padding: 10px; border: 1px solid #294853; border-radius: 9px; background: #0d2028; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tsunami-source-heading, .tsunami-simulator-source-list label.name { grid-column: 1 / -1; }
+.tsunami-source-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tsunami-source-heading strong { min-width: 0; display: flex; align-items: center; gap: 7px; color: #dff8fc; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tsunami-source-heading strong i { flex: 0 0 22px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: #e11d48; color: #fff; font-style: normal; font-size: 11px; }
+.tsunami-source-heading button { min-height: 28px; padding: 0 8px; display: flex; align-items: center; gap: 5px; border: 1px solid #28798a; border-radius: 6px; background: #0d3440; color: #8bedfa; font-size: 11px; }
+.tsunami-simulator-source-list label { min-width: 0; display: flex; flex-direction: column; gap: 4px; color: #84a6b1; font-size: 10px; }
+.tsunami-simulator-source-list input { width: 100%; min-height: 32px; border: 1px solid #2b4853; border-radius: 6px; padding: 0 8px; background: #09181e; color: #eefbff; font-size: 12px; }
+.tsunami-simulator-countries { margin: 0 16px 15px; padding: 11px 12px 12px; border: 1px solid #29454f; border-radius: 9px; display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.tsunami-simulator-countries legend { padding: 0 6px; color: #8fb0bb; font-size: 11px; }
+.tsunami-simulator-countries label { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.tsunami-simulator-countries input { accent-color: #22d3ee; }
+.tsunami-simulator-dialog > footer { min-height: 64px; padding: 10px 16px; border-top: 1px solid #213b45; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.tsunami-simulator-dialog > footer > div { display: flex; align-items: center; gap: 8px; color: #8da8b2; font-size: 11px; }
+.tsunami-simulator-dialog > footer button.primary { min-width: 132px; min-height: 40px; border: 1px solid #20bed2; border-radius: 8px; background: linear-gradient(135deg, #0f8fa5, #0d6c85); color: white; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 7px; }
+.tsunami-simulator-dialog > footer button.primary:disabled { opacity: .35; cursor: not-allowed; }
+.tsunami-map-pick-prompt { position: absolute; z-index: 1505; top: 12px; left: 50%; transform: translateX(-50%); width: min(520px, calc(100% - 28px)); min-height: 54px; padding: 8px 10px; display: flex; align-items: center; gap: 9px; border: 1px solid #67e8f9; border-radius: 10px; background: rgb(5 28 36 / 94%); color: #a5f3fc; box-shadow: 0 8px 28px rgb(0 0 0 / 45%); }
+.tsunami-map-pick-prompt span { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.tsunami-map-pick-prompt strong { color: #effdff; }
+.tsunami-map-pick-prompt small { color: #8db3bc; }
+.tsunami-map-pick-prompt button { min-height: 31px; padding: 0 10px; border: 1px solid #47626b; border-radius: 6px; background: #132a32; color: #d7edf2; }
+.seismic-map--tsunami-pick, .seismic-map--tsunami-pick .leaflet-interactive { cursor: crosshair !important; }
+.tsunami-simulation-source-number { min-width: 17px !important; width: 17px; height: 17px; margin: -8px 0 0 -8px !important; padding: 0 !important; display: grid; place-items: center; border: 0 !important; border-radius: 50%; background: transparent !important; color: #fff !important; font-size: 10px; font-weight: 900; box-shadow: none !important; }
+.tsunami-simulation-source-number::before { display: none; }
+
+@media (max-width: 680px) {
+  .tsunami-alert-panel { top: 8px; right: 8px; width: calc(100% - 16px); max-height: calc(100% - 16px); }
+  .tsunami-simulator-form { grid-template-columns: 1fr; }
+  .tsunami-simulator-form label.wide { grid-column: auto; }
+  .tsunami-simulator-source-list { grid-template-columns: 1fr; }
+  .tsunami-simulator-dialog > footer { align-items: stretch; flex-direction: column; }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -350,6 +521,287 @@ a {
   pointer-events: none;
   overflow: hidden;
   contain: strict;
+}
+
+.fan-weather-sidebar {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: #0d1315;
+}
+
+.fan-weather-sidebar > header {
+  padding: 16px 14px 12px;
+  border-bottom: 1px solid #263438;
+}
+
+.fan-weather-sidebar > header > div,
+.fan-master-switch {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.fan-master-switch {
+  margin-top: 12px;
+  color: #b7c5c7;
+  font-size: 12px;
+}
+
+.fan-weather-sidebar nav {
+  min-height: 0;
+  padding: 8px;
+  overflow: auto;
+}
+
+.fan-interface-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+}
+
+.fan-interface-row.active {
+  border-color: #2d7580;
+  background: rgba(34, 211, 238, 0.08);
+}
+
+.fan-interface-row > button {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.fan-interface-row > button span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.fan-interface-row > button strong {
+  overflow: hidden;
+  color: #d7e4e5;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fan-interface-row > button small,
+.fan-weather-sidebar > footer {
+  color: #75878a;
+  font-size: 10px;
+}
+
+.fan-weather-sidebar > footer {
+  padding: 10px 14px;
+  border-top: 1px solid #263438;
+  line-height: 1.5;
+}
+
+.fan-weather-workspace {
+  min-width: 0;
+  min-height: 0;
+  padding: 18px;
+  overflow: auto;
+  background: radial-gradient(circle at 85% 5%, rgba(14, 165, 233, 0.1), transparent 34%), #0a0f11;
+}
+
+.fan-weather-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 15px 17px;
+  border: 1px solid #29393d;
+  border-radius: 9px;
+  background: rgba(17, 25, 28, 0.92);
+}
+
+.fan-weather-heading > div,
+.fan-weather-heading > div > div,
+.fan-weather-heading button,
+.fan-source-state {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.fan-weather-heading h2,
+.fan-weather-heading p {
+  margin: 0;
+}
+
+.fan-weather-heading h2 { font-size: 17px; }
+.fan-weather-heading p { margin-top: 4px; color: #8ca0a3; font-size: 12px; }
+.fan-weather-heading button { padding: 7px 10px; }
+
+.fan-source-state {
+  color: #849598;
+  font-size: 11px;
+}
+
+.fan-source-state i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #64748b;
+}
+
+.fan-source-state.online i { background: #22c55e; box-shadow: 0 0 9px rgba(34, 197, 94, 0.7); }
+
+.fan-weather-content {
+  display: grid;
+  gap: 14px;
+}
+
+.fan-query-bar {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #29383c;
+  border-radius: 8px;
+  background: #101719;
+}
+
+.fan-query-bar label {
+  min-width: 180px;
+  display: grid;
+  gap: 5px;
+  color: #98abad;
+  font-size: 11px;
+}
+
+.fan-query-bar input,
+.fan-query-bar select { min-height: 34px; }
+.fan-query-bar button { min-height: 34px; display: flex; align-items: center; gap: 6px; }
+
+.fan-empty-state,
+.fan-loading,
+.fan-external-product {
+  min-height: 240px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 9px;
+  padding: 28px;
+  color: #91a4a6;
+  text-align: center;
+  border: 1px dashed #35474b;
+  border-radius: 10px;
+}
+
+.fan-empty-state h3,
+.fan-empty-state p,
+.fan-external-product h3,
+.fan-external-product p { margin: 0; }
+.fan-empty-state.compact { min-height: 120px; }
+.fan-external-product a { display: flex; align-items: center; gap: 6px; color: #67e8f9; }
+
+.fan-data-error {
+  padding: 12px;
+  color: #fecaca;
+  border: 1px solid #7f1d1d;
+  border-radius: 7px;
+  background: rgba(127, 29, 29, 0.22);
+}
+
+.fan-image-product {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.fan-image-product img {
+  width: 100%;
+  max-height: calc(100vh - 210px);
+  object-fit: contain;
+  border: 1px solid #324247;
+  border-radius: 8px;
+  background: #080c0e;
+}
+
+.fan-image-product figcaption,
+.fan-data-summary { color: #829598; font-size: 11px; }
+
+.fan-data-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid #29383c;
+  border-radius: 7px;
+  background: #11191b;
+}
+
+.fan-data-summary strong { color: #d5e5e7; }
+
+.fan-data-table-wrap {
+  max-height: calc(100vh - 250px);
+  overflow: auto;
+  border: 1px solid #2a393d;
+  border-radius: 8px;
+  content-visibility: auto;
+}
+
+.fan-data-table-wrap table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.fan-data-table-wrap th { position: sticky; top: 0; z-index: 1; background: #172124; }
+.fan-data-table-wrap th,
+.fan-data-table-wrap td { max-width: 260px; padding: 8px 10px; overflow: hidden; border-bottom: 1px solid #253337; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.fan-data-table-wrap tbody tr:hover { background: rgba(34, 211, 238, 0.05); }
+
+.fan-typhoon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.fan-typhoon-grid article {
+  padding: 13px;
+  border: 1px solid #344348;
+  border-radius: 9px;
+  background: #11191b;
+}
+
+.fan-typhoon-grid article.active { border-color: #f97316; box-shadow: inset 3px 0 #f97316; }
+.fan-typhoon-grid article header { display: flex; align-items: center; gap: 8px; }
+.fan-typhoon-grid article header div { min-width: 0; display: grid; flex: 1; }
+.fan-typhoon-grid article header small { color: #829397; }
+.fan-typhoon-grid article header b { color: #fb923c; font-size: 11px; }
+.fan-typhoon-grid dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 0; }
+.fan-typhoon-grid dl div { padding: 7px; background: #0b1113; border-radius: 5px; }
+.fan-typhoon-grid dt { color: #718387; font-size: 10px; }
+.fan-typhoon-grid dd { margin: 3px 0 0; color: #d8e5e6; font-size: 12px; }
+
+.fan-summary-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #2f4246;
+  border-radius: 8px;
+  background: #11191b;
+}
+
+.fan-summary-card div { display: grid; gap: 3px; }
+.fan-summary-card span { color: #84979a; font-size: 11px; }
+.fan-json-preview { max-height: 60vh; margin: 0; padding: 14px; overflow: auto; color: #b9cacc; background: #0a0f11; border: 1px solid #29383c; border-radius: 8px; font-size: 11px; }
+
+@media (max-width: 820px) {
+  .fan-weather-heading { align-items: flex-start; flex-direction: column; }
+  .fan-query-bar { align-items: stretch; flex-direction: column; }
+  .fan-query-bar label { min-width: 0; }
+  .fan-data-summary { flex-direction: column; }
 }
 
 .global-header {
@@ -3674,6 +4126,27 @@ button,
   accent-color: #f59e0b;
 }
 
+.seismic-global-auto-locate .seismic-receive-threshold {
+  padding: 6px;
+  border: 1px solid rgba(34, 211, 238, 0.28);
+  border-radius: 4px;
+  background: rgba(8, 145, 178, 0.08);
+}
+
+.seismic-global-auto-locate .seismic-receive-threshold input[type="range"] {
+  accent-color: #22d3ee;
+}
+
+.seismic-global-auto-locate .seismic-receive-threshold output {
+  color: #67e8f9;
+}
+
+.seismic-global-auto-locate label > small {
+  color: #7f918d;
+  font-size: 7px;
+  line-height: 1.45;
+}
+
 .seismic-global-auto-locate > small {
   color: #7f918d;
   font-size: 7px;
@@ -3731,6 +4204,65 @@ button,
   font-size: 8px;
   line-height: 1.45;
 }
+
+.cwa-tsunami-status {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 7px;
+  padding: 7px;
+  border: 1px solid #38464a;
+  border-left: 3px solid #22c55e;
+  border-radius: 5px;
+  background: #0d1517;
+}
+
+.cwa-tsunami-status.advisory { border-left-color: #facc15; }
+.cwa-tsunami-status.information { border-left-color: #38bdf8; }
+.cwa-tsunami-status.warning {
+  border-left-color: #ef4444;
+  background: linear-gradient(90deg, rgba(127, 29, 29, 0.22), #0d1517 58%);
+}
+
+.cwa-tsunami-status > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.cwa-tsunami-status > header span {
+  color: #f9a8d4;
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.cwa-tsunami-status > header strong {
+  overflow: hidden;
+  color: #e9f1ef;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cwa-tsunami-status > header em {
+  color: #b8c5c2;
+  font-size: 7px;
+  font-style: normal;
+}
+
+.cwa-tsunami-status > p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: #aab8b5;
+  font-size: 8px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.cwa-tsunami-status > small { color: #7f918d; font-size: 7px; }
+.cwa-tsunami-status > a { display: inline-flex; align-items: center; gap: 4px; color: #7dd3fc; font-size: 8px; }
 
 .jma-tsunami-legend {
   display: grid;
@@ -3976,6 +4508,45 @@ button,
   padding: 0 9px;
 }
 
+.seismic-sound-library-preview {
+  margin-top: 2px;
+}
+
+.seismic-sound-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: #aebbb8;
+  font-size: 8px;
+}
+
+.seismic-sound-custom label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.seismic-sound-custom input[type="file"] {
+  min-width: 0;
+  width: 100%;
+  color: #c9d4d2;
+  font-size: 8px;
+}
+
+.seismic-sound-custom button {
+  flex: 0 0 auto;
+  min-height: 25px;
+  padding: 3px 6px;
+  border: 1px solid #344044;
+  border-radius: 4px;
+  background: #111a1c;
+  color: #f6b554;
+  font-size: 8px;
+}
+
 .seismic-sound-controls output {
   min-height: 24px;
   display: flex;
@@ -4056,14 +4627,389 @@ button,
 }
 
 .seismic-topbar {
+  position: relative;
   border-left: 3px solid #ef4444;
+}
+
+.seismic-topbar-actions {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.seismic-settings-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid #536266;
+  border-radius: 5px;
+  background: #151f21;
+  color: #dce7e4;
+  font-size: 10px;
+}
+
+.seismic-settings-button:hover,
+.seismic-settings-button[aria-expanded="true"] {
+  border-color: #f59e0b;
+  color: #fcd34d;
+}
+
+.seismic-settings-popover {
+  position: absolute;
+  z-index: 900;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(430px, calc(100vw - 28px));
+  max-height: min(72vh, 680px);
+  display: grid;
+  gap: 8px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #526266;
+  border-radius: 7px;
+  background: rgba(13, 20, 22, 0.98);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.46);
+}
+
+.seismic-settings-popover > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #2f3c40;
+}
+
+.seismic-settings-popover > header div {
+  display: grid;
+  gap: 2px;
+}
+
+.seismic-settings-popover > header strong {
+  color: #f1f5f4;
+  font-size: 12px;
+}
+
+.seismic-settings-popover > header small,
+.seismic-settings-popover small {
+  color: #8fa09d;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.seismic-settings-popover > header button {
+  width: 24px;
+  height: 24px;
+  border: 1px solid #39474b;
+  border-radius: 4px;
+  background: #111a1c;
+  color: #c9d4d2;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.seismic-settings-popover .toggle-row {
+  margin: 0;
+  padding: 6px 7px;
+  border: 1px solid #29373a;
+  border-radius: 4px;
+  background: rgba(17, 27, 29, 0.72);
+}
+
+.seismic-layer-complexity {
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid #29373a;
+  border-radius: 4px;
+  background: rgba(17, 27, 29, 0.72);
+  color: #c9d4d2;
+  font-size: 9px;
+}
+
+.seismic-layer-complexity > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.seismic-layer-complexity output {
+  color: #f6b554;
+  font-weight: 700;
+}
+
+.seismic-layer-complexity input {
+  width: 100%;
+  accent-color: #f59e0b;
+}
+
+.seismic-settings-reset-scale {
+  min-height: 28px;
+  border-color: #354448;
+  background: rgba(17, 27, 29, 0.76);
+  color: #b7c4c1;
+  font-size: 8px;
+}
+
+.seismic-settings-reset-scale:hover,
+.seismic-settings-reset-scale:focus-visible {
+  border-color: rgba(245, 158, 11, 0.72);
+  color: #f6b554;
+}
+
+.seismic-station-style-setting {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid #314044;
+  border-radius: 4px;
+  background: rgba(17, 27, 29, 0.72);
+}
+
+.seismic-station-style-setting > header,
+.seismic-station-style-setting > label {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  color: #b8c6c2;
+  font-size: 8px;
+}
+
+.seismic-station-style-setting > header {
+  display: flex;
+  justify-content: space-between;
+  color: #dce7e4;
+}
+
+.seismic-station-style-setting > header span,
+.seismic-station-style-setting output { color: #f6b554; }
+.seismic-station-style-setting input[type="range"] { width: 100%; accent-color: #f59e0b; }
+.seismic-station-style-setting select { min-width: 0; height: 25px; border: 1px solid #3a484c; background: #11191b; color: #dce7e4; }
+.seismic-station-style-setting > .toggle-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+
+.seismic-settings-source-block {
+  display: grid;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid #29373a;
+  border-radius: 4px;
+}
+
+.seismic-settings-source-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.seismic-settings-source-heading strong {
+  margin-right: auto;
+  color: #dce7e4;
+  font-size: 9px;
+}
+
+.seismic-settings-source-heading button {
+  padding: 2px 5px;
+  border: 1px solid #39474b;
+  border-radius: 3px;
+  background: #111a1c;
+  color: #f6b554;
+  font-size: 8px;
+}
+
+.seismic-settings-source-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 8px;
+}
+
+.seismic-settings-source-grid label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #b8c6c2;
+  font-size: 8px;
+}
+
+.seismic-settings-source-grid input {
+  accent-color: #f59e0b;
+}
+
+.seismic-api-registration {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid #34464a;
+  border-radius: 5px;
+  background: rgba(10, 18, 20, 0.82);
+}
+
+.seismic-api-registration > header,
+.seismic-api-registration article > div,
+.seismic-api-links {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.seismic-api-registration > header {
+  justify-content: space-between;
+  color: #dce7e4;
+}
+
+.seismic-api-registration > header div {
+  display: grid;
+  gap: 1px;
+}
+
+.seismic-api-registration-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.seismic-api-registration article {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid #29383c;
+  border-radius: 4px;
+  background: rgba(18, 28, 30, 0.82);
+}
+
+.seismic-api-registration article > div {
+  justify-content: space-between;
+}
+
+.seismic-api-registration article strong {
+  color: #e3ecea;
+  font-size: 8px;
+}
+
+.seismic-api-registration article em {
+  color: #a7b5b2;
+  font-size: 7px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.seismic-api-registration article em.ok { color: #34d399; }
+.seismic-api-registration article em.warn { color: #fbbf24; }
+.seismic-api-registration article em.restricted { color: #93a4a1; }
+
+.seismic-api-registration p {
+  margin: 0;
+  color: #9baba8;
+  font-size: 7px;
+  line-height: 1.45;
+}
+
+.seismic-api-registration code {
+  color: #d7e1df;
+  font-size: 0.95em;
+  overflow-wrap: anywhere;
+}
+
+.seismic-api-registration a {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #67c9ff;
+  font-size: 7px;
+  text-decoration: none;
+}
+
+.seismic-api-registration a:hover,
+.seismic-api-registration a:focus-visible {
+  color: #a5e2ff;
+  text-decoration: underline;
+}
+
+.seismic-api-links {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 560px) {
+  .seismic-api-registration-grid { grid-template-columns: 1fr; }
 }
 
 .seismic-primary-grid {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 410px);
-  gap: 10px;
+  grid-template-columns: minmax(480px, 1fr) 10px minmax(300px, var(--seismic-side-panel-width, 410px));
+  gap: 0;
+  align-items: stretch;
+}
+
+.seismic-panel-resizer {
+  position: relative;
+  z-index: 570;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  touch-action: none;
+}
+
+.seismic-panel-resizer::before {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  background: #39474b;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.seismic-panel-resizer:hover::before,
+.seismic-panel-resizer:focus-visible::before {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
+}
+
+.seismic-panel-resizer--width {
+  width: 10px;
+  min-width: 10px;
+  cursor: col-resize;
+}
+
+.seismic-panel-resizer--width::before {
+  width: 3px;
+  height: 54px;
+}
+
+.seismic-panel-resizer--height {
+  position: absolute;
+  right: 50%;
+  bottom: 0;
+  width: 112px;
+  height: 14px;
+  transform: translateX(50%);
+  cursor: row-resize;
+}
+
+.seismic-panel-resizer--height::before {
+  width: 54px;
+  height: 3px;
+  background: rgba(226, 232, 240, 0.68);
+  box-shadow: 0 0 0 1px rgba(8, 13, 15, 0.78);
+}
+
+body.seismic-panel-resizing {
+  cursor: grabbing;
+  user-select: none;
 }
 
 .seismic-map-panel,
@@ -4129,8 +5075,10 @@ button,
 .seismic-map-summary .fdsn { background: #f472b6; }
 
 .seismic-waveform-station-pane canvas,
-.seismic-waveform-station-pane svg {
-  animation: fdsn-waveform-layer-pulse 2.4s ease-in-out infinite;
+.seismic-waveform-station-pane svg,
+.seismic-waveform-response-pane canvas,
+.seismic-waveform-response-pane svg {
+  animation: none;
 }
 
 @keyframes fdsn-waveform-layer-pulse {
@@ -4141,7 +5089,9 @@ button,
 
 @media (prefers-reduced-motion: reduce) {
   .seismic-waveform-station-pane canvas,
-  .seismic-waveform-station-pane svg { animation: none; }
+  .seismic-waveform-station-pane svg,
+  .seismic-waveform-response-pane canvas,
+  .seismic-waveform-response-pane svg { animation: none; }
 }
 .seismic-map-summary .waveform { background: #fbcfe8; box-shadow: 0 0 5px rgba(244, 114, 182, 0.9); }
 .seismic-map-summary .cwa { background: #f472b6; }
@@ -4253,38 +5203,10 @@ button,
   color: #f6b554;
 }
 
-.pager-map-city-label {
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 1.5px solid rgba(255, 255, 255, 0.92);
-  border-radius: 50%;
-  background: #d5d9db;
-  color: #081011;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.58);
-  font-size: 7px;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.pager-map-city-label::before { display: none; }
-.pager-map-city-label.mmi-1 { background: #d5d9db; }
-.pager-map-city-label.mmi-2 { background: #8ed8ef; }
-.pager-map-city-label.mmi-3 { background: #54c9ee; }
-.pager-map-city-label.mmi-4 { background: #5de38f; }
-.pager-map-city-label.mmi-5 { background: #f4e75a; }
-.pager-map-city-label.mmi-6 { background: #fbb347; }
-.pager-map-city-label.mmi-7 { background: #f57f36; }
-.pager-map-city-label.mmi-8 { background: #ef4444; color: #fff; }
-.pager-map-city-label.mmi-9 { background: #b91c1c; color: #fff; }
-.pager-map-city-label.mmi-10 { background: #7e22ce; color: #fff; }
-
 .seismic-map-shell {
   position: relative;
-  height: 650px;
-  min-height: 540px;
+  height: var(--seismic-map-panel-height, 650px);
+  min-height: 440px;
   overflow: hidden;
   background: #0a1012;
   container-name: seismic-map;
@@ -4297,13 +5219,124 @@ button,
   background: #0a1012;
 }
 
+.seismic-replay-live-notice {
+  position: absolute;
+  z-index: 1900;
+  top: 14px;
+  left: 14px;
+  width: min(310px, calc(100% - 28px));
+  min-height: 68px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border: 1px solid rgba(248, 113, 113, 0.9);
+  border-left: 4px solid #ef4444;
+  border-radius: 5px;
+  background: rgba(21, 10, 12, 0.96);
+  color: #fecaca;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42);
+  pointer-events: none;
+  animation: seismic-replay-live-notice 5s ease-in-out both;
+  backdrop-filter: blur(8px);
+}
+
+.seismic-replay-live-notice > svg { color: #f87171; }
+.seismic-replay-live-notice > span { min-width: 0; display: grid; gap: 2px; }
+.seismic-replay-live-notice small { color: #fca5a5; font-size: 8px; letter-spacing: 0.08em; }
+.seismic-replay-live-notice strong { overflow: hidden; color: #fff; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.seismic-replay-live-notice em { color: #d1b4b7; font-size: 9px; font-style: normal; }
+
+@keyframes seismic-replay-live-notice {
+  0% { opacity: 0; transform: translateX(calc(-100% - 20px)); }
+  8%, 90% { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(calc(-100% - 20px)); }
+}
+
 .seismic-jshis-webgl-layer {
   position: absolute;
-  inset: 0;
-  /* This canvas is attached directly to the Leaflet container, not a Leaflet pane. */
-  z-index: 405;
+  top: 0;
+  left: 0;
   display: block;
   pointer-events: none;
+  will-change: transform;
+}
+
+.seismic-snet-value-icon {
+  border: 0 !important;
+  background: transparent !important;
+  image-rendering: auto;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.72));
+}
+
+.seismic-map .leaflet-popup-pane {
+  z-index: 2000 !important;
+}
+
+.seismic-cwa-product-layer-chip {
+  position: absolute;
+  z-index: 1600;
+  top: 10px;
+  left: 50%;
+  min-height: 29px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid #f472b6;
+  border-radius: 5px;
+  background: rgba(31, 14, 25, 0.92);
+  color: #fce7f3;
+  font-size: 9px;
+  transform: translateX(-50%);
+  backdrop-filter: blur(6px);
+}
+
+.seismic-map-shell.has-s-wave-warning .seismic-cwa-product-layer-chip {
+  top: 70px;
+}
+
+.seismic-map .leaflet-tooltip.cwa-intensity-map-label {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #071012;
+  box-shadow: none;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 18px;
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.9);
+}
+
+.seismic-map .leaflet-tooltip.cwa-intensity-map-label::before {
+  display: none;
+}
+
+.seismic-map .seismic-user-location-label {
+  margin-left: 9px;
+  padding: 3px 6px;
+  border: 1px solid rgba(125, 211, 252, 0.7);
+  border-radius: 3px;
+  background: rgba(7, 18, 24, 0.9);
+  color: #e0f2fe;
+  font-size: 8px;
+  font-weight: 800;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.36);
+}
+
+.seismic-map .seismic-user-location-label::before {
+  border-right-color: rgba(125, 211, 252, 0.7);
+}
+
+.seismic-map .leaflet-tooltip-pane {
+  z-index: 1900 !important;
+}
+
+.seismic-map .leaflet-popup {
+  z-index: 1;
+  isolation: isolate;
 }
 
 .seismic-intensity-legend {
@@ -4346,8 +5379,18 @@ button,
   gap: 2px;
 }
 
-.seismic-intensity-legend > div:last-child span {
+.seismic-intensity-legend > div:nth-child(2) span {
   grid-template-columns: repeat(9, minmax(18px, 1fr));
+}
+
+.seismic-intensity-legend .palert-pga span {
+  grid-template-columns: repeat(10, minmax(18px, 1fr));
+}
+
+.seismic-intensity-legend .palert-pga i {
+  color: #fff;
+  font-size: 6px;
+  text-shadow: 0 1px 2px #000, 0 0 2px #000;
 }
 
 .seismic-intensity-legend i {
@@ -4623,7 +5666,16 @@ button,
   color: #bae6fd;
 }
 
-.seismic-map-shell:has(.seismic-camera-relay:not(.is-collapsed)) .seismic-map-overlay-stack {
+.seismic-map-shell:has(.seismic-camera-relay:not(.is-collapsed)) .seismic-monitor-rail[data-dock="left"] {
+  max-height: calc(100% - 382px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+  scrollbar-color: #5a696b transparent;
+  scrollbar-width: thin;
+}
+
+.seismic-map-shell:has(.seismic-camera-relay:not(.is-collapsed)) .seismic-monitor-rail[data-dock="right"] {
   max-height: calc(100% - 310px);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -4753,6 +5805,70 @@ button,
   display: none;
 }
 
+.seismic-map .seismic-station-value-icon,
+.seismic-map .seismic-pager-city-icon,
+.seismic-map .seismic-hypocenter-icon {
+  border: 0;
+  background: transparent;
+  image-rendering: auto;
+  filter: none;
+}
+
+.seismic-map .seismic-station-value-icon {
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.seismic-map .seismic-pager-city-icon {
+  border-radius: 50%;
+  pointer-events: auto;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.72));
+}
+
+.seismic-map .seismic-hypocenter-icon {
+  pointer-events: auto;
+}
+
+.seismic-map .seismic-station-value-icon img,
+.seismic-map .seismic-pager-city-icon img,
+.seismic-map .seismic-hypocenter-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: none;
+}
+
+.seismic-map .seismic-station-value-icon img,
+.seismic-map .seismic-pager-city-icon img { border-radius: 50%; }
+
+.seismic-map .seismic-station-value-icon.selected {
+  filter: drop-shadow(0 0 2px #ffffff) drop-shadow(0 2px 3px rgba(0, 0, 0, 0.72));
+}
+
+.seismic-map .seismic-hypocenter-icon {
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.72));
+}
+
+.seismic-map .leaflet-tooltip.ocean-station-side-label {
+  min-width: 14px;
+  margin: 0;
+  padding: 2px 4px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 3px;
+  background: rgba(7, 16, 18, 0.86);
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.72);
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+  text-shadow: 0 1px 1px #000000;
+}
+
+.seismic-map .leaflet-tooltip.ocean-station-side-label::before {
+  display: none;
+}
+
 .seismic-map .seismic-estimate-tooltip strong,
 .seismic-map .seismic-estimate-tooltip span {
   display: block;
@@ -4789,15 +5905,391 @@ button,
   backdrop-filter: blur(5px);
 }
 
-.seismic-map-overlay-stack {
+.seismic-monitor-layer {
+  --monitor-scale: 1;
   position: absolute;
+  inset: 0;
+  z-index: 650;
+  pointer-events: none;
+}
+
+.seismic-monitor-rail {
+  position: absolute;
+  width: min(330px, calc(100% - 72px));
+  max-height: calc(100% - 92px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 1px 2px 1px 1px;
+  pointer-events: none;
+  overscroll-behavior: contain;
+  scrollbar-color: #5a696b transparent;
+  scrollbar-width: thin;
+  transition: inset 180ms ease, transform 180ms ease;
+}
+
+.seismic-monitor-rail:not(:has(.seismic-monitor-widget)) {
+  display: none;
+}
+
+.seismic-monitor-rail[data-dock="left"] {
   top: 10px;
   left: 10px;
-  z-index: 550;
-  width: min(330px, calc(100% - 72px));
-  display: grid;
-  gap: 7px;
+  max-height: calc(100% - 166px);
+  transform: scale(var(--monitor-scale));
+  transform-origin: top left;
+}
+
+.seismic-monitor-rail[data-dock="right"] {
+  top: 10px;
+  right: 10px;
+  transform: scale(var(--monitor-scale));
+  transform-origin: top right;
+}
+
+.seismic-monitor-rail[data-dock="top"] {
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%) scale(var(--monitor-scale));
+  transform-origin: top center;
+}
+
+.seismic-monitor-rail[data-dock="bottom"] {
+  bottom: 72px;
+  left: 50%;
+  transform: translateX(-50%) scale(var(--monitor-scale));
+  transform-origin: bottom center;
+}
+
+.seismic-map-shell.has-s-wave-warning .seismic-monitor-rail:not([data-dock="bottom"]) {
+  top: 74px;
+  max-height: calc(100% - 156px);
+}
+
+.seismic-map-shell.has-s-wave-warning .seismic-monitor-rail[data-dock="left"] {
+  max-height: calc(100% - 230px);
+}
+
+body.seismic-monitor-moving,
+body.seismic-monitor-moving * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+.seismic-monitor-widget {
+  --monitor-drag-x: 0px;
+  --monitor-drag-y: 0px;
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+  display: block;
+  box-sizing: border-box;
+  transform: translate3d(var(--monitor-drag-x), var(--monitor-drag-y), 0);
+  pointer-events: auto;
+}
+
+.seismic-monitor-widget > .jma-tsunami-alert,
+.seismic-monitor-widget > .seismic-map-warning-overlay,
+.seismic-monitor-widget > .seismic-detection-card {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.seismic-monitor-widget.is-dragging {
+  filter: drop-shadow(0 16px 26px rgba(0, 0, 0, 0.52));
+  opacity: 0.94;
+  will-change: transform;
+}
+
+.seismic-monitor-widget-drag-handle {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 6;
+  width: auto;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px 0 5px;
+  border: 1px solid rgba(126, 145, 147, 0.72);
+  border-radius: 999px;
+  background: rgba(7, 13, 15, 0.94);
+  color: #d0d9d7;
+  cursor: grab;
+  text-align: left;
+  opacity: 0;
   pointer-events: none;
+  transform: translateY(-3px);
+  visibility: hidden;
+  transition: opacity 140ms ease, transform 140ms ease, border-color 140ms ease, visibility 0s linear;
+  backdrop-filter: blur(7px);
+}
+
+.seismic-monitor-widget:hover .seismic-monitor-widget-drag-handle,
+.seismic-monitor-widget.is-dragging .seismic-monitor-widget-drag-handle,
+.seismic-monitor-widget-drag-handle:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+  visibility: visible;
+  transition-delay: 1s;
+}
+
+.seismic-monitor-widget.is-dragging .seismic-monitor-widget-drag-handle,
+.seismic-monitor-widget-drag-handle:focus-visible {
+  transition-delay: 0s;
+}
+
+.seismic-monitor-widget-drag-handle:hover,
+.seismic-monitor-widget-drag-handle:focus-visible {
+  border-color: rgba(245, 158, 11, 0.8);
+  color: #f6b554;
+}
+
+.seismic-monitor-widget-drag-handle span {
+  font-size: 7px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.seismic-monitor-drop-zones {
+  position: absolute;
+  inset: 0;
+  z-index: 625;
+  pointer-events: none;
+}
+
+.seismic-monitor-drop-zones span {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.11);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 9px;
+  opacity: 0.5;
+  backdrop-filter: blur(3px);
+  transition: opacity 100ms ease, background 100ms ease;
+}
+
+.seismic-monitor-drop-zones span.active {
+  background: rgba(255, 255, 255, 0.25);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7), 0 0 24px rgba(255, 255, 255, 0.12);
+  opacity: 1;
+}
+
+.seismic-monitor-drop-zones span[data-dock="top"] {
+  top: 7px;
+  left: 23%;
+  width: 54%;
+  height: 18%;
+}
+
+.seismic-monitor-drop-zones span[data-dock="right"] {
+  top: 23%;
+  right: 7px;
+  width: 18%;
+  height: 54%;
+}
+
+.seismic-monitor-drop-zones span[data-dock="bottom"] {
+  bottom: 7px;
+  left: 23%;
+  width: 54%;
+  height: 18%;
+}
+
+.seismic-monitor-drop-zones span[data-dock="left"] {
+  top: 23%;
+  left: 7px;
+  width: 18%;
+  height: 54%;
+}
+
+.seismic-s-wave-banner {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 720;
+  min-height: 68px;
+  display: grid;
+  grid-template-columns: minmax(56px, 0.6fr) minmax(150px, 1.2fr) minmax(118px, 0.75fr) minmax(88px, 0.7fr) minmax(56px, 0.6fr);
+  grid-template-rows: 49px 19px;
+  align-items: center;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(248, 113, 113, 0.84);
+  background: rgba(20, 17, 18, 0.94);
+  color: #fef2f2;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+}
+
+.seismic-s-wave-stripes {
+  position: relative;
+  align-self: stretch;
+  overflow: hidden;
+  background: repeating-linear-gradient(130deg, rgba(153, 27, 27, 0.98) 0 20px, rgba(24, 22, 23, 0.98) 20px 40px);
+  background-size: 58px 58px;
+  border-right: 2px solid #b91c1c;
+  animation: seismic-s-wave-stripes 1.8s linear infinite;
+  will-change: background-position;
+}
+
+.seismic-s-wave-meta + .seismic-s-wave-stripes {
+  grid-column: 5;
+  border-right: 0;
+  border-left: 2px solid #b91c1c;
+  transform: scaleX(-1);
+}
+
+.seismic-s-wave-title {
+  grid-column: 2;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 13px;
+  color: #f87171;
+  animation: seismic-s-wave-warning-pulse 1.35s steps(2, end) infinite;
+}
+
+.seismic-s-wave-title span,
+.seismic-s-wave-meta {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.seismic-s-wave-title strong {
+  overflow: hidden;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seismic-s-wave-title small,
+.seismic-s-wave-meta small {
+  overflow: hidden;
+  color: #c5b8b8;
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seismic-s-wave-banner output {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  width: clamp(190px, 30vw, 320px);
+  padding: 2px 18px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(0, 0, 0, 0.42);
+  color: #ffffff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 34px;
+  text-align: center;
+  text-shadow: 0 0 14px rgba(248, 113, 113, 0.6);
+  transform: translateX(-50%);
+}
+
+.seismic-s-wave-banner output::before,
+.seismic-s-wave-banner output::after {
+  position: absolute;
+  top: -5px;
+  bottom: -5px;
+  width: 12px;
+  border-top: 1px solid rgba(254, 226, 226, 0.72);
+  border-bottom: 1px solid rgba(254, 226, 226, 0.72);
+  content: "";
+  animation: seismic-s-wave-bracket-pulse 1.35s ease-in-out infinite;
+}
+
+.seismic-s-wave-banner output::before {
+  left: -7px;
+  border-left: 1px solid rgba(254, 226, 226, 0.72);
+}
+
+.seismic-s-wave-banner output::after {
+  right: -7px;
+  border-right: 1px solid rgba(254, 226, 226, 0.72);
+}
+
+.seismic-s-wave-banner.arrived output {
+  color: #fecaca;
+  animation: seismic-s-wave-pulse 650ms steps(2, end) infinite;
+}
+
+.seismic-s-wave-meta {
+  grid-column: 4;
+  padding: 0 12px;
+}
+
+.seismic-s-wave-meta strong {
+  color: #fca5a5;
+  font-size: 9px;
+}
+
+.seismic-s-wave-marquee {
+  grid-column: 1 / -1;
+  align-self: stretch;
+  overflow: hidden;
+  border-top: 1px solid rgba(248, 113, 113, 0.28);
+  background: rgba(69, 10, 10, 0.58);
+  color: #fecaca;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.seismic-s-wave-marquee span {
+  display: inline-block;
+  min-width: 100%;
+  padding-left: 100%;
+  animation: seismic-s-wave-marquee 18s linear infinite;
+}
+
+@keyframes seismic-s-wave-marquee {
+  to { transform: translateX(-100%); }
+}
+
+@keyframes seismic-s-wave-pulse {
+  50% { background: rgba(127, 29, 29, 0.68); }
+}
+
+@keyframes seismic-s-wave-stripes {
+  to { background-position: 58px 0; }
+}
+
+@keyframes seismic-s-wave-warning-pulse {
+  0%, 76% { opacity: 1; }
+  77%, 100% { opacity: 0.36; }
+}
+
+@keyframes seismic-s-wave-bracket-pulse {
+  50% { opacity: 0.38; transform: scaleX(0.92); }
+}
+
+.seismic-map path.seismic-tsunami-coastline-flash {
+  animation: seismic-tsunami-coastline-flash 2s steps(1, end) infinite;
+  will-change: opacity, filter;
+}
+
+@keyframes seismic-tsunami-coastline-flash {
+  0%, 49% { opacity: 1; filter: drop-shadow(0 0 5px currentColor); }
+  50%, 100% { opacity: 0.22; filter: none; }
 }
 
 .jma-tsunami-alert {
@@ -4864,7 +6356,7 @@ button,
 }
 
 .seismic-map-warning-overlay,
-.seismic-detection-strip {
+.seismic-detection-card {
   pointer-events: auto;
 }
 
@@ -4991,13 +6483,7 @@ button,
   font-size: 8px;
 }
 
-.seismic-detection-strip {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
-}
-
-.seismic-detection-strip > button {
+.seismic-detection-card {
   min-width: 0;
   min-height: 83px;
   display: grid;
@@ -5012,46 +6498,42 @@ button,
   backdrop-filter: blur(7px);
 }
 
-.seismic-detection-strip > button:not(:disabled):hover {
+.seismic-detection-card:not(:disabled):hover {
   border-color: #f59e0b;
   background: rgba(23, 33, 36, 0.96);
 }
 
-.seismic-detection-strip > button:disabled {
+.seismic-detection-card:disabled {
   cursor: default;
   opacity: 1;
 }
 
-.seismic-detection-strip > button.detected {
+.seismic-detection-card.detected {
   border-color: rgba(126, 145, 147, 0.72);
   box-shadow: inset 3px 0 #7e9193;
 }
 
-.seismic-detection-strip > button.ocean {
-  grid-column: 1 / -1;
-}
-
-.seismic-detection-strip > button.detected.ocean {
+.seismic-detection-card.detected.ocean {
   border-color: rgba(34, 211, 238, 0.86);
   box-shadow: inset 3px 0 #22d3ee;
 }
 
-.seismic-detection-strip > button.detected.ocean span i {
+.seismic-detection-card.detected.ocean span i {
   background: #22d3ee;
   box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.18);
 }
 
-.seismic-detection-strip > button.replay {
+.seismic-detection-card.replay {
   border-color: rgba(250, 204, 21, 0.66);
   box-shadow: inset 3px 0 #facc15;
 }
 
-.seismic-detection-strip > button.replay span i {
+.seismic-detection-card.replay span i {
   background: #facc15;
   box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.15);
 }
 
-.seismic-detection-strip span {
+.seismic-detection-card span {
   min-width: 0;
   display: inline-flex;
   align-items: center;
@@ -5062,57 +6544,57 @@ button,
   white-space: nowrap;
 }
 
-.seismic-detection-strip span i {
+.seismic-detection-card span i {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: #22c55e;
 }
 
-.seismic-detection-strip .detected span i {
+.seismic-detection-card.detected span i {
   background: #7e9193;
   box-shadow: 0 0 0 3px rgba(126, 145, 147, 0.18);
 }
 
-.seismic-detection-strip > button.detected.green {
+.seismic-detection-card.detected.green {
   border-color: rgba(22, 163, 74, 0.9);
   box-shadow: inset 3px 0 #16a34a;
 }
 
-.seismic-detection-strip > button.detected.yellow {
+.seismic-detection-card.detected.yellow {
   border-color: rgba(250, 204, 21, 0.9);
   box-shadow: inset 3px 0 #facc15;
 }
 
-.seismic-detection-strip > button.detected.red {
+.seismic-detection-card.detected.red {
   border-color: rgba(239, 68, 68, 0.9);
   box-shadow: inset 3px 0 #ef4444;
 }
 
-.seismic-detection-strip > button.detected.green span i {
+.seismic-detection-card.detected.green span i {
   background: #16a34a;
   box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.18);
 }
 
-.seismic-detection-strip > button.detected.yellow span i {
+.seismic-detection-card.detected.yellow span i {
   background: #facc15;
   box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.18);
 }
 
-.seismic-detection-strip > button.detected.red span i {
+.seismic-detection-card.detected.red span i {
   background: #ef4444;
   box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18);
 }
 
-.seismic-detection-strip strong {
+.seismic-detection-card strong {
   justify-self: end;
   color: #f6b554;
   font-size: 12px;
   white-space: nowrap;
 }
 
-.seismic-detection-strip small,
-.seismic-detection-strip time {
+.seismic-detection-card small,
+.seismic-detection-card time {
   min-width: 0;
   overflow: hidden;
   color: #8d9c99;
@@ -5121,7 +6603,7 @@ button,
   white-space: nowrap;
 }
 
-.seismic-detection-strip time {
+.seismic-detection-card time {
   justify-self: end;
 }
 
@@ -5130,14 +6612,14 @@ button,
 }
 
 .seismic-professional-panel {
-  height: 694px;
+  height: calc(var(--seismic-map-panel-height, 650px) + 44px);
   display: grid;
   grid-template-rows: 48px minmax(0, 1fr) 238px;
 }
 
 .seismic-panel-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   border-bottom: 1px solid var(--line);
   background: #101719;
 }
@@ -5170,6 +6652,135 @@ button,
   min-height: 0;
   padding: 12px;
   overflow: auto;
+}
+
+.palert-event-toolbar,
+.palert-event-stations > header,
+.palert-product-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.palert-event-toolbar {
+  margin: 9px 0;
+  padding: 7px;
+  border: 1px solid #2d3a3e;
+  border-radius: 4px;
+  background: #11191b;
+}
+
+.palert-event-toolbar label { display: flex; align-items: center; gap: 6px; color: #98aaa6; font-size: 8px; }
+.palert-event-toolbar select { min-height: 27px; border: 1px solid #3b494d; background: #0d1517; color: #e5eeec; }
+.palert-event-toolbar button { min-height: 27px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; font-size: 8px; }
+.palert-event-toolbar button.active { border-color: #22c55e; color: #86efac; }
+
+.palert-event-list {
+  display: grid;
+  gap: 5px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.palert-event-list > article {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px;
+  border: 1px solid #2e3b3f;
+  border-radius: 4px;
+  background: #101719;
+}
+
+.palert-event-list > article.active { border-color: #f59e0b; box-shadow: inset 2px 0 #f59e0b; }
+.palert-event-main { min-width: 0; display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 5px; align-items: center; padding: 7px; border: 0; background: transparent; text-align: left; }
+.palert-event-main time { color: #9aaba7; font-size: 7px; }
+.palert-event-main strong { color: #f6b554; font-size: 9px; }
+.palert-event-main span { overflow: hidden; color: #c6d1cf; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.palert-event-list > article > div { display: flex; align-items: center; gap: 3px; padding-right: 5px; }
+.palert-event-list > article > div button { width: 24px; height: 24px; display: grid; place-items: center; padding: 0; color: #f6b554; }
+
+.palert-event-stations { margin-top: 9px; border: 1px solid #344347; border-radius: 5px; overflow: hidden; }
+.palert-event-stations > header { padding: 7px 8px; background: #151f21; }
+.palert-event-stations > header > div { min-width: 0; display: grid; gap: 2px; }
+.palert-event-stations > header strong { color: #f2f6f5; font-size: 9px; }
+.palert-event-stations > header span { color: #8fa09d; font-size: 7px; }
+.palert-event-stations > header button { display: inline-flex; align-items: center; gap: 4px; padding: 5px 7px; color: #f6b554; font-size: 7px; white-space: nowrap; }
+.palert-event-stations > div { max-height: 180px; overflow: auto; }
+.palert-event-stations > div > button { width: 100%; display: grid; grid-template-columns: 58px minmax(0, 1fr) 64px; gap: 6px; padding: 6px 8px; border: 0; border-top: 1px solid #253135; border-radius: 0; background: #101719; text-align: left; }
+.palert-event-stations > div > button:hover { background: #172226; }
+.palert-event-stations > div > button strong { color: #7dd3fc; font-size: 8px; }
+.palert-event-stations > div > button span { color: #f6b554; font-size: 8px; text-align: right; }
+.palert-event-stations > div > button small { color: #81918e; font-size: 7px; text-align: right; }
+
+.palert-product-dialog {
+  width: min(1180px, calc(100vw - 24px));
+  max-width: none;
+}
+
+.palert-product-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid #2d393d;
+  background: #0d1416;
+}
+
+.palert-product-tabs button {
+  min-height: 28px;
+  padding: 0 9px;
+  border-color: #334246;
+  color: #a7b7b3;
+  font-size: 8px;
+}
+
+.palert-product-tabs button.active {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  color: #f6b554;
+}
+
+.palert-product-viewer {
+  min-height: 420px;
+  max-height: calc(100vh - 210px);
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    #070b0c;
+  background-size: 24px 24px;
+}
+
+.palert-product-viewer > img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 210px);
+  object-fit: contain;
+  image-rendering: auto;
+}
+
+.palert-product-viewer > img[hidden] {
+  display: none;
+}
+
+.palert-product-footer {
+  min-height: 38px;
+  padding: 7px 10px;
+  border-top: 1px solid #2d393d;
+  color: #8fa09d;
+  background: #0f1719;
+  font-size: 8px;
+}
+
+.palert-product-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #7dd3fc;
 }
 
 .seismic-pager-exposure-summary {
@@ -5418,7 +7029,7 @@ button,
 .seismic-station-rolling-panel {
   min-height: 0;
   display: grid;
-  grid-template-rows: 42px minmax(0, 1fr);
+  grid-template-rows: 42px 34px minmax(0, 1fr);
   border-top: 1px solid var(--line);
   background: #0d1315;
 }
@@ -5449,6 +7060,87 @@ button,
 .seismic-station-rolling-panel > header small { margin-top: 2px; color: var(--muted); font-size: 7px; }
 .seismic-station-rolling-panel > header b { max-width: 145px; overflow: hidden; color: #9baba8; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
 .seismic-station-rolling-panel > header b.auto { color: #facc15; }
+
+.station-recorder-controls {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(94px, 1fr) auto minmax(58px, auto);
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border-bottom: 1px solid #263135;
+  background: #0d1416;
+}
+
+.station-recorder-controls label {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+  color: #8fa09d;
+  font-size: 7px;
+}
+
+.station-recorder-controls select,
+.station-recorder-controls button {
+  height: 26px;
+  border: 1px solid #344044;
+  border-radius: 4px;
+  background: #0c1315;
+  color: #dce6e4;
+  font-size: 8px;
+}
+
+.station-recorder-controls select {
+  min-width: 0;
+  width: 100%;
+  padding: 0 3px;
+}
+
+.station-recorder-transport {
+  display: grid;
+  grid-template-columns: repeat(4, 27px);
+  gap: 3px;
+}
+
+.station-recorder-transport button {
+  width: 27px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.station-recorder-transport button.active {
+  border-color: #b66b09;
+  background: #d98512;
+  color: #101315;
+}
+
+.station-recorder-transport button:disabled {
+  color: #4e5b5f;
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.station-recorder-controls output {
+  min-width: 0;
+  overflow: hidden;
+  color: #8fa09d;
+  font-size: 7px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.station-recorder-controls output.recording { color: #4ade80; }
+.station-recorder-controls output.paused { color: #facc15; }
+.station-recorder-controls output.stopped { color: #f6b554; }
+
+.station-recorder-unavailable {
+  min-height: 0;
+  padding: 18px;
+}
 
 .seismic-station-rolling-content {
   min-height: 0;
@@ -5532,6 +7224,7 @@ button,
   margin: 3px 0 8px;
 }
 
+.fdsn-manual-picker input,
 .fdsn-manual-picker select {
   min-width: 0;
   width: 100%;
@@ -5543,6 +7236,8 @@ button,
   color: #fce7f3;
   font-size: 9px;
 }
+
+.fdsn-manual-picker input::placeholder { color: #9a778a; }
 
 .fdsn-manual-picker span {
   color: #bda4b2;
@@ -5580,7 +7275,7 @@ button,
 .fdsn-waveform-panel {
   min-height: 0;
   display: grid;
-  grid-template-rows: 42px minmax(0, 1fr);
+  grid-template-rows: 42px 34px minmax(0, 1fr);
   border-top: 1px solid var(--line);
   background: #0b1113;
 }
@@ -5609,6 +7304,8 @@ button,
 .fdsn-waveform-panel > header small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fdsn-waveform-panel > header strong { font-size: 9px; }
 .fdsn-waveform-panel > header small { margin-top: 2px; color: var(--muted); font-size: 7px; }
+.fdsn-waveform-panel > header > b { max-width: 145px; overflow: hidden; color: #9baba8; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.fdsn-waveform-panel > header > b.auto { color: #facc15; }
 
 .fdsn-waveform-actions {
   flex: 0 0 auto;
@@ -5676,12 +7373,12 @@ button,
 .fdsn-waveform-error { color: #fca5a5; }
 .fdsn-waveform-error button { height: 27px; padding: 0 10px; border-color: #7f1d1d; background: #2a1114; color: #fecaca; }
 
-.fdsn-waveform-panel:has(.fdsn-waveform-transport) {
-  grid-template-rows: 42px 31px minmax(0, 1fr) 24px;
+.fdsn-waveform-panel.waveform:has(.fdsn-waveform-transport) {
+  grid-template-rows: 42px 34px 31px minmax(0, 1fr) 24px;
 }
 
-.fdsn-waveform-panel:has(.fdsn-waveform-autoplay) {
-  grid-template-rows: 42px 24px 31px minmax(0, 1fr) 24px;
+.fdsn-waveform-panel.waveform:has(.fdsn-waveform-autoplay) {
+  grid-template-rows: 42px 34px 24px 31px minmax(0, 1fr) 24px;
 }
 
 .fdsn-waveform-transport {
@@ -6160,12 +7857,68 @@ button,
 .seismic-replay-clock strong { color: var(--muted); font-size: 9px; }
 .seismic-replay-slider { width: 100%; margin: 15px 0; accent-color: #f59e0b; }
 
+.seismic-replay-step {
+  display: grid;
+  grid-template-columns: auto minmax(90px, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+  margin: -6px 0 12px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.seismic-replay-step input { width: 100%; accent-color: #f59e0b; }
+.seismic-replay-step strong { color: #f6b554; text-align: right; font-variant-numeric: tabular-nums; }
+
+.seismic-replay-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.seismic-replay-options .seismic-replay-step { margin: -6px 0 0; }
+
+.seismic-replay-movie-toggle {
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  column-gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid #354145;
+  border-radius: 4px;
+  background: #0d1315;
+  color: #dce6e8;
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.seismic-replay-movie-toggle input { margin: 0; accent-color: #f59e0b; }
+.seismic-replay-movie-toggle em { grid-column: 2; color: #f6b554; font-size: 7px; font-style: normal; }
+
 .seismic-replay-controls {
   display: grid;
-  grid-template-columns: repeat(5, 38px);
+  grid-template-columns: 38px 38px 38px auto 38px 38px;
+  align-items: center;
   justify-content: center;
   gap: 7px;
 }
+
+.seismic-replay-speed {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid #354145;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.seismic-replay-speed select { min-width: 54px; }
 
 .seismic-replay-controls button {
   width: 38px;
@@ -6569,6 +8322,138 @@ button,
   color: #f6b554;
 }
 
+.seismic-institution-filterbar {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid #313c40;
+  border-radius: 5px;
+  background: #0d1315;
+}
+
+.seismic-institution-magnitude-filter {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.seismic-institution-magnitude-filter > span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.seismic-institution-magnitude-filter select {
+  width: 100%;
+  height: 30px;
+  padding: 0 28px 0 8px;
+  border: 1px solid #3d494d;
+  border-radius: 4px;
+  background: #101719;
+  color: #dce5e3;
+  font-size: 9px;
+}
+
+.seismic-institution-source-filter {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(9, minmax(62px, 1fr));
+  gap: 5px;
+}
+
+.seismic-institution-source-filter label {
+  position: relative;
+  min-width: 0;
+  height: 30px;
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  border: 1px solid #344044;
+  border-radius: 4px;
+  background: #101719;
+  color: #8f9d9a;
+  cursor: pointer;
+}
+
+.seismic-institution-source-filter label:hover {
+  border-color: #607075;
+  background: #182124;
+}
+
+.seismic-institution-source-filter label.active {
+  border-color: rgba(245, 158, 11, 0.62);
+  background: #1b211d;
+  color: #edf4f2;
+  box-shadow: inset 0 -2px #f59e0b;
+}
+
+.seismic-institution-source-filter label:has(input:focus-visible) {
+  outline: 2px solid #7dd3fc;
+  outline-offset: 1px;
+}
+
+.seismic-institution-source-filter input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.seismic-institution-source-filter i {
+  width: 6px;
+  height: 14px;
+  border-radius: 2px;
+  opacity: 0.45;
+}
+
+.seismic-institution-source-filter label.active i {
+  opacity: 1;
+}
+
+.seismic-institution-source-filter span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 8px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seismic-institution-source-filter em {
+  color: #778683;
+  font-size: 7px;
+  font-style: normal;
+}
+
+.seismic-institution-source-filter label.active em {
+  color: #d4dfdc;
+}
+
+.seismic-institution-filter-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.seismic-institution-filter-actions button {
+  height: 30px;
+  padding: 0 9px;
+  border-color: #3d494d;
+  background: #101719;
+  color: #c7d2d0;
+  font-size: 8px;
+}
+
+.seismic-institution-filter-actions button:hover {
+  border-color: #f59e0b;
+  color: #f6b554;
+}
+
 .seismic-institution-layout {
   min-width: 0;
   display: grid;
@@ -6872,7 +8757,7 @@ button,
 
 @media (max-width: 1280px) {
   .seismic-primary-grid {
-    grid-template-columns: minmax(0, 1fr) 360px;
+    grid-template-columns: minmax(440px, 1fr) 10px minmax(300px, var(--seismic-side-panel-width, 360px));
   }
 
   .seismic-map-summary span {
@@ -6887,14 +8772,19 @@ button,
 @media (max-width: 1080px) {
   .seismic-primary-grid {
     grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .seismic-panel-resizer--width {
+    display: none;
   }
 
   .seismic-professional-panel {
-    height: 620px;
+    height: max(620px, calc(var(--seismic-map-panel-height, 650px) + 44px));
   }
 
   .seismic-map-shell {
-    height: 560px;
+    height: var(--seismic-map-panel-height, 560px);
   }
 
   .seismic-intensity-legend {
@@ -6913,12 +8803,24 @@ button,
     height: 16px;
     font-size: 6px;
   }
+
+  .seismic-institution-filterbar {
+    grid-template-columns: 160px minmax(0, 1fr) auto;
+  }
+
+  .seismic-institution-source-filter {
+    grid-template-columns: repeat(5, minmax(62px, 1fr));
+  }
 }
 
 @media (max-width: 820px) {
   .seismic-map-shell {
     height: 460px;
     min-height: 460px;
+  }
+
+  .seismic-panel-resizer--height {
+    display: none;
   }
 
   .seismic-camera-relay {
@@ -6931,7 +8833,8 @@ button,
     width: min(276px, calc(100% - 62px));
   }
 
-  .seismic-map-shell:has(.seismic-camera-relay:not(.is-collapsed)) .seismic-map-overlay-stack {
+  .seismic-map-shell:has(.seismic-camera-relay:not(.is-collapsed)) .seismic-monitor-rail[data-dock="left"],
+  .seismic-map-shell:has(.seismic-camera-relay:not(.is-collapsed)) .seismic-monitor-rail[data-dock="right"] {
     max-height: calc(100% - 300px);
   }
 
@@ -6962,6 +8865,18 @@ button,
   .seismic-lower-panel {
     min-height: 560px;
     grid-template-rows: 42px minmax(0, 1fr);
+  }
+
+  .seismic-institution-filterbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .seismic-institution-magnitude-filter {
+    grid-column: 1 / -1;
+  }
+
+  .seismic-institution-source-filter {
+    grid-template-columns: repeat(3, minmax(72px, 1fr));
   }
 
   .seismic-lower-tabs {
@@ -7094,10 +9009,26 @@ button,
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .seismic-map-overlay-stack {
-    top: 8px;
-    left: 8px;
+  .seismic-monitor-rail {
     width: min(330px, calc(100% - 62px));
+  }
+
+  .seismic-monitor-rail[data-dock="left"] { left: 8px; }
+  .seismic-monitor-rail[data-dock="right"] { right: 8px; }
+  .seismic-monitor-rail[data-dock="top"],
+  .seismic-monitor-rail[data-dock="bottom"] { left: 50%; }
+
+  .seismic-s-wave-banner {
+    grid-template-columns: 44px minmax(130px, 1fr) minmax(104px, 0.8fr) minmax(80px, 0.65fr) 44px;
+  }
+
+  .seismic-s-wave-title {
+    padding: 0 8px;
+  }
+
+  .seismic-s-wave-title small,
+  .seismic-s-wave-meta small {
+    display: none;
   }
 
   .seismic-warning-summary {
@@ -7105,12 +9036,12 @@ button,
     padding: 7px 8px;
   }
 
-  .seismic-detection-strip > button {
+  .seismic-detection-card {
     min-height: 74px;
     padding: 6px 7px;
   }
 
-  .seismic-detection-strip time {
+  .seismic-detection-card time {
     display: none;
   }
 
@@ -7134,11 +9065,33 @@ button,
   }
 }
 
+@container seismic-map (max-width: 520px) {
+  .seismic-s-wave-banner {
+    grid-template-columns: 40px minmax(120px, 1fr) minmax(96px, 0.72fr);
+  }
+
+  .seismic-s-wave-meta,
+  .seismic-s-wave-meta + .seismic-s-wave-stripes {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .seismic-map .leaflet-zoom-animated,
-  .seismic-map .leaflet-fade-anim .leaflet-tile {
+  .seismic-map .leaflet-fade-anim .leaflet-tile,
+  .seismic-s-wave-banner.arrived output,
+  .seismic-s-wave-banner output::before,
+  .seismic-s-wave-banner output::after,
+  .seismic-s-wave-stripes,
+  .seismic-s-wave-title,
+  .seismic-s-wave-marquee span,
+  .seismic-map path.seismic-tsunami-coastline-flash {
     animation: none !important;
     transition: none !important;
+  }
+
+  .seismic-s-wave-marquee span {
+    padding-left: 8px;
   }
 }
 
@@ -7463,6 +9416,26 @@ button,
   font-size: 11px;
 }
 
+.earthquake-cwa-catalogue-banner {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid rgba(244, 114, 182, 0.34);
+  border-radius: 6px;
+  background: rgba(80, 24, 58, 0.2);
+  color: #dce7e4;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.earthquake-cwa-catalogue-banner svg { flex: 0 0 auto; color: #f472b6; }
+.earthquake-cwa-catalogue-banner strong { margin-right: 6px; color: #fbcfe8; }
+.earthquake-cwa-catalogue-banner.warn { border-color: rgba(245, 158, 11, 0.42); background: rgba(120, 53, 15, 0.2); color: #fde68a; }
+.earthquake-cwa-catalogue-banner.warn svg,
+.earthquake-cwa-catalogue-banner.warn strong { color: #fbbf24; }
+
 .earthquake-primary-grid {
   min-width: 0;
   display: grid;
@@ -7615,6 +9588,41 @@ button,
   border: 2px solid;
   border-radius: 50%;
   background: #475569;
+}
+
+.earthquake-map-layer-chip {
+  position: absolute;
+  z-index: 551;
+  top: 10px;
+  right: 48px;
+  min-height: 29px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid #f472b6;
+  border-radius: 5px;
+  background: rgba(31, 14, 25, 0.9);
+  color: #fce7f3;
+  font-size: 9px;
+  backdrop-filter: blur(6px);
+}
+
+.earthquake-map .leaflet-tooltip.cwa-intensity-map-label {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #071012;
+  box-shadow: none;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 18px;
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.9);
+}
+
+.earthquake-map .leaflet-tooltip.cwa-intensity-map-label::before {
+  display: none;
 }
 
 .leaflet-control-attribution,
@@ -8029,6 +10037,378 @@ button,
   display: grid;
   place-items: center;
   padding: 0;
+}
+
+.cenc-product-dialog {
+  width: min(900px, calc(100vw - 24px));
+}
+
+.cwa-product-dialog {
+  width: min(980px, calc(100vw - 24px));
+}
+
+.cwa-product-content {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.cwa-product-summary {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border-left: 3px solid #f472b6;
+  background: #171217;
+}
+
+.cwa-product-summary > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cwa-product-summary strong { color: #fbcfe8; font-size: 11px; }
+.cwa-product-summary span { color: #f9a8d4; font-size: 9px; }
+.cwa-product-summary p { margin: 0; color: #dce7e4; font-size: 10px; line-height: 1.5; }
+.cwa-product-summary small { color: var(--muted); font-size: 8px; }
+
+.cwa-product-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.cwa-product-metrics article {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid #3a4144;
+  border-radius: 5px;
+  background: #11191b;
+}
+
+.cwa-product-metrics span { color: var(--muted); font-size: 8px; }
+.cwa-product-metrics strong { color: #f9a8d4; font-size: 14px; }
+
+.cwa-product-layer-actions {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.75fr) repeat(2, minmax(170px, 1fr));
+  gap: 7px;
+  align-items: center;
+}
+
+.cwa-product-layer-actions > strong,
+.cwa-product-layer-actions button {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cwa-product-layer-actions > strong { color: #f9a8d4; font-size: 9px; }
+.cwa-product-layer-actions button { justify-content: center; font-size: 9px; }
+.cwa-product-layer-actions button:not(:disabled) { border-color: #9d4777; color: #fbcfe8; }
+
+.cwa-affected-areas {
+  display: grid;
+  gap: 7px;
+}
+
+.cwa-affected-areas > strong { color: #dce7e4; font-size: 10px; }
+.cwa-affected-areas > div { display: flex; flex-wrap: wrap; gap: 5px; }
+.cwa-affected-areas span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid #3a464a;
+  border-radius: 999px;
+  background: #131b1d;
+  color: #cdd8d5;
+  font-size: 8px;
+}
+.cwa-affected-areas span b { color: #fcd34d; }
+
+.cwa-product-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.cwa-product-images a {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  overflow: hidden;
+  border: 1px solid #3a4144;
+  border-radius: 5px;
+  background: #0d1416;
+  color: #dce7e4;
+  font-size: 9px;
+  text-decoration: none;
+}
+
+.cwa-product-images img { width: 100%; height: 180px; object-fit: contain; background: #f3f4f6; }
+.cwa-product-images span { display: flex; align-items: center; gap: 4px; padding: 0 7px 7px; }
+
+.cwa-wave-archive {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid #97521d;
+  border-radius: 5px;
+  background: #21170e;
+  color: #fde68a;
+  text-decoration: none;
+}
+
+.cwa-wave-archive span { display: grid; gap: 2px; }
+.cwa-wave-archive strong { font-size: 9px; }
+.cwa-wave-archive small { color: #c6a978; font-size: 7px; }
+
+.cwa-station-table {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #334044;
+  border-radius: 5px;
+  scrollbar-width: thin;
+}
+
+.cwa-station-table > header,
+.cwa-station-table-head,
+.cwa-station-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 1.3fr) 54px minmax(72px, 0.7fr) minmax(72px, 0.7fr) 72px 42px;
+  align-items: center;
+  gap: 7px;
+}
+
+.cwa-station-table > header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  min-height: 35px;
+  padding: 0 9px;
+  border-bottom: 1px solid #3a464a;
+  background: #151f21;
+}
+
+.cwa-station-table > header strong { font-size: 9px; }
+.cwa-station-table > header span { justify-self: end; color: var(--muted); font-size: 8px; }
+
+.cwa-station-table-head {
+  position: sticky;
+  z-index: 2;
+  top: 35px;
+  min-height: 25px;
+  padding: 0 9px;
+  border-bottom: 1px solid #303b3e;
+  background: #101719;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.cwa-station-row {
+  min-height: 39px;
+  padding: 4px 9px;
+  border-bottom: 1px solid #293438;
+  content-visibility: auto;
+  contain-intrinsic-size: 39px;
+  color: #c9d4d2;
+  font-size: 8px;
+}
+
+.cwa-station-row:last-child { border-bottom: 0; }
+.cwa-station-row > span:first-child { min-width: 0; display: grid; gap: 2px; }
+.cwa-station-row strong,
+.cwa-station-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cwa-station-row small { color: var(--muted); font-size: 7px; }
+.cwa-station-row > b { color: #fcd34d; }
+.cwa-station-row a { width: 25px; height: 25px; display: grid; place-items: center; border: 1px solid #3a464a; border-radius: 4px; color: #7dd3fc; }
+
+.cwa-product-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.cwa-product-footer a { display: inline-flex; align-items: center; gap: 4px; color: #7dd3fc; }
+
+.cenc-product-content {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.cenc-product-content h3,
+.cenc-product-content p {
+  margin: 0;
+}
+
+.cenc-product-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #344449;
+  border-radius: 5px;
+  background: #151f21;
+  font-size: 10px;
+}
+
+.cenc-product-state span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.cenc-product-state.online { border-color: #2b8a68; }
+.cenc-product-state.stale { border-color: #b7791f; }
+.cenc-product-state.restricted,
+.cenc-product-state.error { border-color: #a44d4d; }
+
+.cenc-product-summary,
+.cenc-product-content details p {
+  color: #b7c4c1;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.cenc-product-sections {
+  display: grid;
+  gap: 7px;
+}
+
+.cenc-product-sections article {
+  display: grid;
+  gap: 3px;
+  padding: 7px 8px;
+  border-left: 2px solid #d88922;
+  background: rgba(30, 39, 41, 0.72);
+}
+
+.cenc-product-sections strong {
+  color: #f6b554;
+  font-size: 9px;
+}
+
+.cenc-product-sections p {
+  color: #b7c4c1;
+  font-size: 9px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.cenc-product-layers {
+  display: grid;
+  gap: 6px;
+}
+
+.cenc-product-layers > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #f6b554;
+  font-size: 10px;
+}
+
+.cenc-product-layers button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid #344449;
+  border-radius: 4px;
+  background: #111a1c;
+  color: #dce7e4;
+  text-align: left;
+  font-size: 9px;
+}
+
+.cenc-product-layers button:not(:disabled):hover {
+  border-color: #f59e0b;
+  color: #fcd34d;
+}
+
+.cenc-product-layers button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.cenc-product-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.cenc-product-images a {
+  display: grid;
+  gap: 4px;
+  overflow: hidden;
+  border: 1px solid #303d40;
+  border-radius: 5px;
+  background: #0d1416;
+  color: #c9d4d2;
+  font-size: 8px;
+}
+
+.cenc-product-images img {
+  width: 100%;
+  height: 96px;
+  object-fit: cover;
+  background: #202a2d;
+}
+
+.cenc-product-images span {
+  padding: 0 6px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cenc-product-links {
+  display: grid;
+  gap: 4px;
+}
+
+.cenc-product-links a,
+.cenc-product-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #7dd3fc;
+  font-size: 9px;
+}
+
+.cenc-product-content details {
+  border-top: 1px solid #293438;
+  padding-top: 8px;
+}
+
+.cenc-product-content summary {
+  cursor: pointer;
+  color: #c9d4d2;
+  font-size: 9px;
+}
+
+.cenc-product-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 4px;
+  color: var(--muted);
+  font-size: 8px;
 }
 
 .mechanism-event-line {
