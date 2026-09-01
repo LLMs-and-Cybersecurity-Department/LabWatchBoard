@@ -65,6 +65,7 @@ import {
   type EarthquakeTimeZone,
 } from "./earthquake";
 import { FocalMechanismDialog } from "./FocalMechanismDialog";
+import { CencProductsDialog } from "./CencProductsDialog";
 import { NiedProductsDialog } from "./NiedProductsDialog";
 import { JshisDialog } from "./JshisDialog";
 import { ShakeMapDialog } from "./ShakeMapDialog";
@@ -77,6 +78,7 @@ import {
   type JshisFaultShape,
   type JshisLocationSnapshot,
 } from "./jshis";
+import type { CencProductLayer } from "./cencProducts";
 
 const SOURCE_ORDER: EarthquakeSourceId[] = ["usgs", "shakealert", "jma", "cenc", "cwa", "emsc", "gfz", "geonet", "bmkg"];
 const MIN_MAGNITUDES = [0, 1, 2.5, 4, 5, 6];
@@ -125,7 +127,9 @@ function sourceTone(source: EarthquakeSourceId) {
 
 function intensityLabel(event: EarthquakeEvent) {
   if (event.intensity === null || event.intensityScale === null) return "未提供";
-  return event.intensityScale === "JMA" ? `JMA 震度 ${event.intensity}` : `MMI ${event.intensity}`;
+  if (event.intensityScale === "JMA") return `JMA 震度 ${event.intensity}`;
+  if (event.intensityScale === "CWA") return `CWA 震度 ${event.intensity}`;
+  return `MMI ${event.intensity}`;
 }
 
 function MapFocus({ event }: { event: EarthquakeEvent | null }) {
@@ -168,6 +172,7 @@ function EarthquakeMap(props: {
   burstClock: number;
   jshisLocation: JshisLocationSnapshot | null;
   jshisFault: JshisFaultShape | null;
+  cencLayers: CencProductLayer[];
   onSelect: (event: EarthquakeEvent, focus?: boolean) => void;
 }) {
   const layer = BASE_LAYERS[props.baseLayer];
@@ -199,6 +204,9 @@ function EarthquakeMap(props: {
         {props.jshisLocation?.hazard && <LeafletGeoJSON data={props.jshisLocation.hazard.feature} interactive={false} style={{ color: "#facc15", fillColor: "#f97316", weight: 2.2, opacity: 0.98, fillOpacity: 0.22, dashArray: "5 3" }} />}
         {props.jshisLocation?.site && <LeafletGeoJSON data={props.jshisLocation.site.feature} interactive={false} style={{ color: "#22d3ee", fillColor: "#0891b2", weight: 1.8, opacity: 0.95, fillOpacity: 0.18 }} />}
         {props.jshisFault && <LeafletGeoJSON data={props.jshisFault.features} interactive={false} style={{ color: "#ef4444", fillColor: "#dc2626", weight: 2.4, opacity: 0.98, fillOpacity: 0.24 }} />}
+      </Pane>
+      <Pane name="global-cenc-products" style={{ zIndex: 395, pointerEvents: "none" }}>
+        {props.cencLayers.map((layer, index) => layer.data && <LeafletGeoJSON key={`${layer.title}:${index}`} data={layer.data} interactive={false} style={{ color: "#f59e0b", fillColor: "#f97316", weight: 2, opacity: 0.9, fillOpacity: 0.18 }} />)}
       </Pane>
       {props.events.map((event) => {
         const selected = event.id === props.selectedId;
@@ -347,6 +355,8 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
   const [jshisEvent, setJshisEvent] = useState<EarthquakeEvent | null>(null);
   const [jshisLocation, setJshisLocation] = useState<JshisLocationSnapshot | null>(null);
   const [jshisFault, setJshisFault] = useState<JshisFaultShape | null>(null);
+  const [cencEvent, setCencEvent] = useState<EarthquakeEvent | null>(null);
+  const [cencLayers, setCencLayers] = useState<CencProductLayer[]>([]);
   const [updateBursts, setUpdateBursts] = useState<Record<string, number>>({});
   const [burstClock, setBurstClock] = useState(Date.now());
   const abortRef = useRef<AbortController | null>(null);
@@ -459,6 +469,11 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
   const chooseEvent = (event: EarthquakeEvent, focus = false) => {
     setSelectedId(event.id);
     if (focus) setFocusEventId(event.id);
+  };
+
+  const openCencProducts = (event: EarthquakeEvent) => {
+    setCencLayers([]);
+    setCencEvent(event);
   };
 
   const toggleSource = (source: EarthquakeSourceId) => {
@@ -614,6 +629,7 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
                 burstClock={burstClock}
                 jshisLocation={jshisLocation}
                 jshisFault={jshisFault}
+                cencLayers={cencLayers}
                 onSelect={chooseEvent}
               />
               <div className="earthquake-map-legend" aria-label="地图编码图例">
@@ -652,6 +668,7 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
                   {isNiedQueryable(selectedEvent) && <button onClick={() => setNiedEvent(selectedEvent)}><Activity size={15} />NIED 一键详情</button>}
                   {isMechanismQueryable(selectedEvent) && <button onClick={() => setMechanismEvent(selectedEvent)}><CircleGauge size={15} />{selectedEvent.source === "emsc" ? "查询 EMSC 机制解" : "官方机制解"}</button>}
                   {isJshisPositionSupported(selectedEvent.latitude, selectedEvent.longitude) && <button onClick={() => setJshisEvent(selectedEvent)}><Layers3 size={15} />J-SHIS 位置产品</button>}
+                  {selectedEvent.source === "cenc" && <button onClick={() => openCencProducts(selectedEvent)}><Layers3 size={15} />CENC 官方专题</button>}
                   {isShakeMapQueryable(selectedEvent) && <button onClick={() => setShakeMapEvent(selectedEvent)}><MapIcon size={15} />USGS ShakeMap</button>}
                   {isPagerQueryable(selectedEvent) && <button onClick={() => setPagerEvent(selectedEvent)}><BarChart3 size={15} />USGS PAGER</button>}
                   {isDyfiQueryable(selectedEvent) && <button onClick={() => setDyfiEvent(selectedEvent)}><MessageCircle size={15} />Did You Feel It?</button>}
@@ -731,7 +748,7 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
                     <td><span className="depth-readout"><i style={{ background: depthColor(event.depthKm) }} />{event.depthKm?.toFixed(0) ?? "--"} km</span></td>
                     <td>{intensityLabel(event)}</td>
                     <td>{event.status}</td>
-                    <td><div className="earthquake-product-actions">{event.shakeAlertReport && <button title="查看 ShakeAlert 性能报告" aria-label={`查看 ${event.place} ShakeAlert 性能报告`} onClick={() => chooseEvent(event)}><Radio size={14} /></button>}{isNiedQueryable(event) && <button title="查看 NIED F-net / Hi-net 一键详情" aria-label={`查看 ${event.place} NIED 一键详情`} onClick={() => setNiedEvent(event)}><Activity size={14} /></button>}{isMechanismQueryable(event) && <button title={event.source === "emsc" ? "查询 EMSC 收录的机制解" : "查看官方机制解"} aria-label={`查看 ${event.place} 官方机制解`} onClick={() => setMechanismEvent(event)}><CircleGauge size={14} /></button>}{isJshisPositionSupported(event.latitude, event.longitude) && <button title="查看 J-SHIS 官方位置产品" aria-label={`查看 ${event.place} J-SHIS`} onClick={() => setJshisEvent(event)}><Layers3 size={14} /></button>}{isShakeMapQueryable(event) && <button title="查看已确认存在的 USGS ShakeMap" aria-label={`查看 ${event.place} USGS ShakeMap`} onClick={() => setShakeMapEvent(event)}><MapIcon size={14} /></button>}{isPagerQueryable(event) && <button title="查看已确认存在的 USGS PAGER 人口与损失估算" aria-label={`查看 ${event.place} USGS PAGER`} onClick={() => setPagerEvent(event)}><BarChart3 size={14} /></button>}{isDyfiQueryable(event) && <button title="查看已确认存在的 USGS Did You Feel It? 图片与图表" aria-label={`查看 ${event.place} USGS DYFI`} onClick={() => setDyfiEvent(event)}><MessageCircle size={14} /></button>}<a href={event.url} target="_blank" rel="noreferrer" aria-label={`打开 ${event.place} 官方记录`}><ExternalLink size={14} /></a></div></td>
+                    <td><div className="earthquake-product-actions">{event.shakeAlertReport && <button title="查看 ShakeAlert 性能报告" aria-label={`查看 ${event.place} ShakeAlert 性能报告`} onClick={() => chooseEvent(event)}><Radio size={14} /></button>}{isNiedQueryable(event) && <button title="查看 NIED F-net / Hi-net 一键详情" aria-label={`查看 ${event.place} NIED 一键详情`} onClick={() => setNiedEvent(event)}><Activity size={14} /></button>}{isMechanismQueryable(event) && <button title={event.source === "emsc" ? "查询 EMSC 收录的机制解" : "查看官方机制解"} aria-label={`查看 ${event.place} 官方机制解`} onClick={() => setMechanismEvent(event)}><CircleGauge size={14} /></button>}{isJshisPositionSupported(event.latitude, event.longitude) && <button title="查看 J-SHIS 官方位置产品" aria-label={`查看 ${event.place} J-SHIS`} onClick={() => setJshisEvent(event)}><Layers3 size={14} /></button>}{event.source === "cenc" && <button title="查看 CENC 官方专题产品" aria-label={`查看 ${event.place} CENC 官方专题`} onClick={() => openCencProducts(event)}><Layers3 size={14} /></button>}{isShakeMapQueryable(event) && <button title="查看已确认存在的 USGS ShakeMap" aria-label={`查看 ${event.place} USGS ShakeMap`} onClick={() => setShakeMapEvent(event)}><MapIcon size={14} /></button>}{isPagerQueryable(event) && <button title="查看已确认存在的 USGS PAGER 人口与损失估算" aria-label={`查看 ${event.place} USGS PAGER`} onClick={() => setPagerEvent(event)}><BarChart3 size={14} /></button>}{isDyfiQueryable(event) && <button title="查看已确认存在的 USGS Did You Feel It? 图片与图表" aria-label={`查看 ${event.place} USGS DYFI`} onClick={() => setDyfiEvent(event)}><MessageCircle size={14} /></button>}<a href={event.url} target="_blank" rel="noreferrer" aria-label={`打开 ${event.place} 官方记录`}><ExternalLink size={14} /></a></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -774,6 +791,11 @@ function GlobalEarthquakeDashboard({ onToggleSidebar, onOpenLive }: EarthquakeDa
         onLoaded={setJshisLocation}
         onFaultLoaded={setJshisFault}
         onClose={() => setJshisEvent(null)}
+      />}
+      {cencEvent && <CencProductsDialog
+        event={cencEvent}
+        onClose={() => setCencEvent(null)}
+        onShowLayer={(layer) => setCencLayers((current) => [...current.filter((existing) => existing.title !== layer.title), layer])}
       />}
     </>
   );
