@@ -24,9 +24,10 @@
   <img src="nsti_logo.png" alt="NSTI LOGO" width="800">
 </p>  
 <p align="center">
-  <img src="msil_logo_sdofnet.png" alt="MSIL LOGO" width="250">
-  <img src="nied_logo.png" alt="NIED LOGO" width="200">
-  <img src="jshis_nied_logo.png" alt="JSHIS LOGO" width="250">
+  <img src="msil_logo_sdofnet.png" alt="MSIL LOGO" width="200">
+  <img src="nied_logo.png" alt="NIED LOGO" width="160">
+  <img src="jshis_nied_logo.png" alt="JSHIS LOGO" width="300">
+  <img src="PAlert_logo.png" alt="JSHIS LOGO" width="200">
 </p>  
 <p align="center">
   <img src="usgs_logo.png" alt="USGS LOGO" width="200">
