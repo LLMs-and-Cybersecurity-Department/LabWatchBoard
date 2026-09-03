@@ -1,12 +1,45 @@
-特别鸣谢：
-FAN STUDIO<img src="[FAN LOGO](https://api.fanstudio.tech/FAN_LOGO.png)" alt="LabWatch Logo" width="160">
-Lipomoea[https://github.com/Lipomoea]
+<p align="center">
+<img src="./labwatch_banner.png" alt="LabWatchBanner" width="1080">
+</p>  
+<h1 align="center">LabWatch</h1>
+<p align="center">
+  Real-time Earthquake, Weather & Disaster Monitoring Platform
+</p>  
 
----
 # 天气与地震信息看板
 
 面向公众的开源天气与地震信息看板：在一个中文界面中查看多模式天气预报、气象动画、点位趋势、全球地震报告、区域地震预警信息、测站观测与历史事件回放。
+<h1 align="center">特别鸣谢</h1>
+<p align="center">
+  感谢各机构与平台的数据与交流贡献
+</p> 
+<p align="center">
+<img src="cenc_logo.png" alt="CENC LOGO" width="300">
+<img src="FAN_LOGO.png" alt="FAN LOGO" width="100">
+  <img src="wolfx_logo.png" alt="Wolfx LOGO" width="100">
+    <img src="cwa_logo.png" alt="CWA LOGO" width="140">
+    <img src="jma_logo.png" alt="JMA LOGO" width="180">
+</p>  
+<p align="center">
+  <img src="nsti_logo.png" alt="NSTI LOGO" width="800">
+</p>  
+<p align="center">
+  <img src="msil_logo_sdofnet.png" alt="MSIL LOGO" width="250">
+  <img src="nied_logo.png" alt="NIED LOGO" width="200">
+  <img src="jshis_nied_logo.png" alt="JSHIS LOGO" width="250">
+</p>  
+<p align="center">
+  <img src="usgs_logo.png" alt="USGS LOGO" width="200">
+  <img src="emsc_logo.png" alt="ENSC LOGO" width="200">
+</p>  
+<p align="center">  
 
+##技术好友  
+要石kanameishi开发者：  
+Kanameishi  Author: [Lipomoea](https://github.com/Lipomoea)
+
+
+---
 项目聚合 ECMWF、NOAA GFS、DWD ICON、CMA/NMC、JMA、USGS、CENC、CWA、EMSC、GFZ、GeoNet、BMKG 等机构的公开数据，并尽量保留来源、更新时间、震级类型和缓存状态，帮助普通用户更直观地理解天气变化与地震活动。
 
 > [!IMPORTANT-重要提示]  
