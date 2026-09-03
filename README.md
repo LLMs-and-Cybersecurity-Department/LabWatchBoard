@@ -34,9 +34,8 @@
 </p>  
 <p align="center">  
 
-##技术好友  
-要石kanameishi开发者：  
-Kanameishi  Author: [Lipomoea](https://github.com/Lipomoea)
+## 技术好友  
+要石kanameishi开发者：[Lipomoea](https://github.com/Lipomoea)
 
 
 ---
