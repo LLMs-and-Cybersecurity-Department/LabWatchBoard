@@ -1,3 +1,8 @@
+特别鸣谢：
+FAN STUDIO<img src="[FAN LOGO](https://api.fanstudio.tech/FAN_LOGO.png)" alt="LabWatch Logo" width="160">
+Lipomoea[https://github.com/Lipomoea]
+
+---
 # 天气与地震信息看板
 
 面向公众的开源天气与地震信息看板：在一个中文界面中查看多模式天气预报、气象动画、点位趋势、全球地震报告、区域地震预警信息、测站观测与历史事件回放。
